@@ -1,0 +1,440 @@
+{
+  "components": [
+    {
+      "bom-ref": "80590fbf099d9b87a183826b5f95dbd1",
+      "cryptoProperties": {
+        "algorithmProperties": {
+          "classicalSecurityLevel": 256,
+          "cryptoFunctions": [
+            "encrypt"
+          ],
+          "mode": "gcm",
+          "nistQuantumSecurityLevel": 5,
+          "parameterSetIdentifier": "256",
+          "primitive": "block-cipher"
+        },
+        "assetType": "algorithm"
+      },
+      "evidence": {
+        "occurrences": [
+          {
+            "additionalContext": "rule=py-aes-gcm@2.0 :: AESGCM(key)",
+            "bom-ref": "80590fbf099d9b87a183826b5f95dbd1#0",
+            "line": 88,
+            "location": "services/ledger/vault.py"
+          }
+        ]
+      },
+      "name": "AES-256",
+      "properties": [
+        {
+          "name": "ecdat:asset_type",
+          "value": "algorithm"
+        },
+        {
+          "name": "ecdat:confidence",
+          "value": "1.0"
+        },
+        {
+          "name": "ecdat:configurable",
+          "value": "false"
+        },
+        {
+          "name": "ecdat:occurrence",
+          "value": "declared|services/ledger/vault.py:88|source.semgrep|rule=py-aes-gcm@2.0"
+        },
+        {
+          "name": "ecdat:param:key_size",
+          "value": "256"
+        },
+        {
+          "name": "ecdat:param:mode",
+          "value": "GCM"
+        },
+        {
+          "name": "ecdat:usage",
+          "value": "encrypt"
+        },
+        {
+          "name": "ecdat:view",
+          "value": "declared"
+        }
+      ],
+      "type": "cryptographic-asset"
+    },
+    {
+      "bom-ref": "04f89ce4c2d564cb81049af47f3cbbba",
+      "cryptoProperties": {
+        "assetType": "certificate",
+        "certificateProperties": {
+          "certificateFormat": "X.509",
+          "issuerName": "CN=QuantumBank Internal CA",
+          "notValidAfter": "2027-03-01T00:00:00+00:00",
+          "subjectName": "CN=api.quantumbank.in"
+        }
+      },
+      "evidence": {
+        "occurrences": [
+          {
+            "additionalContext": "x509 serial=0x2f1c :: CN=api.quantumbank.in",
+            "bom-ref": "04f89ce4c2d564cb81049af47f3cbbba#0",
+            "location": "sha256:9f3a/etc/ssl/certs/api.pem"
+          }
+        ]
+      },
+      "name": "ECDSA-P-256",
+      "properties": [
+        {
+          "name": "ecdat:asset_type",
+          "value": "certificate"
+        },
+        {
+          "name": "ecdat:confidence",
+          "value": "1.0"
+        },
+        {
+          "name": "ecdat:occurrence",
+          "value": "shipped|sha256:9f3a/etc/ssl/certs/api.pem|container.certs|x509 serial=0x2f1c"
+        },
+        {
+          "name": "ecdat:param:curve",
+          "value": "P-256"
+        },
+        {
+          "name": "ecdat:param:format",
+          "value": "X.509"
+        },
+        {
+          "name": "ecdat:param:issuer",
+          "value": "CN=QuantumBank Internal CA"
+        },
+        {
+          "name": "ecdat:param:subject",
+          "value": "CN=api.quantumbank.in"
+        },
+        {
+          "name": "ecdat:param:valid_to",
+          "value": "2027-03-01T00:00:00Z"
+        },
+        {
+          "name": "ecdat:usage",
+          "value": "verify"
+        },
+        {
+          "name": "ecdat:view",
+          "value": "shipped"
+        }
+      ],
+      "type": "cryptographic-asset"
+    },
+    {
+      "bom-ref": "299b445580f737e6284681ad520be9f1",
+      "cryptoProperties": {
+        "algorithmProperties": {
+          "cryptoFunctions": [
+            "sign"
+          ],
+          "nistQuantumSecurityLevel": 0,
+          "padding": "pkcs1v15",
+          "parameterSetIdentifier": "2048",
+          "primitive": "signature"
+        },
+        "assetType": "algorithm"
+      },
+      "evidence": {
+        "occurrences": [
+          {
+            "additionalContext": "rule=py-jwt-rs256@1.3 :: jwt.encode(claims, key, algorithm=\"RS256\")",
+            "bom-ref": "299b445580f737e6284681ad520be9f1#0",
+            "line": 42,
+            "location": "services/auth/jwt.py"
+          },
+          {
+            "additionalContext": "probe=RSA_sign nid=rsaEncryption",
+            "bom-ref": "299b445580f737e6284681ad520be9f1#1",
+            "location": "services/auth/jwt.py:pid2231"
+          }
+        ]
+      },
+      "name": "RSA-2048",
+      "properties": [
+        {
+          "name": "ecdat:asset_type",
+          "value": "algorithm"
+        },
+        {
+          "name": "ecdat:confidence",
+          "value": "1.0"
+        },
+        {
+          "name": "ecdat:configurable",
+          "value": "false"
+        },
+        {
+          "name": "ecdat:occurrence",
+          "value": "declared|services/auth/jwt.py:42|source.semgrep|rule=py-jwt-rs256@1.3"
+        },
+        {
+          "name": "ecdat:occurrence",
+          "value": "observed|services/auth/jwt.py:pid2231|runtime.ebpf|probe=RSA_sign nid=rsaEncryption"
+        },
+        {
+          "name": "ecdat:param:key_size",
+          "value": "2048"
+        },
+        {
+          "name": "ecdat:param:padding",
+          "value": "PKCS1v15"
+        },
+        {
+          "name": "ecdat:usage",
+          "value": "sign"
+        },
+        {
+          "name": "ecdat:view",
+          "value": "declared"
+        },
+        {
+          "name": "ecdat:view",
+          "value": "observed"
+        }
+      ],
+      "type": "cryptographic-asset"
+    },
+    {
+      "bom-ref": "a78b65e076266fdc2a159b1bc2d968db",
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "size": 4096,
+          "type": "private-key"
+        }
+      },
+      "evidence": {
+        "occurrences": [
+          {
+            "additionalContext": "pem type=RSA PRIVATE KEY",
+            "bom-ref": "a78b65e076266fdc2a159b1bc2d968db#0",
+            "location": "sha256:9f3a/etc/ssl/private/api.key"
+          }
+        ]
+      },
+      "name": "RSA-4096",
+      "properties": [
+        {
+          "name": "ecdat:asset_type",
+          "value": "key"
+        },
+        {
+          "name": "ecdat:confidence",
+          "value": "1.0"
+        },
+        {
+          "name": "ecdat:occurrence",
+          "value": "shipped|sha256:9f3a/etc/ssl/private/api.key|container.certs|pem type=RSA PRIVATE KEY"
+        },
+        {
+          "name": "ecdat:param:key_size",
+          "value": "4096"
+        },
+        {
+          "name": "ecdat:param:material",
+          "value": "private-key"
+        },
+        {
+          "name": "ecdat:usage",
+          "value": "key-transport"
+        },
+        {
+          "name": "ecdat:view",
+          "value": "shipped"
+        }
+      ],
+      "type": "cryptographic-asset"
+    },
+    {
+      "bom-ref": "998468154a27545ef2e5c6a82dcf99a4",
+      "cryptoProperties": {
+        "algorithmProperties": {
+          "cryptoFunctions": [
+            "digest"
+          ],
+          "primitive": "hash"
+        },
+        "assetType": "algorithm"
+      },
+      "evidence": {
+        "occurrences": [
+          {
+            "additionalContext": "rule=py-weak-hash@1.1 :: hashlib.sha1(payload)",
+            "bom-ref": "998468154a27545ef2e5c6a82dcf99a4#0",
+            "line": 7,
+            "location": "services/ledger/legacy.py"
+          }
+        ]
+      },
+      "name": "SHA-1",
+      "properties": [
+        {
+          "name": "ecdat:asset_type",
+          "value": "algorithm"
+        },
+        {
+          "name": "ecdat:confidence",
+          "value": "0.8"
+        },
+        {
+          "name": "ecdat:configurable",
+          "value": "false"
+        },
+        {
+          "name": "ecdat:occurrence",
+          "value": "declared|services/ledger/legacy.py:7|source.semgrep|rule=py-weak-hash@1.1"
+        },
+        {
+          "name": "ecdat:usage",
+          "value": "hash"
+        },
+        {
+          "name": "ecdat:view",
+          "value": "declared"
+        }
+      ],
+      "type": "cryptographic-asset"
+    },
+    {
+      "bom-ref": "e43d0fbd2dec39d42033bd64f424ebba",
+      "cryptoProperties": {
+        "assetType": "protocol",
+        "protocolProperties": {
+          "cipherSuites": [
+            {
+              "name": "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+            }
+          ],
+          "type": "tls",
+          "version": "1.2"
+        }
+      },
+      "evidence": {
+        "occurrences": [
+          {
+            "additionalContext": "serverhello version=771",
+            "bom-ref": "e43d0fbd2dec39d42033bd64f424ebba#0",
+            "location": "api.quantumbank.in:443"
+          }
+        ]
+      },
+      "name": "TLS 1.2",
+      "properties": [
+        {
+          "name": "ecdat:asset_type",
+          "value": "protocol"
+        },
+        {
+          "name": "ecdat:confidence",
+          "value": "1.0"
+        },
+        {
+          "name": "ecdat:configurable",
+          "value": "true"
+        },
+        {
+          "name": "ecdat:occurrence",
+          "value": "observed|api.quantumbank.in:443|network.handshake|serverhello version=771"
+        },
+        {
+          "name": "ecdat:param:cipher_suites",
+          "value": "['TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256']"
+        },
+        {
+          "name": "ecdat:param:group",
+          "value": "secp256r1"
+        },
+        {
+          "name": "ecdat:param:version",
+          "value": "1.2"
+        },
+        {
+          "name": "ecdat:usage",
+          "value": "key-exchange"
+        },
+        {
+          "name": "ecdat:view",
+          "value": "observed"
+        }
+      ],
+      "type": "cryptographic-asset"
+    },
+    {
+      "bom-ref": "062a3144e88d274a555297748054a900",
+      "evidence": {
+        "occurrences": [
+          {
+            "additionalContext": "libssl.so.3=3.0.2",
+            "bom-ref": "062a3144e88d274a555297748054a900#0",
+            "location": "sha256:9f3a/usr/lib/x86_64-linux-gnu/libssl.so.3"
+          }
+        ]
+      },
+      "name": "OpenSSL",
+      "properties": [
+        {
+          "name": "ecdat:asset_type",
+          "value": "library"
+        },
+        {
+          "name": "ecdat:confidence",
+          "value": "1.0"
+        },
+        {
+          "name": "ecdat:occurrence",
+          "value": "shipped|sha256:9f3a/usr/lib/x86_64-linux-gnu/libssl.so.3|deps.sbom|libssl.so.3=3.0.2"
+        },
+        {
+          "name": "ecdat:param:version",
+          "value": "3.0.2"
+        },
+        {
+          "name": "ecdat:usage",
+          "value": "unknown"
+        },
+        {
+          "name": "ecdat:view",
+          "value": "shipped"
+        }
+      ],
+      "type": "library",
+      "version": "3.0.2"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "04f89ce4c2d564cb81049af47f3cbbba"
+    },
+    {
+      "ref": "062a3144e88d274a555297748054a900"
+    },
+    {
+      "ref": "299b445580f737e6284681ad520be9f1"
+    },
+    {
+      "ref": "80590fbf099d9b87a183826b5f95dbd1"
+    },
+    {
+      "ref": "998468154a27545ef2e5c6a82dcf99a4"
+    },
+    {
+      "ref": "a78b65e076266fdc2a159b1bc2d968db"
+    },
+    {
+      "ref": "e43d0fbd2dec39d42033bd64f424ebba"
+    }
+  ],
+  "metadata": {},
+  "serialNumber": "urn:uuid:0e0835ab-f6d6-5b15-bdd8-0f039a0d7e1f",
+  "version": 1,
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6"
+}
