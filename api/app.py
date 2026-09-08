@@ -1,0 +1,147 @@
+"""The ECDAT HTTP API.
+
+Thin by design: it runs the orchestrator and serves what the store holds. No
+scanning logic, no scoring, no reshaping of the CBOM -- the document is handed
+back as the exact bytes that were stored, because re-encoding it through a JSON
+serialiser would quietly break the determinism guarantee ADR-0002 rests on.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Annotated, Literal
+
+from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from core import store
+from core.logs import configure_logging, get_logger
+from core.orchestrator import default_context, run_scan
+from core.scanner import Scanner, Target
+from scanners.stub import StubScanner
+
+__all__ = ["app"]
+
+_log = get_logger("api")
+
+#: The dashboard runs on a Vite dev server; nothing else needs cross-origin
+#: access. Kept to explicit localhost origins rather than "*" -- the API will
+#: serve an estate's full cryptographic inventory.
+LOCAL_DASHBOARD_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+
+class TargetIn(BaseModel):
+    """A thing to scan, as the dashboard describes it."""
+
+    kind: Literal["repo", "directory", "image", "host", "endpoint"]
+    ref: str = Field(min_length=1)
+    system: str | None = None
+    data_class: str | None = None
+
+
+class ScanCreated(BaseModel):
+    scan_id: str
+    component_count: int
+
+
+class TargetOut(BaseModel):
+    kind: str
+    ref: str
+    system: str | None
+    data_class: str | None
+
+
+class ScanSummary(BaseModel):
+    id: str
+    target: TargetOut
+    created_at: datetime
+    component_count: int
+
+
+def get_scanners() -> list[Scanner]:
+    """The plugins a scan runs.
+
+    One stub today. Override in tests via ``app.dependency_overrides``; replace
+    when the real scanners land.
+    """
+    return [StubScanner()]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
+    configure_logging()
+    store.init_db()
+    _log.info("api_started", extra={"event": "api_started"})
+    yield
+
+
+app = FastAPI(
+    title="ECDAT",
+    version="0.1.0",
+    summary="Enterprise Cryptographic Discovery & Analysis Tool",
+    lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=LOCAL_DASHBOARD_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/scans", status_code=status.HTTP_201_CREATED)
+def create_scan(
+    body: TargetIn, scanners: Annotated[list[Scanner], Depends(get_scanners)]
+) -> ScanCreated:
+    target = Target(
+        kind=body.kind,
+        ref=body.ref,
+        system=body.system,
+        data_class=body.data_class,
+    )
+    scan_id = run_scan(target, scanners, default_context())
+    scan = store.get_scan(scan_id)
+    if scan is None:  # pragma: no cover - the row was just committed
+        raise HTTPException(status_code=500, detail="scan disappeared after saving")
+    return ScanCreated(scan_id=scan.id, component_count=scan.component_count)
+
+
+@app.get("/scans")
+def list_scans() -> list[ScanSummary]:
+    return [
+        ScanSummary(
+            id=scan.id,
+            target=TargetOut(
+                kind=scan.target_kind,
+                ref=scan.target_ref,
+                system=scan.target_system,
+                data_class=scan.target_data_class,
+            ),
+            created_at=scan.created_at,
+            component_count=scan.component_count,
+        )
+        for scan in store.list_scans()
+    ]
+
+
+@app.get("/scans/{scan_id}/cbom")
+def get_cbom(scan_id: str) -> Response:
+    scan = store.get_scan(scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail=f"no scan with id {scan_id!r}")
+    # Verbatim bytes: see the module docstring.
+    return Response(content=scan.cbom_json, media_type="application/json")

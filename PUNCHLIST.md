@@ -37,3 +37,18 @@
   inline. Per CLAUDE.md this is knowledge-pack material and should move to
   `knowledge/` with the rest, once that format exists.
   *Raised: Phase 0, CBOM normaliser slice.*
+- **`scanners/stub` is a placeholder and must be deleted.** It detects nothing
+  and returns one hand-written RSA-2048 finding for every target, purely to
+  exercise the pipe. Remove the package, and drop it from the default scanner
+  lists in `api/app.py` and `cli.py`, when Scanner A (source scanning) lands.
+  *Raised: Phase 0, scan pipe slice.*
+- **`POST /scans` is synchronous.** The request blocks until the whole scan
+  finishes, which is acceptable for a stub and not for a real repo, image or
+  host scan. Needs a job model: accept, return a scan id immediately, and let
+  the dashboard poll status.
+  *Raised: Phase 0, scan pipe slice. See ADR-0003 Consequences.*
+- **The API has no authentication and `GET /scans` is unpaginated.** It serves
+  an estate's complete cryptographic inventory over plain localhost CORS. Needs
+  authn/authz and pagination before it is exposed anywhere but a developer
+  machine.
+  *Raised: Phase 0, scan pipe slice.*

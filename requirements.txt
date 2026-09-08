@@ -5,3 +5,8 @@
 # it. Without it the normaliser refuses to emit rather than emit unchecked.
 cyclonedx-python-lib[validation]>=11.12,<12
 pydantic>=2.11,<3
+
+# The API and its persistence.
+fastapi>=0.115,<1
+sqlalchemy>=2.0,<3
+uvicorn>=0.30,<1

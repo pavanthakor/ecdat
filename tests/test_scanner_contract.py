@@ -26,7 +26,7 @@ class _StubScanner:
     def supports(self, target: Target) -> bool:
         return target.kind == "repo"
 
-    def scan(self, target: Target, ctx: ScanContext) -> Iterator[Finding]:  # noqa: ARG002
+    def scan(self, target: Target, ctx: ScanContext) -> Iterator[Finding]:
         yield Finding(
             scanner_id=self.id,
             view="declared",

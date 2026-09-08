@@ -54,6 +54,7 @@ select = [
 "tests/*" = [
     "S101",  # asserts are the point of a test
     "S311",  # shuffling test inputs is not a cryptographic use of randomness
+    "ARG002",  # protocol-conforming fakes must accept args they ignore
 ]
 
 [tool.ruff.lint.isort]

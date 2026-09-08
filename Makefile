@@ -3,18 +3,19 @@
 
 PY ?= .venv/bin/python
 
-.PHONY: help install lint format typecheck test validate golden check
+.PHONY: help install lint format typecheck test validate golden serve check
 
 help:
 	@echo "install    install runtime + dev dependencies into .venv"
 	@echo "lint       ruff check + format check"
 	@echo "format     ruff format (rewrites files)"
-	@echo "typecheck  mypy over core/ and tests/"
+	@echo "typecheck  mypy over core/, api/, scanners/, cli.py and tests/"
 	@echo "test       full pytest run"
 	@echo "validate   fail if any produced CBOM does not validate against"
 	@echo "           the official CycloneDX 1.6 JSON schema"
 	@echo "golden     regenerate tests/golden/*.cbom.json (review the diff!)"
 	@echo "check      lint + typecheck + test + validate  (what CI runs)"
+	@echo "serve      run the API on http://127.0.0.1:8000"
 
 install:
 	$(PY) -m pip install -r requirements-dev.txt
@@ -27,7 +28,7 @@ format:
 	$(PY) -m ruff format .
 
 typecheck:
-	$(PY) -m mypy core
+	$(PY) -m mypy core api scanners cli.py
 	$(PY) -m mypy tests
 
 test:
@@ -41,5 +42,8 @@ validate:
 
 golden:
 	$(PY) -m tests.golden_gen
+
+serve:
+	$(PY) -m uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
 
 check: lint typecheck test validate
