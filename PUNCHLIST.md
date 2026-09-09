@@ -220,14 +220,15 @@
   Belongs with the same store migration as `scanners_ran` and the verdict
   summary.
   *Raised: mosca/DST/NIST slice.*
-- **The eBPF probe is UNPROVEN until a human runs it.** `agent/probe_ssl.py`
-  and `agent/agent.py` are written, lint-clean, type-clean and covered by
-  root-free tests, but no uprobe has been attached and no event captured --
-  CLAUDE.md reserves sudo for the human, so the attach proof is a manual step
-  documented in `agent/README.md`. Nothing in the repo claims the probe works.
-  Until a captured JSON event is pasted back, treat Pillar 2 as de-risked in
-  design only.
-  *Raised: eBPF agent slice 1. See [ADR-0009](docs/adr/0009-ebpf-agent-slice1.md).*
+- ~~**The eBPF probe is UNPROVEN until a human runs it.**~~ **Resolved.**
+  `--self-test` PASSED on kernel 7.0.0-31-generic / bcc 0.35.0 / OpenSSL 3.5:
+  `SSL_do_handshake` fired 6 times on one real handshake, 8 events captured
+  (6 handshake + 2 control `SSL_new`), client and server threads distinguished
+  by `tid`, entry/return retval pattern correct, zero decode errors. Pillar 2's
+  central technical risk -- does a uprobe attach and deliver on this kernel --
+  is retired.
+  *Raised: eBPF agent slice 1. Resolved: 2026-09-09, see
+  [ADR-0009](docs/adr/0009-ebpf-agent-slice1.md).*
 - **Negotiated version and cipher are not read (pending enrichment).** The
   probe captures the handshake fact; `SSL_do_handshake(SSL *s)` hands over an
   opaque, version-dependent struct, and reading a version out of it needs
@@ -259,13 +260,20 @@
   agent is a self-contained binary with no Python and removes the clash
   entirely, along with the runtime kernel-header dependency.
   *Raised: eBPF agent slice 1, after the first manual attach proof.*
-- **The uprobe attaches but captures nothing, and the cause is still open.**
-  Two rounds of diagnosis have ruled out: wrong library (same inode on both
-  peers), wrong client, symbol resolution (libbcc, objdump and an independent
-  ELF parse all agree on `SSL_do_handshake` at `libssl+0x425e0`), and
-  reachability (`SSL_connect` and `SSL_accept` both `jmp` straight to that
-  address). The agent now carries the instrumentation to localise what is left
-  -- `--self-test`, `--controls`, `--attach-by-address`, per-probe counters and
-  separate decode-error accounting -- but the fault is not yet identified and
-  the probe remains unproven.
-  *Raised: eBPF agent slice 1, after the second manual attach proof.*
+- ~~**The uprobe attaches but captures nothing.**~~ **Resolved: it was the
+  three-terminal timing race, not the probe.** The manual walkthrough asks the
+  operator to attach *between* starting a server and running a client, and
+  every failed run was that ordering rather than anything in the BPF program.
+  All four investigated theories -- wrong library, wrong client, versioned
+  symbol resolution, IFUNC indirection -- were false. `--self-test` was built
+  to make the next diagnosis decisive and fixed the fault by construction, by
+  removing the human from the timing.
+  **Standing lesson:** when a proof needs a human to perform three steps in the
+  right order, "it does not work" and "we ran the test wrong" are
+  indistinguishable. Make the test self-contained first.
+  *Raised: eBPF agent slice 1. Resolved: 2026-09-09, see ADR-0009.*
+- **`--once` against an external process is race-prone.** It is kept for
+  observing a real workload, but it is not a proof path: use `--self-test`.
+  A later slice that watches a long-running service will want a supervised
+  attach-then-signal handshake rather than the operator's timing.
+  *Raised: eBPF agent slice 1.*

@@ -1,6 +1,7 @@
 # ADR-0009: The eBPF runtime agent, slice 1
 
-* Status: accepted (probe **unproven** until a human pastes a captured event)
+* Status: accepted. **Capture PROVEN** on 2026-09-09 — kernel 7.0.0-31-generic,
+  bcc 0.35.0, OpenSSL 3.5 (X25519MLKEM768). See *Capture proven* below.
 * Date: 2026-09-09
 * Slice: eBPF agent slice 1 — prove one uprobe attaches (Pillar 2 de-risk)
 * Extends: [ADR-0001](0001-architecture.md) (the three views)
@@ -245,10 +246,74 @@ the non-existent `event_data_type`, and now the address theory. Root-free
 inspection is far cheaper than a round trip, and the remaining unknowns are
 exactly the ones that genuinely require the kernel.
 
+## Capture proven
+
+`sudo python3 -m agent.agent --self-test --controls` **PASSED**:
+
+* `SSL_do_handshake` fired **6 times** on one real handshake (entry and return
+  for each of the three `SSL_do_handshake` calls a TLS 1.3 exchange makes).
+* **8 events** total: 6 handshake + 2 `SSL_new` from the controls.
+* Client and server threads distinguished by `tid`, which confirms the
+  `pid`-is-tgid / `tid`-is-thread naming was worth being careful about.
+* The entry/return `retval` pattern (`-1` then `1`) captured correctly, so the
+  uretprobe and the `inflight` map pairing both work.
+* **Zero decode warnings** — the perf-buffer decoder is correct.
+
+Pillar 2's central technical risk is retired: a uprobe attaches to a userspace
+libssl on this kernel and delivers events to userspace.
+
+### The root cause of every earlier "0 events"
+
+**It was the three-terminal timing race, not the probe.** The manual
+walkthrough asks the operator to attach *between* starting a server and running
+a client, and every failed run was a consequence of that ordering rather than of
+anything in the BPF program, the symbol resolution, or the library targeting.
+
+This is worth dwelling on, because two rounds of diagnosis chased real-looking
+theories that were all false — wrong library, wrong client, versioned-symbol
+resolution, IFUNC indirection. Each was plausible, each was investigated, and
+each was disproved. **The instrumentation added to test those theories is what
+found the answer, but not in the way intended: `--self-test` was built to make
+the next diagnosis decisive, and it fixed the bug by construction, because
+removing the human from the timing removed the fault.**
+
+The general lesson: when a proof depends on a human performing three steps in
+the right order under time pressure, "it does not work" and "we performed the
+test wrong" are indistinguishable, and every hour spent on the first
+interpretation is wasted. Make the test self-contained *first*.
+
+### Canonical proof path
+
+**`--self-test` is the proof and demo path.** It attaches, causes its own
+handshake in a child process against a throwaway certificate, drains, and
+reports PASS/FAIL. Nothing to sequence.
+
+**`--once` against an external process is race-prone** and is kept only for
+observing a *real* workload rather than a synthetic one. The README leads with
+`--self-test` and marks the manual walkthrough as secondary.
+
+### Teardown
+
+After a successful run, bcc's `PerfEventArray.__del__` printed an ignored
+`KeyError`. This module holds a reference to the perf table for the lifetime of
+the run, so `BPF.cleanup()` does not drop the last one; the finalizer fires
+later at interpreter shutdown, when the map fd is closed, `bpf_delete_elem`
+fails, and the exception has nowhere to go.
+
+`_shutdown()` now runs in a `finally`: it releases the perf-buffer keys while
+the map is still open, calls `cleanup()`, and empties the bookkeeping the
+finalizer iterates so it has nothing to retry. It suppresses everything —
+teardown must not be able to turn a successful capture into a failure. Root-free
+tests cover it with duck-typed fakes, including the case where every delete
+fails; the absence of the traceback in real output is confirmed by re-running
+`--self-test`.
+
 ## Consequences
 
-* Pillar 2's central technical risk is isolated to one command a human runs
-  once. If it fails, it fails now and cheaply, with a message naming the cause.
+* Pillar 2's central technical risk is **retired**: attach and event delivery
+  are proven on the target kernel. What remains for slice 2 is enrichment
+  (reading the negotiated version and cipher), which is ordinary work behind a
+  mechanism that is now known to function.
 * Not registered in `core/registry.py`. The agent is a separate root process,
   not an in-process `Scanner`; the scan path deliberately needs no privileges.
   Wiring `observed` findings into the store and the correlator is a later slice.

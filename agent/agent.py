@@ -39,6 +39,7 @@ and is entirely local.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -269,6 +270,49 @@ def _report(seen: int, per_probe: dict[str, int], decode_errors: int) -> None:
             f"did not fire either, the fault is not specific to {SYMBOL}.",
             file=sys.stderr,
         )
+
+
+def _shutdown(bpf: Any, events_table: Any) -> None:
+    """Release probes and perf buffers deterministically, and never raise.
+
+    bcc's ``PerfEventArray.__del__`` re-runs its own teardown at
+    garbage-collection time. Because this module keeps a reference to the table
+    for the lifetime of the run, ``BPF.cleanup()`` does not drop the last one --
+    so that finalizer fires later, at interpreter shutdown, when the map fd is
+    already closed. ``bpf_delete_elem`` then fails, ``__delitem__`` raises
+    ``KeyError``, and Python can only print "Exception ignored in:" because
+    exceptions in finalizers have nowhere to go.
+
+    The run has already succeeded by that point, so the only casualty is a
+    traceback printed after the PASS line. That is cosmetic and still worth
+    fixing: a demo that ends in a traceback reads as a failure.
+
+    Three steps, in this order:
+
+    1. Release the perf-buffer keys ourselves while the map is still open, so
+       the readers are freed properly rather than leaked.
+    2. ``cleanup()`` to detach the probes and close the module.
+    3. Empty the bookkeeping bcc's finalizer iterates. Anything still in it is
+       a key whose delete just failed, and the finalizer would retry exactly
+       that failing delete where the error cannot be handled. Clearing it
+       leaks nothing that matters -- the process is exiting and the kernel
+       reclaims the rest.
+
+    Called from a ``finally``, so it runs on Ctrl-C and on error too. It
+    suppresses everything: teardown must not be able to turn a successful
+    capture into a failure.
+    """
+    open_fds = getattr(events_table, "_open_key_fds", None)
+    if isinstance(open_fds, dict):
+        for key in list(open_fds):
+            with contextlib.suppress(Exception):
+                del events_table[key]
+
+    with contextlib.suppress(Exception):
+        bpf.cleanup()
+
+    if isinstance(open_fds, dict):
+        open_fds.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -565,29 +609,34 @@ def run(args: argparse.Namespace) -> int:
 
     events_table.open_perf_buffer(handle)
 
-    if args.self_test:
-        return _run_self_test(
-            bpf,
-            lambda: counters["seen"],
-            per_probe,
-            lambda: counters["decode_errors"],
-        )
-
-    print("Waiting for a TLS handshake; Ctrl-C to stop.", file=sys.stderr)
     try:
-        # A LOOP with a real timeout. perf_buffer_poll returns as soon as it has
-        # drained whatever is ready, which is routinely before the event we are
-        # waiting for exists; polling once would report "nothing" for a probe
-        # that fires half a second later.
-        while True:
-            bpf.perf_buffer_poll(timeout=POLL_TIMEOUT_MS)
-            if args.once and counters["seen"]:
-                break
-    except KeyboardInterrupt:
-        print("", file=sys.stderr)
+        if args.self_test:
+            return _run_self_test(
+                bpf,
+                lambda: counters["seen"],
+                per_probe,
+                lambda: counters["decode_errors"],
+            )
 
-    _report(counters["seen"], per_probe, counters["decode_errors"])
-    return 0 if counters["seen"] else 1
+        print("Waiting for a TLS handshake; Ctrl-C to stop.", file=sys.stderr)
+        try:
+            # A LOOP with a real timeout. perf_buffer_poll returns as soon as it
+            # has drained whatever is ready, which is routinely before the event
+            # we are waiting for exists; polling once would report "nothing" for
+            # a probe that fires half a second later.
+            while True:
+                bpf.perf_buffer_poll(timeout=POLL_TIMEOUT_MS)
+                if args.once and counters["seen"]:
+                    break
+        except KeyboardInterrupt:
+            print("", file=sys.stderr)
+
+        _report(counters["seen"], per_probe, counters["decode_errors"])
+        return 0 if counters["seen"] else 1
+    finally:
+        # Deterministic teardown while the interpreter is still healthy, so the
+        # run does not end on a finalizer traceback. See _shutdown.
+        _shutdown(bpf, events_table)
 
 
 def build_parser() -> argparse.ArgumentParser:

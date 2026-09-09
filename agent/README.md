@@ -72,6 +72,15 @@ entirely — punchlisted.
 
 ---
 
+## Status: capture PROVEN
+
+`--self-test` passed on kernel 7.0.0-31-generic / bcc 0.35.0 / OpenSSL 3.5:
+`SSL_do_handshake` fired 6 times on one real handshake, 8 events captured, zero
+decode errors, client and server threads distinguished by `tid`.
+
+Every earlier "attached but captured 0 events" was the **three-terminal timing
+race** in the manual walkthrough below — not the probe. Use `--self-test`.
+
 ## The fast path: one command
 
 ```bash
@@ -107,8 +116,11 @@ self-test: PASS -- SSL_do_handshake fired N time(s) on a real handshake.
 | `FAIL -- a handshake completed and NO probe fired` | Fault is upstream: attach, perf buffer, or poll. | Re-run with `--controls` if you omitted it. |
 | `N event(s) arrived but could not be decoded` | The probe fires and the buffer works; the reader is wrong. | Paste the warning; that is a code bug. |
 
-The manual walkthrough below still works and is worth keeping for observing a
-*real* workload rather than a synthetic one.
+**`--once` against an external process is race-prone.** The manual walkthrough
+below is kept for observing a *real* workload rather than a synthetic one, but
+if you are answering "does the probe work?", use `--self-test`: attaching
+between starting a server and running a client is exactly the ordering that
+produced every false negative so far.
 
 ---
 

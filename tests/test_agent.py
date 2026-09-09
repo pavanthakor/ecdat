@@ -607,3 +607,99 @@ def test_the_self_test_cleans_up_after_itself() -> None:
 
     assert "tempfile.TemporaryDirectory" in body, "cert material must be temporary"
     assert "child.kill()" in body, "a hung handshake child must be killed"
+
+
+# --------------------------------------------------------------------------
+# Teardown. Root-free, because the helper is duck-typed.
+#
+# bcc's PerfEventArray.__del__ re-runs its own teardown at garbage-collection
+# time. By then the map fd is closed, bpf_delete_elem fails, and __delitem__
+# raises KeyError from inside a finalizer -- where Python can only print
+# "Exception ignored in:" and carry on. The run has already succeeded, so the
+# only casualty is a traceback after the PASS line. Cosmetic, and worth fixing:
+# a demo that ends in a traceback reads as a failure.
+# --------------------------------------------------------------------------
+
+
+class _FakePerfTable:
+    """A perf table whose deletes fail, exactly as bcc's does at shutdown."""
+
+    def __init__(self, keys: list[int], *, fail: bool = True) -> None:
+        self._open_key_fds = dict.fromkeys(keys, 0)
+        self.fail = fail
+        self.deleted: list[int] = []
+
+    def __delitem__(self, key: int) -> None:
+        if self.fail:
+            # bcc leaves the key in _open_key_fds when the underlying delete
+            # fails, which is why the finalizer retries it forever.
+            raise KeyError(key)
+        self.deleted.append(key)
+        del self._open_key_fds[key]
+
+
+class _FakeBpf:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.cleaned = 0
+        self.fail = fail
+
+    def cleanup(self) -> None:
+        self.cleaned += 1
+        if self.fail:
+            raise RuntimeError("cleanup exploded")
+
+
+def test_shutdown_releases_keys_and_cleans_up() -> None:
+    from agent.agent import _shutdown
+
+    table = _FakePerfTable([0, 1, 2], fail=False)
+    bpf = _FakeBpf()
+
+    _shutdown(bpf, table)
+
+    assert table.deleted == [0, 1, 2]
+    assert table._open_key_fds == {}
+    assert bpf.cleaned == 1
+
+
+def test_shutdown_leaves_nothing_for_the_finalizer_to_retry() -> None:
+    """The actual bug: deletes fail, and the bookkeeping must still end empty.
+
+    If a key survives here, bcc's __del__ retries the same failing delete at
+    interpreter shutdown and prints the KeyError we are trying to remove.
+    """
+    from agent.agent import _shutdown
+
+    table = _FakePerfTable([0, 1, 2], fail=True)
+
+    _shutdown(_FakeBpf(), table)
+
+    assert table._open_key_fds == {}
+
+
+def test_shutdown_never_raises() -> None:
+    """It runs in a finally, after a successful capture. It must not be able to
+    turn a PASS into a traceback."""
+    from agent.agent import _shutdown
+
+    _shutdown(_FakeBpf(fail=True), _FakePerfTable([0], fail=True))
+    _shutdown(_FakeBpf(fail=True), object())
+    _shutdown(object(), object())
+
+
+def test_shutdown_cleans_up_even_when_key_release_fails() -> None:
+    from agent.agent import _shutdown
+
+    bpf = _FakeBpf()
+    _shutdown(bpf, _FakePerfTable([0], fail=True))
+
+    assert bpf.cleaned == 1, "probes must still be detached"
+
+
+def test_the_run_tears_down_in_a_finally() -> None:
+    """Teardown must survive Ctrl-C and an exception, not just the happy path."""
+    source = (Path(__file__).resolve().parent.parent / "agent" / "agent.py").read_text()
+    body = source[source.index("def run(") :]
+
+    assert "finally:" in body
+    assert "_shutdown(bpf, events_table)" in body
