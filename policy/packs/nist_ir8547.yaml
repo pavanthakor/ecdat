@@ -1,0 +1,96 @@
+# ECDAT NIST IR 8547 transition pack, plus the exposure model.
+#
+# NIST's transition timetable is the SECOND deadline source in the system, and
+# that is deliberate: with DST's 2028 and NIST's 2030 both applying to the same
+# RSA, the earliest-deadline merge in ADR-0007 stops being a claim and starts
+# being something a test can catch. An organisation subject to both is bound by
+# whichever comes first, and the engine must say so without being told which
+# regime "wins".
+#
+# ---------------------------------------------------------------------------
+# WHY THE EXPOSURE RULES ARE IN THIS FILE
+# ---------------------------------------------------------------------------
+# Exposure -- is this asset reachable from the internet, only internally, or
+# only at build time -- is not a NIST concept, and it sits here for a practical
+# reason rather than a principled one: NIST IR 8547's transition guidance is
+# what asks organisations to PRIORITISE rather than migrate everything at once,
+# and reachability is the input that prioritisation needs. It is arguably its
+# own concern and may move to a dedicated pack later; the category is separate
+# (`exposure`, cap 10) precisely so moving it costs nothing.
+#
+# CAP 10, the smallest of the four. Reachability adjusts a verdict at the
+# margin. It should be able to push an already-serious finding over a band
+# boundary and never able to make a sound one look broken.
+pack: nist_ir8547
+version: 1
+citation: >-
+  NIST IR 8547 ipd, "Transition to Post-Quantum Cryptography Standards"
+  (November 2024).
+
+caps:
+  exposure: 10
+
+rules:
+  - id: nist-112-bit-asymmetric-deprecated
+    when:
+      algorithm:
+        in: [RSA, DSA, DH, DHE]
+      key_size:
+        max: 3072
+    effect:
+      score: 0
+      category: quantum
+      deadline: 2030-01-01
+      labels: [nist-disallowed-2035, nist-deprecated-2030]
+      action: >-
+        NIST deprecates 112-bit-classical asymmetric cryptography (RSA-2048 and
+        RSA-3072 among them) after 2030 and DISALLOWS it entirely after 2035.
+        Deprecated means "may be used but the risk is accepted knowingly";
+        disallowed means it may not be used at all. Plan to complete migration
+        before 2030, not before 2035.
+    citation: >-
+      NIST IR 8547 ipd Table 1 and Sec. 4: RSA, DSA and DH at 112 bits of
+      classical security are deprecated after 2030 and disallowed after 2035.
+
+  # ------------------------------------------------------------------
+  # Exposure. See the header for why these live here.
+  # ------------------------------------------------------------------
+  - id: exposure-internet-reachable
+    when:
+      exposure: internet
+    effect:
+      score: 10
+      category: exposure
+      labels: [internet-reachable]
+      action: >-
+        Internet-reachable: an adversary can collect this traffic today without
+        first getting inside the estate, which is what makes harvest-now-
+        decrypt-later practical rather than theoretical. Migrate ahead of
+        internal systems carrying the same algorithm.
+    citation: >-
+      NIST IR 8547 ipd Sec. 4 directs organisations to prioritise the
+      transition by risk rather than migrate uniformly; externally reachable
+      systems carry the highest collection risk.
+
+  - id: exposure-internal-only
+    when:
+      exposure: internal
+    effect:
+      score: 5
+      category: exposure
+      labels: [internal-only]
+    citation: >-
+      NIST IR 8547 ipd Sec. 4 (risk-based prioritisation). Internal reachability
+      still permits collection by an adversary already inside the perimeter.
+
+  - id: exposure-build-time-only
+    when:
+      exposure: build
+    effect:
+      score: 2
+      category: exposure
+      labels: [build-time-only]
+    citation: >-
+      NIST IR 8547 ipd Sec. 4 (risk-based prioritisation). Build-time-only
+      cryptography is not exposed to live traffic collection, but it remains a
+      supply-chain integrity concern.

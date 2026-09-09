@@ -1,0 +1,70 @@
+# ECDAT Mosca-urgency pack.
+#
+# Mosca's inequality: if x + y > z -- the years data must stay secret, plus the
+# years migration takes, exceeding the years until a cryptographically relevant
+# quantum computer -- then data encrypted TODAY is already lost. Harvest now,
+# decrypt later.
+#
+# This pack turns "RSA is broken eventually" into "RSA here is urgent" or
+# "RSA here can wait". It is the only pack whose contribution depends on the
+# ORGANISATION rather than on the cryptography, which is exactly why it is the
+# term that makes Criticality reachable honestly.
+#
+# THE ARITHMETIC IS NOT IN THIS FILE. The rule names a computation
+# (`effect: {type: mosca_urgency}`) that lives in policy/engine.py as a single
+# tested function. A pack can ask for the Mosca gap; it cannot describe a
+# different calculation, and there is no expression language for it to describe
+# one in. See ADR-0008.
+#
+# CAP 30. Below quantum's 40, because being late is a consequence of being
+# broken -- urgency should sharpen a verdict, never outrank the defect.
+pack: mosca
+version: 1
+citation: >-
+  Michele Mosca, "Cybersecurity in an era with quantum computers: will we be
+  ready?", IEEE Security & Privacy 16(5), 2018; the x + y > z formulation is
+  also used by NIST IR 8547 ipd Sec. 2 in describing the harvest-now-decrypt-
+  later threat.
+
+caps:
+  mosca: 30
+
+rules:
+  - id: mosca-harvest-now-decrypt-later
+    when:
+      x_years:
+        present: true
+    effect:
+      type: mosca_urgency
+      category: mosca
+      labels: [mosca-assessed]
+      action: >-
+        Prioritise by Mosca's inequality: this asset's data lifetime plus its
+        migration time is measured against the CRQC horizon. A positive gap
+        means data encrypted today is already exposed to harvest-now-
+        decrypt-later, and migration cannot wait for the deadline.
+    citation: >-
+      Mosca (IEEE S&P 2018): migration must COMPLETE before x + y exceeds z,
+      so the planning trigger is the gap, not the deadline.
+
+  # The honesty rule. Fires on exactly the absence the rule above requires, so
+  # an unclassified asset is visibly UNASSESSED rather than quietly scored as
+  # safe -- which is what a default of x=0 would have done.
+  - id: mosca-data-lifetime-unknown
+    when:
+      x_years:
+        present: false
+    effect:
+      score: 0
+      category: mosca
+      labels: [mosca-data-lifetime-unknown]
+      action: >-
+        Data lifetime is unknown, so Mosca urgency could not be computed and
+        contributes nothing. This is NOT a finding that the asset is safe.
+        Classify the data this asset protects (see knowledge/data_classes.yaml)
+        and re-score.
+    citation: >-
+      Mosca (IEEE S&P 2018) requires x as an input; with x unknown the
+      inequality is undefined. Scoring an undefined term as zero would assert
+      that the data has no confidentiality requirement, which is a claim no
+      scan can support.

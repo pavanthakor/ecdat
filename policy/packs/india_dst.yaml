@@ -1,0 +1,104 @@
+# ECDAT India DST / National Quantum Mission migration pack.
+#
+# The national roadmap's deadlines and assurance expectations, as they apply to
+# an inventoried cryptographic asset. This is the pack that makes ECDAT's first
+# pillar -- India roadmap compliance -- something a scan can answer.
+#
+# ---------------------------------------------------------------------------
+# VERIFICATION STATUS -- read before scoring anything real on this pack
+# ---------------------------------------------------------------------------
+# The DEADLINES (2028-12-31 for critical information infrastructure,
+# 2029-12-31 for full adoption), the CII sector list, and the L2A assurance
+# label below were supplied to ECDAT as roadmap requirements and are encoded
+# here verbatim. They have NOT been checked line by line against the published
+# DST/NQM roadmap text by this engine's authors. They are structurally right --
+# a phased CII-first migration with a later full-adoption date is exactly the
+# shape such roadmaps take -- but the exact dates and the assurance-level
+# mapping must be confirmed against the published document before an
+# organisation acts on a deadline this pack produces. Tracked in PUNCHLIST.
+#
+# ASSURANCE LEVELS. Only the software mapping is encoded (library / module /
+# service -> L2A). Hardware, key-management and certificate-authority assurance
+# levels are deliberately ABSENT rather than guessed: an invented assurance
+# level is worse than a missing one, because it looks answered.
+#
+# CAP 20 on `criticality`. Below mosca's 30 and quantum's 40: which sector you
+# are in sharpens a verdict, it does not create one. An asset that is not
+# broken does not become critical by being in a bank.
+pack: india_dst
+version: 1
+citation: >-
+  Department of Science & Technology / National Quantum Mission post-quantum
+  cryptography migration roadmap (May 2026). Deadlines and assurance levels as
+  supplied to ECDAT; see the VERIFICATION STATUS note in this file's header.
+
+caps:
+  criticality: 20
+
+rules:
+  # Critical information infrastructure migrates first. Selects on
+  # quantum_status, which is a VERDICT output -- the engine runs such rules in a
+  # second pass, after the quantum pack has decided. See ADR-0008.
+  - id: dst-cii-priority-migration
+    when:
+      sector:
+        in: [defence, power, telecom, bfsi]
+      quantum_status: broken
+    effect:
+      score: 20
+      category: criticality
+      deadline: 2028-12-31
+      labels: [CII, dst-cii-priority]
+      action: >-
+        Critical information infrastructure: migrate this high-priority system
+        ahead of the general timetable. The CII deadline is 2028-12-31, a full
+        year before general full adoption.
+    citation: >-
+      DST/NQM roadmap (May 2026): quantum-vulnerable cryptography in critical
+      information infrastructure -- defence, power, telecom and BFSI -- carries
+      the earlier 2028 migration deadline.
+
+  - id: dst-full-adoption
+    when:
+      quantum_status: broken
+    effect:
+      score: 0
+      category: criticality
+      deadline: 2029-12-31
+      labels: [dst-full-adoption]
+      action: >-
+        Quantum-vulnerable cryptography must be replaced by the national
+        full-adoption deadline of 2029-12-31, whatever the sector.
+    citation: >-
+      DST/NQM roadmap (May 2026): full adoption of post-quantum cryptography
+      across all sectors by end-2029.
+
+  - id: dst-aes-128-uplift
+    when:
+      algorithm: AES
+      key_size:
+        max: 128
+    effect:
+      score: 0
+      category: criticality
+      labels: [dst-aes-uplift]
+      action: >-
+        Upgrade to AES-256. Grover halves the effective key strength, so
+        AES-128 retains roughly 64 bits against a quantum adversary; AES-256
+        retains 128. This is a key-size change, not an algorithm change.
+    citation: >-
+      DST/NQM roadmap (May 2026) symmetric-key uplift guidance; NIST IR 8547
+      ipd Sec. 3 for the Grover halving; FIPS 197 for the key sizes.
+
+  - id: dst-assurance-software-l2a
+    when:
+      asset_type:
+        in: [library, module, service]
+    effect:
+      score: 0
+      category: criticality
+      labels: ["assurance:L2A"]
+    citation: >-
+      DST/NQM roadmap (May 2026) assurance-level mapping for software
+      cryptographic assets. Only the software mapping is encoded; hardware,
+      key-management and CA levels are deliberately not guessed.

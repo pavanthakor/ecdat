@@ -31,7 +31,7 @@ from core.logs import get_logger
 from core.normalise import normalise, validate_cbom_json
 from core.scanner import ScanContext, Scanner, Target
 from core.schema import Finding
-from policy.apply import apply_policy
+from policy.apply import DEFAULT_Z_YEARS, ScoreInputs, apply_policy
 from policy.engine import Pack, default_packs
 
 __all__ = ["default_context", "run_scan"]
@@ -81,12 +81,17 @@ def run_scan(
     scanners: Sequence[Scanner],
     ctx: ScanContext,
     packs: Sequence[Pack] | None = None,
+    z_years: int = DEFAULT_Z_YEARS,
 ) -> str:
     """Scan ``target`` with every applicable scanner and store the scored CBOM.
 
     ``packs`` defaults to the signed packs under ``policy/packs``. Pass an
     explicit (possibly empty) sequence to score with something else, or with
     nothing.
+
+    ``z_years`` is the CRQC horizon every Mosca calculation is measured
+    against. It is a global assumption rather than a per-component fact, so it
+    is passed in here and recorded on every component.
     """
     _log.info(
         "scan_started",
@@ -165,7 +170,17 @@ def run_scan(
     # an estate under new guidance is then re-running policy over stored
     # documents rather than re-scanning it.
     resolved_packs = default_packs() if packs is None else list(packs)
-    cbom_json = apply_policy(cbom_json, resolved_packs)
+    cbom_json = apply_policy(
+        cbom_json,
+        resolved_packs,
+        inputs=ScoreInputs(
+            data_class=target.data_class,
+            sector=target.sector,
+            exposure=target.exposure,
+            z_years=z_years,
+            knowledge_dir=ctx.knowledge_dir,
+        ),
+    )
     validate_cbom_json(cbom_json)
 
     scan_id = store.save_scan(target, cbom_json)

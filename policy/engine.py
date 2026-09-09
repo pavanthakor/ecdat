@@ -41,6 +41,11 @@ from policy import sign
 __all__ = [
     "BANDS",
     "CATEGORY_CAP_DEFAULT",
+    "DERIVED_FACTS",
+    "EFFECT_TYPES",
+    "MOSCA_GAP_CEILING",
+    "Y_YEARS_BASE",
+    "Y_YEARS_HARDCODED_PENALTY",
     "Pack",
     "PackSignatureError",
     "PackValidationError",
@@ -53,6 +58,8 @@ __all__ = [
     "evaluate",
     "load_packs",
     "matches",
+    "mosca_contribution",
+    "mosca_gap",
 ]
 
 _log = get_logger("policy")
@@ -78,6 +85,71 @@ CATEGORY_CAP_DEFAULT = 40
 #: Most severe first. When several rules set `quantum_status`, the worst wins,
 #: so adding a reassuring rule can never mask a damning one.
 _QUANTUM_STATUS_SEVERITY = ("broken", "weakened", "adequate", "pqc")
+
+# ---------------------------------------------------------------------------
+# Mosca's inequality
+#
+# x + y > z  --  if the time data must stay secret (x) plus the time migration
+# takes (y) exceeds the time until a cryptographically relevant quantum
+# computer (z), then data encrypted TODAY is already lost. The gap is how many
+# years late you already are.
+#
+# This is the ONLY arithmetic in the policy system that is not a plain sum of
+# rule scores, and it lives here -- one named, tested function -- specifically
+# so the selector grammar never needs an expression language to express it.
+# A pack asks for it by name (`effect: {type: mosca_urgency}`); it cannot
+# describe a different calculation. See ADR-0008.
+# ---------------------------------------------------------------------------
+
+#: Gap in years at which Mosca urgency reaches the category cap. Below this the
+#: contribution scales linearly. 20 years is a full migration-planning horizon:
+#: being two decades late is as urgent as this dimension can express, and
+#: everything worse is already maximally urgent.
+MOSCA_GAP_CEILING = 20
+
+#: Y -- migration time in years, for a component that is configurable.
+#:
+#: AN ESTIMATE, NOT A MEASUREMENT. Mosca's y is meant to be measured for a
+#: specific organisation; ECDAT cannot measure it from a scan, so it models it.
+#: The base is the low end of published enterprise crypto-migration experience;
+#: the penalty reflects that a hard-coded algorithm needs a code change, review
+#: and redeploy where a configured one may need only a config change. Every
+#: emitted y_years carries a basis string saying it is an estimate.
+Y_YEARS_BASE = 3
+
+#: Added to Y when the finding is hard-coded (``configurable == False``).
+Y_YEARS_HARDCODED_PENALTY = 2
+
+#: Effect types a rule may name. Closed, like the selector vocabulary: an
+#: unknown type is refused at load rather than silently scoring zero.
+EFFECT_TYPES = frozenset({"mosca_urgency"})
+
+#: Facts that are produced by evaluation rather than read off the component.
+#: A rule selecting on one of these runs in the second pass; see `evaluate`.
+DERIVED_FACTS = frozenset({"quantum_status"})
+
+
+def mosca_gap(x_years: int | None, y_years: int, z_years: int) -> int | None:
+    """``(x + y) - z``, or ``None`` when the data lifetime is unknown.
+
+    ``None`` is not zero and must never be treated as zero. An unclassified
+    system is one nobody has assessed, not one that is safe; scoring it as safe
+    is the exact failure this returns ``None`` to prevent.
+    """
+    if x_years is None:
+        return None
+    return int(x_years) + int(y_years) - int(z_years)
+
+
+def mosca_contribution(gap: int | None, cap: int) -> int:
+    """Scale a Mosca gap onto ``[0, cap]``.
+
+    Integer arithmetic throughout: a float here would make the score depend on
+    binary rounding, and the determinism guarantee is about bytes.
+    """
+    if gap is None or gap <= 0:
+        return 0
+    return min(cap, (cap * gap) // MOSCA_GAP_CEILING)
 
 
 class PolicyError(Exception):
@@ -203,6 +275,22 @@ def _algorithm_from(name: str, params: Mapping[str, str], asset_type: str) -> st
     return name
 
 
+#: ``ecdat:`` properties that are SCORE INPUTS rather than verdict outputs,
+#: mapped to the fact name a selector addresses. Written onto the component by
+#: policy.apply before any rule runs, so a pack can match on organisational
+#: context (sector, exposure) and on the Mosca terms. A closed allowlist, so
+#: adding a new input is a deliberate edit here and not an accident of naming.
+SCORE_INPUT_FACTS = {
+    "ecdat:x_years": "x_years",
+    "ecdat:y_years": "y_years",
+    "ecdat:z_years": "z_years",
+    "ecdat:sector": "sector",
+    "ecdat:exposure": "exposure",
+    "ecdat:data_class": "data_class",
+    "ecdat:configurable": "configurable",
+}
+
+
 def component_facts(component: Mapping[str, Any]) -> dict[str, Any]:
     """Flatten a CBOM component into the fields a selector may address.
 
@@ -212,7 +300,14 @@ def component_facts(component: Mapping[str, Any]) -> dict[str, Any]:
     ``name``, ``algorithm``, ``component_type``, ``asset_type``, ``primitive``,
     ``usage``, ``views`` (list), ``nist_quantum_security_level``,
     ``classical_security_level``, plus every ``ecdat:param:X`` as ``X``
-    (``key_size``, ``curve``, ``mode``, ``version``, ``pqc_capable``, ...).
+    (``key_size``, ``curve``, ``mode``, ``version``, ``pqc_capable``, ...),
+    plus the score inputs in :data:`SCORE_INPUT_FACTS` (``x_years``,
+    ``y_years``, ``z_years``, ``sector``, ``exposure``, ``data_class``,
+    ``configurable``) when policy.apply has attached them.
+
+    One fact is NOT read from the component: ``quantum_status`` is produced by
+    evaluation, and rules selecting on it run in a second pass -- see
+    :func:`evaluate`.
 
     Numeric-looking params are converted to numbers so range operators work
     without every pack having to quote them.
@@ -232,6 +327,8 @@ def component_facts(component: Mapping[str, Any]) -> dict[str, Any]:
             facts["usage"] = value
         elif prop_name == "ecdat:asset_type":
             facts["asset_type"] = value
+        elif prop_name in SCORE_INPUT_FACTS:
+            facts[SCORE_INPUT_FACTS[prop_name]] = _coerce(value)
 
     for key, raw in params.items():
         facts[key] = _coerce(raw)
@@ -337,6 +434,7 @@ _ALLOWED_EFFECT_KEYS = frozenset(
         "action",
         "actions",
         "quantum_status",
+        "type",
     }
 )
 
@@ -361,7 +459,8 @@ def _parse_rule(raw: Mapping[str, Any], pack_name: str, source: Path) -> Rule:
     effect = raw.get("effect")
     if not isinstance(effect, Mapping):
         raise PackValidationError(f"{source}: rule {rule_id!r} has no `effect`")
-    for key in _REQUIRED_EFFECT_KEYS:
+    required = ("category",) if "type" in effect else _REQUIRED_EFFECT_KEYS
+    for key in required:
         if key not in effect:
             raise PackValidationError(
                 f"{source}: rule {rule_id!r} effect is missing {key!r}"
@@ -371,7 +470,20 @@ def _parse_rule(raw: Mapping[str, Any], pack_name: str, source: Path) -> Rule:
         raise PackValidationError(
             f"{source}: rule {rule_id!r} effect has unknown key(s) {unknown}"
         )
-    if not isinstance(effect["score"], int) or isinstance(effect["score"], bool):
+    effect_type = effect.get("type")
+    if effect_type is not None:
+        if effect_type not in EFFECT_TYPES:
+            raise PackValidationError(
+                f"{source}: rule {rule_id!r} effect type {effect_type!r} is not "
+                f"one of {sorted(EFFECT_TYPES)}. Effect types are a closed "
+                "vocabulary: a pack names a computation, it cannot describe one."
+            )
+        if "score" in effect:
+            raise PackValidationError(
+                f"{source}: rule {rule_id!r} sets both `type` and `score`; a "
+                "computed effect must not also carry a literal score"
+            )
+    elif not isinstance(effect["score"], int) or isinstance(effect["score"], bool):
         raise PackValidationError(
             f"{source}: rule {rule_id!r} score must be an integer"
         )
@@ -516,6 +628,11 @@ def _listed(effect: Mapping[str, Any], singular: str, plural: str) -> list[str]:
     return values
 
 
+def _is_derived_rule(rule: Rule) -> bool:
+    """Whether a rule selects on a fact that evaluation itself produces."""
+    return any(key in DERIVED_FACTS for key in rule.when)
+
+
 def evaluate(component: Mapping[str, Any], packs: Iterable[Pack]) -> Verdict:
     """Score one CBOM component against every rule in every pack.
 
@@ -525,17 +642,31 @@ def evaluate(component: Mapping[str, Any], packs: Iterable[Pack]) -> Verdict:
       CAPPED, then the capped subtotals sum. Capping per category rather than
       globally stops one dimension of risk from crowding out the others: ten
       quantum rules on one component cannot bury a single critical hygiene
-      finding.
+      finding, and it is what lets Criticality mean "bad along several axes"
+      rather than "many rules fired".
     * **labels** -- union, sorted.
     * **deadline** -- the EARLIEST any rule demands. A later deadline never
       relaxes an earlier one.
     * **actions** -- ordered by (deadline, rule id), soonest first, deduped.
     * **fired_rules** -- sorted.
     * **quantum_status** -- most severe wins.
+
+    **Two passes.** A rule may select on ``quantum_status``, which is a verdict
+    output rather than a property of the component -- "if this is Shor-broken
+    AND it is in a critical sector" is a rule the India DST pack genuinely
+    needs. Pass one runs every rule that does not, producing the derived facts;
+    pass two runs the rules that do, against those facts. Exactly two passes,
+    so a pass-two rule cannot feed another pass-two rule and there is no
+    fixpoint to reason about. Contributions from both passes merge identically.
     """
-    facts = component_facts(component)
+    facts = dict(component_facts(component))
 
     caps: dict[str, int] = {}
+    for pack in packs:
+        for category, cap in pack.caps.items():
+            # Narrowest cap wins: a pack may tighten a ceiling, never widen it.
+            caps[category] = min(caps.get(category, cap), cap)
+
     subtotals: dict[str, int] = {}
     labels: set[str] = set()
     fired: list[str] = []
@@ -543,20 +674,28 @@ def evaluate(component: Mapping[str, Any], packs: Iterable[Pack]) -> Verdict:
     actions: list[tuple[dt.date, str, str]] = []
     statuses: set[str] = set()
 
-    for pack in packs:
-        for category, cap in pack.caps.items():
-            # Narrowest cap wins: a pack may tighten a ceiling, never widen it.
-            caps[category] = min(caps.get(category, cap), cap)
-
-    for pack in packs:
-        for rule in pack.rules:
+    def run(rules: Iterable[Rule]) -> None:
+        for rule in rules:
             if not matches(rule.when, facts):
                 continue
 
             fired.append(rule.id)
             effect = rule.effect
             category = str(effect["category"])
-            subtotals[category] = subtotals.get(category, 0) + int(effect["score"])
+
+            if effect.get("type") == "mosca_urgency":
+                contribution = mosca_contribution(
+                    mosca_gap(
+                        facts.get("x_years"),
+                        int(facts.get("y_years", Y_YEARS_BASE)),
+                        int(facts.get("z_years", 0)),
+                    ),
+                    caps.get(category, CATEGORY_CAP_DEFAULT),
+                )
+            else:
+                contribution = int(effect["score"])
+
+            subtotals[category] = subtotals.get(category, 0) + contribution
             labels.update(_listed(effect, "label", "labels"))
 
             status = effect.get("quantum_status")
@@ -572,6 +711,17 @@ def evaluate(component: Mapping[str, Any], packs: Iterable[Pack]) -> Verdict:
             for action in _listed(effect, "action", "actions"):
                 actions.append((sort_date, rule.id, action))
 
+    all_rules = [rule for pack in packs for rule in pack.rules]
+    run(r for r in all_rules if not _is_derived_rule(r))
+
+    quantum_status = next((s for s in _QUANTUM_STATUS_SEVERITY if s in statuses), None)
+    if quantum_status is not None:
+        facts["quantum_status"] = quantum_status
+    run(r for r in all_rules if _is_derived_rule(r))
+
+    # Recomputed: a second-pass rule may itself assert a status.
+    quantum_status = next((s for s in _QUANTUM_STATUS_SEVERITY if s in statuses), None)
+
     capped = {
         category: min(total, caps.get(category, CATEGORY_CAP_DEFAULT))
         for category, total in sorted(subtotals.items())
@@ -582,8 +732,6 @@ def evaluate(component: Mapping[str, Any], packs: Iterable[Pack]) -> Verdict:
     for _date, _rule_id, action in sorted(actions):
         if action not in ordered_actions:
             ordered_actions.append(action)
-
-    quantum_status = next((s for s in _QUANTUM_STATUS_SEVERITY if s in statuses), None)
 
     return Verdict(
         score=score,

@@ -1,0 +1,100 @@
+# ECDAT data-classification pack: how long must this stay secret?
+#
+# This supplies X in Mosca's inequality -- the number of years data protected
+# today must remain confidential. It is the term that turns "RSA is broken
+# eventually" into "RSA here is urgent" or "RSA here can wait", and it is the
+# only one of the three that depends on the ORGANISATION rather than on the
+# cryptography.
+#
+# ---------------------------------------------------------------------------
+# THESE ARE POLICY DEFAULTS, NOT STATUTORY RETENTION PERIODS.
+# ---------------------------------------------------------------------------
+# No law states "personal data must stay confidential for 25 years". What the
+# law supplies is the FRAMING -- that personal data's sensitivity is bounded by
+# the data principal's lifetime, that sovereign and defence material is
+# protected on a multi-decade horizon. The specific year counts below are
+# ECDAT's defaults for that framing, chosen to be defensible and adjustable,
+# and an organisation is expected to override them with its own retention
+# schedule. Each entry says what it is derived from.
+#
+# The distinction matters because X drives urgency: inflating it manufactures
+# alarm, deflating it manufactures calm, and neither should happen by accident
+# in a file nobody re-reads.
+#
+# ---------------------------------------------------------------------------
+# ENTRY SCHEMA
+# ---------------------------------------------------------------------------
+#   name        Canonical class name. Matched case-insensitively against
+#               Target.data_class, so "personal", "Personal" and "PERSONAL"
+#               are the same class.
+#   x_years     Years the data must stay confidential. Feeds mosca_gap().
+#   aliases     Other spellings a scanner or a user might supply.
+#   rationale   Why this number. Required.
+#   source      Citation for the framing. Required.
+#
+# UNKNOWN IS NOT ZERO. A target with no data_class, or one naming a class that
+# is not listed here, yields NO x_years at all -- not a default of 0. Mosca
+# then contributes nothing and the component is labelled
+# `mosca-data-lifetime-unknown`. Treating unknown as 0 would silently score
+# every unclassified system as safe, which is the failure mode this pack exists
+# to prevent.
+version: 1
+
+data_classes:
+  - name: Public
+    x_years: 0
+    aliases: [public, open, unclassified]
+    rationale: >-
+      Published or intended for publication. There is no confidentiality
+      window to protect, so harvest-now-decrypt-later does not apply. X=0 means
+      Mosca urgency is driven entirely by migration time.
+    source: >-
+      Definitional: data already public has no remaining confidentiality
+      requirement.
+
+  - name: Internal
+    x_years: 3
+    aliases: [internal, restricted, business]
+    rationale: >-
+      Ordinary business material whose sensitivity decays with the business
+      cycle. Three years reflects a typical planning and audit horizon rather
+      than any statutory period.
+    source: >-
+      ECDAT default. Organisations should substitute their own records-
+      retention schedule.
+
+  - name: Confidential
+    x_years: 10
+    aliases: [confidential, commercial, trade-secret, ip]
+    rationale: >-
+      Commercial confidences, contracts and intellectual property, which
+      commonly retain value across a decade.
+    source: >-
+      ECDAT default, aligned to typical commercial contract and IP horizons.
+
+  - name: Personal
+    x_years: 25
+    aliases: [personal, pii, sensitive-personal, sdpi, health, financial]
+    rationale: >-
+      Personal data stays sensitive for as long as it can be linked to a living
+      individual, so its confidentiality window is a fraction of a lifetime
+      rather than a business cycle. 25 years is ECDAT's default for that
+      framing -- the DPDP Act sets purpose limitation and erasure duties, not a
+      confidentiality horizon, so the number is ours and not the statute's.
+    source: >-
+      Digital Personal Data Protection Act, 2023 (India), Sec. 8(7) (erasure on
+      purpose completion) supplies the framing; the 25-year figure is an ECDAT
+      default, not a statutory retention period.
+
+  - name: Sovereign
+    x_years: 50
+    aliases: [sovereign, defence, defense, national-security, classified, secret]
+    rationale: >-
+      State and defence material is protected on a multi-decade horizon, and is
+      the clearest case of harvest-now-decrypt-later: traffic captured today is
+      still worth decrypting in 2050. This is the class where a quantum-broken
+      algorithm is already an active loss, not a future one.
+    source: >-
+      NIST IR 8547 ipd Sec. 2 describes the harvest-now-decrypt-later threat
+      that makes long-lived data urgent; the 50-year figure is an ECDAT default
+      reflecting standard national-security declassification horizons.

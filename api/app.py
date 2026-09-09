@@ -22,6 +22,7 @@ from core import registry, store
 from core.logs import configure_logging, get_logger
 from core.orchestrator import default_context, run_scan
 from core.scanner import Target
+from policy.apply import DEFAULT_Z_YEARS
 from policy.engine import BANDS
 
 __all__ = ["app"]
@@ -50,6 +51,15 @@ class TargetIn(BaseModel):
     ref: str = Field(min_length=1)
     system: str | None = None
     data_class: str | None = None
+    #: Which sector this target serves. Drives the DST roadmap's earlier
+    #: critical-information-infrastructure deadline.
+    sector: Literal["defence", "power", "telecom", "bfsi", "other"] = "other"
+    #: How reachable the target is. Feeds blast-radius prioritisation.
+    exposure: Literal["internet", "internal", "build", "unknown"] = "unknown"
+    #: Years until a cryptographically relevant quantum computer. A global
+    #: assumption, not a measurement -- the dashboard exposes it as a slider so
+    #: an analyst can re-prioritise the estate against a different horizon.
+    z_years: int = Field(default=DEFAULT_Z_YEARS, ge=0, le=100)
     #: Which plugins to run. Omitted (``None``) means every registered scanner,
     #: which is the normal case. An explicit list selects a subset -- and an
     #: explicit empty list selects none, which is honoured rather than treated
@@ -132,8 +142,10 @@ def create_scan(body: TargetIn) -> ScanCreated:
         ref=body.ref,
         system=body.system,
         data_class=body.data_class,
+        sector=body.sector,
+        exposure=body.exposure,
     )
-    scan_id = run_scan(target, scanners, default_context())
+    scan_id = run_scan(target, scanners, default_context(), z_years=body.z_years)
     scan = store.get_scan(scan_id)
     if scan is None:  # pragma: no cover - the row was just committed
         raise HTTPException(status_code=500, detail="scan disappeared after saving")

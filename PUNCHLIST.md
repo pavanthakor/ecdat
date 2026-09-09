@@ -147,14 +147,18 @@
   none of which exist. Until then the signature gate defends against accidental
   edits and in-repo tampering, not against an attacker who can commit.
   *Raised: policy engine slice. See [ADR-0007](docs/adr/0007-policy-engine.md).*
-- **With only the quantum pack, nothing can reach Critical or High.** The
-  quantum category caps at 40 and Medium starts at 40, so a Shor-broken RSA is
-  Medium. That is the locked cap and the locked bands meaning what they say --
-  criticality is meant to come from a component being bad on several axes at
-  once. Re-check the band distribution once the `mosca`, `india_dst` and `nist`
-  packs land; if real Criticals still do not appear, the cap table or the band
-  thresholds need revisiting, not the pack.
-  *Raised: policy engine slice. See ADR-0007.*
+- ~~**With only the quantum pack, nothing can reach Critical or High.**~~
+  **Resolved** in the mosca/DST/NIST pack slice, and resolved the way it should
+  have been -- by adding context rather than by raising a cap. Four categories
+  now total 100 (quantum 40, mosca 30, criticality 20, exposure 10), so Critical
+  requires a component to be bad on at least three axes at once. The same
+  RSA-2048 scores 98/Critical in a BFSI system holding personal data on the
+  internet and 45/Medium in an internal lab holding public data.
+  `test_the_same_algorithm_is_critical_or_medium_by_context` is the guard: if a
+  future edit makes Criticality reachable by tuning a number instead of by
+  context, that test is what should stop it.
+  *Raised: policy engine slice. Resolved: mosca/DST/NIST slice, see
+  [ADR-0008](docs/adr/0008-mosca-dst-nist-packs.md).*
 - **`GET /scans` parses every stored CBOM to build its summary.** `band_counts`
   and `max_score` are read back out of each stored document on every list call.
   Correct (the summary must report what was stored, not what today's packs
@@ -174,3 +178,45 @@
   Acceptable while `quantum` is the only pack defining the field; revisit if a
   second pack wants its own status vocabulary.
   *Raised: policy engine slice.*
+- **The India DST deadlines and assurance mapping are unverified.** The
+  2028-12-31 CII deadline, the 2029-12-31 full-adoption deadline, the CII sector
+  list and the `assurance:L2A` software mapping in
+  `policy/packs/india_dst.yaml` were supplied to ECDAT as roadmap requirements
+  and encoded verbatim; they have not been checked line by line against the
+  published DST/NQM roadmap text. The structure is right, but a deadline an
+  organisation acts on must be confirmed against the source. Hardware,
+  key-management and CA assurance levels are deliberately absent rather than
+  guessed. The pack header carries the same warning.
+  *Raised: mosca/DST/NIST slice. See ADR-0008.*
+- **The Y (migration time) model is crude.** `Y = 3 years, +2 if hard-coded` is
+  a two-value heuristic derived from one bit of information. Real migration time
+  depends on blast radius, test coverage, deployment cadence, vendor
+  dependencies and whether the algorithm is negotiated or pinned -- none of
+  which ECDAT looks at yet. Every emitted `y_years` carries a basis string
+  saying it is an estimate, which is the minimum honest treatment, not a
+  substitute for a better model. Revisit once the correlator can measure blast
+  radius.
+  *Raised: mosca/DST/NIST slice.*
+- **The exposure model is three buckets and a default.** internet/internal/
+  build/unknown, scored 10/5/2/0, set per TARGET rather than per component --
+  so every component in a scan shares one exposure value even though a build
+  script and a TLS terminator in the same repo plainly differ. Per-component
+  exposure needs the correlator (which asset is actually reachable), and the
+  rules deliberately live in their own `exposure` category so they can move to
+  their own pack without touching anything else.
+  *Raised: mosca/DST/NIST slice. See ADR-0008 Consequences.*
+- **Mosca urgency fires on quantum-safe algorithms too.** The
+  `mosca-harvest-now-decrypt-later` rule fires on any component with a known
+  data lifetime, so AES-256 in a Sovereign-classified system accrues mosca
+  points despite not being going to break. Gating it on `quantum_status` makes
+  it a second-pass rule, which the engine now supports -- a one-line change,
+  deferred so the four-pack merge was proved with the simpler form first.
+  *Raised: mosca/DST/NIST slice.*
+- **`sector`, `exposure` and `z_years` are not persisted on the scan row.**
+  They reach the CBOM as `ecdat:` properties on every component, so the stored
+  document is self-describing, but `store.Scan` still records only kind, ref,
+  system and data_class. Re-running policy over a stored CBOM under a different
+  CRQC horizon therefore needs the caller to remember the original context.
+  Belongs with the same store migration as `scanners_ran` and the verdict
+  summary.
+  *Raised: mosca/DST/NIST slice.*

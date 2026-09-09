@@ -348,14 +348,23 @@ def test_fired_rules_are_sorted(packs: list[Pack]) -> None:
     assert list(verdict.fired_rules) == sorted(verdict.fired_rules)
 
 
-def test_a_component_matching_nothing_scores_zero(packs: list[Pack]) -> None:
+def test_a_component_no_scoring_rule_matches_stays_at_zero(
+    packs: list[Pack],
+) -> None:
+    """An unknown algorithm must not accumulate a score by accident.
+
+    It does fire `mosca-data-lifetime-unknown`, which is the honesty rule: with
+    no data classification there is no Mosca term, and saying so out loud is
+    the point. That rule contributes 0.
+    """
     verdict = evaluate(component("Whirlpool"), packs)
 
     assert verdict.score == 0
     assert verdict.band == "Low"
-    assert verdict.fired_rules == ()
     assert verdict.deadline is None
     assert verdict.quantum_status is None
+    assert verdict.fired_rules == ("mosca-data-lifetime-unknown",)
+    assert "mosca-data-lifetime-unknown" in verdict.labels
 
 
 @pytest.mark.parametrize(
@@ -519,7 +528,12 @@ def test_duplicate_rule_ids_across_packs_are_refused(tmp_path: Path) -> None:
 
 def test_the_shipped_packs_are_signed_and_load_in_production_mode() -> None:
     loaded = load_packs(PACK_DIR, dev=False)
-    assert [p.name for p in loaded] == ["quantum"]
+    assert [p.name for p in loaded] == [
+        "india_dst",
+        "mosca",
+        "nist_ir8547",
+        "quantum",
+    ]
 
 
 def test_the_shipped_pack_declares_the_quantum_cap(packs: list[Pack]) -> None:
@@ -635,5 +649,10 @@ def test_two_scans_of_the_same_target_store_identical_scored_documents(
     assert first.cbom_json == second.cbom_json
 
 
-def test_default_packs_loads_the_shipped_pack() -> None:
-    assert [p.name for p in default_packs()] == ["quantum"]
+def test_default_packs_loads_every_shipped_pack() -> None:
+    assert [p.name for p in default_packs()] == [
+        "india_dst",
+        "mosca",
+        "nist_ir8547",
+        "quantum",
+    ]

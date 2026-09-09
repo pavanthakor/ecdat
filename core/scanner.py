@@ -24,11 +24,21 @@ from typing import Literal, Protocol, runtime_checkable
 
 from core.schema import Finding, View
 
-__all__ = ["ScanContext", "Scanner", "Target", "TargetKind"]
+__all__ = ["Exposure", "ScanContext", "Scanner", "Sector", "Target", "TargetKind"]
 
 #: What sort of thing is being scanned. Determines which plugins apply and
 #: which view their findings land in.
 TargetKind = Literal["repo", "directory", "image", "host", "endpoint"]
+
+#: Which part of the estate this target belongs to. Drives the India DST
+#: roadmap's critical-information-infrastructure deadlines, which are earlier
+#: for defence, power, telecom and BFSI than for everything else.
+Sector = Literal["defence", "power", "telecom", "bfsi", "other"]
+
+#: How reachable this target is. Feeds blast-radius prioritisation: the same
+#: algorithm on an internet-facing service is collectable today in a way the
+#: same algorithm in a build tool is not.
+Exposure = Literal["internet", "internal", "build", "unknown"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,8 +52,16 @@ class Target:
     #: Used to roll findings up for blast-radius scoring.
     system: str | None = None
     #: Optional data-classification tag (e.g. ``"pii"``, ``"public"``). Feeds
-    #: the Mosca "how long must this stay secret" term.
+    #: the Mosca "how long must this stay secret" term via
+    #: ``knowledge/data_classes.yaml``. Absent means UNKNOWN, not "public":
+    #: the policy engine declines to compute Mosca urgency rather than assume
+    #: there is nothing to protect.
     data_class: str | None = None
+    #: Which sector this target serves. Drives the DST roadmap's earlier
+    #: critical-information-infrastructure deadline.
+    sector: Sector = "other"
+    #: How reachable this target is. Feeds blast-radius prioritisation.
+    exposure: Exposure = "unknown"
 
 
 @dataclass(frozen=True, slots=True)

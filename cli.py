@@ -23,7 +23,8 @@ from pathlib import Path
 from core import registry, store
 from core.logs import configure_logging
 from core.orchestrator import default_context, run_scan
-from core.scanner import Target, TargetKind
+from core.scanner import Exposure, Sector, Target, TargetKind
+from policy.apply import DEFAULT_Z_YEARS
 
 __all__ = ["main"]
 
@@ -34,6 +35,9 @@ TARGET_KINDS: tuple[TargetKind, ...] = (
     "host",
     "endpoint",
 )
+
+SECTORS: tuple[Sector, ...] = ("defence", "power", "telecom", "bfsi", "other")
+EXPOSURES: tuple[Exposure, ...] = ("internet", "internal", "build", "unknown")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,7 +60,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--system", default=None, help="service or system name")
     scan.add_argument(
-        "--data-class", default=None, help="data-classification tag for the target"
+        "--data-class",
+        default=None,
+        help=(
+            "data-classification tag (Public/Internal/Confidential/Personal/"
+            "Sovereign, or an alias). Supplies X in Mosca's inequality; omit it "
+            "and Mosca urgency is reported as unknown rather than assumed zero"
+        ),
+    )
+    scan.add_argument(
+        "--sector",
+        choices=SECTORS,
+        default="other",
+        help="sector this target serves; drives the DST CII deadline",
+    )
+    scan.add_argument(
+        "--exposure",
+        choices=EXPOSURES,
+        default="unknown",
+        help="how reachable the target is; feeds blast-radius prioritisation",
+    )
+    scan.add_argument(
+        "--crqc-years",
+        type=int,
+        default=DEFAULT_Z_YEARS,
+        metavar="Z",
+        help=(
+            "years until a cryptographically relevant quantum computer "
+            f"(default {DEFAULT_Z_YEARS}). An assumption, not a measurement"
+        ),
     )
     scan.add_argument(
         "-o",
@@ -100,8 +132,10 @@ def _scan(args: argparse.Namespace) -> int:
         ref=args.ref,
         system=args.system,
         data_class=args.data_class,
+        sector=args.sector,
+        exposure=args.exposure,
     )
-    scan_id = run_scan(target, scanners, default_context())
+    scan_id = run_scan(target, scanners, default_context(), z_years=args.crqc_years)
     scan = store.get_scan(scan_id)
     if scan is None:  # pragma: no cover - the row was just committed
         print("scan disappeared after saving", file=sys.stderr)
