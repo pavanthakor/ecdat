@@ -11,6 +11,13 @@ line through the middle of that:
 * **A normalisation or validation failure is a real failure.** It means ECDAT
   produced a document that is not a valid CBOM, and there is nothing partial
   about that. It propagates, and nothing is written to the store.
+
+Policy scoring runs between normalisation and the store, so a stored CBOM
+already carries its verdicts and the dashboard never has to score anything
+itself. A pack that will not load -- unsigned, tampered, uncited -- fails the
+scan rather than downgrading it to an unscored document, for the same reason a
+broken CBOM does: a document that looks scored but is not is worse than one
+that is obviously missing.
 """
 
 from __future__ import annotations
@@ -21,9 +28,11 @@ from pathlib import Path
 
 from core import store
 from core.logs import get_logger
-from core.normalise import normalise
+from core.normalise import normalise, validate_cbom_json
 from core.scanner import ScanContext, Scanner, Target
 from core.schema import Finding
+from policy.apply import apply_policy
+from policy.engine import Pack, default_packs
 
 __all__ = ["default_context", "run_scan"]
 
@@ -67,8 +76,18 @@ def _collect(
     return findings, None
 
 
-def run_scan(target: Target, scanners: Sequence[Scanner], ctx: ScanContext) -> str:
-    """Scan ``target`` with every applicable scanner and store the CBOM."""
+def run_scan(
+    target: Target,
+    scanners: Sequence[Scanner],
+    ctx: ScanContext,
+    packs: Sequence[Pack] | None = None,
+) -> str:
+    """Scan ``target`` with every applicable scanner and store the scored CBOM.
+
+    ``packs`` defaults to the signed packs under ``policy/packs``. Pass an
+    explicit (possibly empty) sequence to score with something else, or with
+    nothing.
+    """
     _log.info(
         "scan_started",
         extra={
@@ -141,6 +160,14 @@ def run_scan(target: Target, scanners: Sequence[Scanner], ctx: ScanContext) -> s
     # Deliberately outside any try/except: a document that does not validate is
     # a failure of ECDAT, not of a plugin, and must not be written.
     bom, cbom_json = normalise(findings, target)
+
+    # Score before storing, so a stored CBOM is always a scored CBOM. Re-scoring
+    # an estate under new guidance is then re-running policy over stored
+    # documents rather than re-scanning it.
+    resolved_packs = default_packs() if packs is None else list(packs)
+    cbom_json = apply_policy(cbom_json, resolved_packs)
+    validate_cbom_json(cbom_json)
+
     scan_id = store.save_scan(target, cbom_json)
 
     _log.info(
@@ -153,6 +180,7 @@ def run_scan(target: Target, scanners: Sequence[Scanner], ctx: ScanContext) -> s
             "scanners_ran": ran,
             "scanners_failed": failed,
             "scanners_skipped": skipped,
+            "packs_applied": [f"{p.name}@{p.version}" for p in resolved_packs],
         },
     )
     return scan_id

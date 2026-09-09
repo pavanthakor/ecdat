@@ -138,3 +138,39 @@
   nothing rolls them up, so an OpenSSL count is currently a package count.
   Belongs to the correlator slice.
   *Raised: Scanner C slice.*
+- **Policy packs are signed with a committed DEV key.** `policy/keys/dev/` holds
+  an Ed25519 keypair whose private half is in the repository, so a valid
+  signature proves a pack was built by this repo's tooling and nothing about
+  who approved it. It exists so `make check` verifies the shipped packs without
+  a key-provisioning step. Production needs an offline signing key, a published
+  verification key, a release process that uses them, and a rotation story --
+  none of which exist. Until then the signature gate defends against accidental
+  edits and in-repo tampering, not against an attacker who can commit.
+  *Raised: policy engine slice. See [ADR-0007](docs/adr/0007-policy-engine.md).*
+- **With only the quantum pack, nothing can reach Critical or High.** The
+  quantum category caps at 40 and Medium starts at 40, so a Shor-broken RSA is
+  Medium. That is the locked cap and the locked bands meaning what they say --
+  criticality is meant to come from a component being bad on several axes at
+  once. Re-check the band distribution once the `mosca`, `india_dst` and `nist`
+  packs land; if real Criticals still do not appear, the cap table or the band
+  thresholds need revisiting, not the pack.
+  *Raised: policy engine slice. See ADR-0007.*
+- **`GET /scans` parses every stored CBOM to build its summary.** `band_counts`
+  and `max_score` are read back out of each stored document on every list call.
+  Correct (the summary must report what was stored, not what today's packs
+  would say) but O(scans x document size) per request. Wants the verdict
+  summary denormalised onto the scan row when the store gains a migration
+  story -- which is also where `scanners_ran` should land.
+  *Raised: policy engine slice.*
+- **Re-scoring a stored CBOM under updated packs has no entry point.**
+  `apply_policy` is idempotent and designed for exactly this, but nothing
+  exposes it: there is no `ecdat rescore` command and no API route, so today a
+  guidance change means re-scanning. The whole reason scoring is separate from
+  normalisation is to make that unnecessary.
+  *Raised: policy engine slice.*
+- **`quantum_status` severity ordering is hard-coded in the engine.**
+  `broken > weakened > adequate > pqc` lives in `policy/engine.py` rather than
+  in a pack, so a pack cannot introduce a new status without an engine change.
+  Acceptable while `quantum` is the only pack defining the field; revisit if a
+  second pack wants its own status vocabulary.
+  *Raised: policy engine slice.*

@@ -15,6 +15,7 @@ help:
 	@echo "           the official CycloneDX 1.6 JSON schema"
 	@echo "golden     regenerate tests/golden/*.cbom.json (review the diff!)"
 	@echo "check      lint + typecheck + test + validate  (what CI runs)"
+	@echo "sign-packs re-sign policy packs with the committed DEV key"
 	@echo "serve      run the API on http://127.0.0.1:8000"
 
 install:
@@ -28,7 +29,7 @@ format:
 	$(PY) -m ruff format .
 
 typecheck:
-	$(PY) -m mypy core api scanners cli.py
+	$(PY) -m mypy core api scanners policy cli.py
 	$(PY) -m mypy tests
 
 test:
@@ -47,3 +48,8 @@ serve:
 	$(PY) -m uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
 
 check: lint typecheck test validate
+
+# Re-sign every policy pack with the DEV key after editing one. The dev keypair
+# is committed and is NOT a production key -- see policy/sign.py and ADR-0007.
+sign-packs:
+	$(PY) -m policy.sign

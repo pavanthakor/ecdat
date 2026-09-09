@@ -1,0 +1,219 @@
+# ECDAT quantum-risk pack.
+#
+# What a quantum-capable adversary does to each algorithm family, and what that
+# is worth as a score. Nothing here is about deadlines-by-jurisdiction or
+# Mosca's inequality -- those are the india_dst, nist and mosca packs, which are
+# separate on purpose so a national roadmap can change without re-litigating
+# the physics.
+#
+# CATEGORY CAP. `caps` below is the ceiling for this pack's category. It lives
+# in the pack header rather than in the engine so that the rules which create a
+# category and the ceiling on that category version and ship together: raising
+# the ceiling is a reviewable, signed change to the same file. The engine caps
+# each category separately and then sums, so ten quantum rules on one component
+# can never crowd out a single critical finding from another dimension. Where
+# two packs declare the same category the NARROWEST cap wins -- a pack may
+# tighten a ceiling, never widen it.
+#
+# SCORING SHAPE
+#   40  Shor-broken, or classically broken today
+#   20  Grover-weakened (halved effective strength, still standing)
+#    5  adequate under Grover; inventoried so coverage is visible
+#    0  post-quantum
+pack: quantum
+version: 1
+citation: >-
+  NIST IR 8547 ipd, "Transition to Post-Quantum Cryptography Standards"
+  (November 2024); FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA),
+  August 2024; NIST SP 800-131A Rev.2, "Transitioning the Use of Cryptographic
+  Algorithms and Key Lengths" (March 2019).
+
+caps:
+  quantum: 40
+
+rules:
+  # ------------------------------------------------------------------
+  # Shor: the asymmetric family does not survive at any key size.
+  # ------------------------------------------------------------------
+  - id: quantum-shor-broken-asymmetric
+    when:
+      algorithm:
+        in:
+          - RSA
+          - DSA
+          - DH
+          - DHE
+          - ECDH
+          - ECDHE
+          - ECDSA
+          - EdDSA
+          - Ed25519
+          - Ed448
+          - X25519
+          - X448
+          - ElGamal
+    effect:
+      score: 40
+      category: quantum
+      quantum_status: broken
+      labels: [shor-broken, quantum-vulnerable]
+      deadline: 2035-01-01
+      action: >-
+        Replace with a post-quantum algorithm chosen by USAGE: ML-KEM (FIPS 203)
+        for key establishment and key transport, ML-DSA (FIPS 204) for
+        signatures, or SLH-DSA (FIPS 205) where a conservative hash-based
+        signature is preferred. Increasing the key size does not help.
+    citation: >-
+      NIST IR 8547 ipd Table 1: RSA, DSA, DH, ECDSA, ECDH and EdDSA are
+      deprecated after 2030 and disallowed after 2035, because Shor's algorithm
+      solves the integer-factorisation and discrete-logarithm problems they
+      rest on.
+
+  # The structural corroboration of the rule above, from the CBOM's own
+  # nistQuantumSecurityLevel rather than from a name. Deliberately a SEPARATE
+  # rule: it catches an algorithm the name list has not been taught yet, and
+  # fired_rules then shows which route reached the verdict.
+  - id: quantum-shor-broken-by-nist-level
+    when:
+      nist_quantum_security_level: 0
+    effect:
+      score: 40
+      category: quantum
+      quantum_status: broken
+      labels: [shor-broken]
+    citation: >-
+      CycloneDX 1.6 defines nistQuantumSecurityLevel 0 as "none of the
+      categories are met"; the NIST PQC Call for Proposals (2016) Sec. 4.A.5
+      defines categories 1-5 by AES/SHA-2 anchors that a Shor-broken algorithm
+      cannot reach. See also NIST IR 8413.
+
+  # ------------------------------------------------------------------
+  # Grover: symmetric strength is halved, not destroyed.
+  # ------------------------------------------------------------------
+  - id: quantum-grover-weakened-symmetric
+    when:
+      algorithm:
+        in: [AES-128, 3DES, TripleDES, Camellia-128, ARIA-128]
+    effect:
+      score: 20
+      category: quantum
+      quantum_status: weakened
+      labels: [grover-weakened]
+      deadline: 2030-01-01
+      action: >-
+        Move to a 256-bit key (AES-256) so the post-Grover margin stays at
+        128 bits. This is a key-size change, not an algorithm change.
+    citation: >-
+      NIST IR 8547 ipd Sec. 3: Grover's algorithm reduces the effective
+      strength of a symmetric key by half, so a 128-bit key retains roughly
+      64 bits against a quantum adversary. NIST SP 800-131A Rev.2 Table 5
+      separately disallows three-key TDEA for encryption after 2023.
+
+  - id: quantum-grover-weakened-aes-128-by-key-size
+    when:
+      algorithm: AES
+      key_size:
+        max: 128
+    effect:
+      score: 20
+      category: quantum
+      quantum_status: weakened
+      labels: [grover-weakened]
+      deadline: 2030-01-01
+      action: >-
+        Move to a 256-bit key (AES-256) so the post-Grover margin stays at
+        128 bits. This is a key-size change, not an algorithm change.
+    citation: >-
+      FIPS 197 defines AES key sizes; NIST IR 8547 ipd Sec. 3 gives the Grover
+      halving. AES-128 therefore retains roughly 64 bits of quantum strength.
+
+  # ------------------------------------------------------------------
+  # Adequate under Grover. Detected so the inventory shows what is already
+  # right, which is what drift detection needs as much as what is wrong.
+  # ------------------------------------------------------------------
+  - id: quantum-adequate-symmetric-and-hash
+    when:
+      algorithm:
+        in:
+          - AES-256
+          - SHA-384
+          - SHA-512
+          - SHA3-384
+          - SHA3-512
+          - ChaCha20
+          - ChaCha20-Poly1305
+    effect:
+      score: 5
+      category: quantum
+      quantum_status: adequate
+      labels: [quantum-adequate]
+    citation: >-
+      NIST IR 8547 ipd Sec. 3 and Table 2: AES-256 and SHA-384/512 remain
+      approved past 2035; Grover and the quantum collision bounds leave them
+      with an adequate margin. NSA CNSA 2.0 requires AES-256 and SHA-384 for
+      national security systems.
+
+  - id: quantum-adequate-aes-256-by-key-size
+    when:
+      algorithm: AES
+      key_size:
+        min: 256
+    effect:
+      score: 5
+      category: quantum
+      quantum_status: adequate
+      labels: [quantum-adequate]
+    citation: >-
+      FIPS 197; NIST IR 8547 ipd Sec. 3. AES-256 retains roughly 128 bits of
+      strength against Grover, which NIST considers adequate.
+
+  # ------------------------------------------------------------------
+  # Broken TODAY. Scored the same as Shor-broken, but for a different reason,
+  # and the label and action must both say so: waiting for 2035 to fix MD5 is
+  # a misreading a scored inventory could easily encourage.
+  # ------------------------------------------------------------------
+  - id: quantum-classically-broken
+    when:
+      algorithm:
+        in: [MD5, MD4, SHA-1, DES, RC4, ARC4, RC2, Blowfish, MD5-SHA1]
+    effect:
+      score: 40
+      category: quantum
+      labels: [broken-today, classically-broken]
+      deadline: 2026-01-01
+      action: >-
+        Broken TODAY, not in 2035: this is a live defect, not a quantum
+        migration item, and it does not wait for the post-quantum timetable.
+        Replace immediately -- SHA-256 or SHA-3 for hashing, AES-256-GCM for
+        encryption.
+    citation: >-
+      NIST SP 800-131A Rev.2 Tables 5 and 8: single DES disallowed since 2005,
+      MD5 and SHA-1 disallowed for digital signature generation; RFC 6151
+      (MD5 collisions), RFC 7465 (RC4 prohibited in TLS), CVE-2016-2183
+      (Sweet32, 64-bit block ciphers).
+
+  # ------------------------------------------------------------------
+  # The destination.
+  # ------------------------------------------------------------------
+  - id: quantum-post-quantum-approved
+    when:
+      algorithm:
+        in:
+          - ML-KEM
+          - ML-DSA
+          - SLH-DSA
+          - Kyber
+          - Dilithium
+          - SPHINCS+
+          - FN-DSA
+          - Falcon
+    effect:
+      score: 0
+      category: quantum
+      quantum_status: pqc
+      labels: [post-quantum]
+    citation: >-
+      FIPS 203 (ML-KEM), FIPS 204 (ML-DSA) and FIPS 205 (SLH-DSA), approved
+      August 2024. Kyber, Dilithium and SPHINCS+ are the pre-standardisation
+      names of the first three and are matched so an early adopter's inventory
+      is not silently unscored.

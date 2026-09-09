@@ -8,6 +8,7 @@ serialiser would quietly break the determinism guarantee ADR-0002 rests on.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -21,10 +22,15 @@ from core import registry, store
 from core.logs import configure_logging, get_logger
 from core.orchestrator import default_context, run_scan
 from core.scanner import Target
+from policy.engine import BANDS
 
 __all__ = ["app"]
 
 _log = get_logger("api")
+
+#: Band names, highest severity first, straight from the policy engine so the
+#: API cannot drift from the bands the engine actually assigns.
+BAND_NAMES = tuple(band for _threshold, band in BANDS)
 
 #: The dashboard runs on a Vite dev server; nothing else needs cross-origin
 #: access. Kept to explicit localhost origins rather than "*" -- the API will
@@ -68,6 +74,13 @@ class ScanSummary(BaseModel):
     target: TargetOut
     created_at: datetime
     component_count: int
+    #: How many components landed in each policy band, e.g.
+    #: ``{"Critical": 0, "High": 0, "Medium": 3, "Low": 4}``. Read back out of
+    #: the stored CBOM rather than recomputed, so the dashboard sees exactly
+    #: the verdicts that were stored.
+    band_counts: dict[str, int]
+    #: The highest component score in the scan; 0 for an empty CBOM.
+    max_score: int
 
 
 @asynccontextmanager
@@ -127,22 +140,45 @@ def create_scan(body: TargetIn) -> ScanCreated:
     return ScanCreated(scan_id=scan.id, component_count=scan.component_count)
 
 
+def _verdict_summary(cbom_json: str) -> tuple[dict[str, int], int]:
+    """Band counts and the top score, read back out of a stored CBOM.
+
+    Parsed from the document rather than recomputed from the packs: the summary
+    must report what was stored, not what today's packs would say about it.
+    Re-scoring is a deliberate act, not a side effect of listing scans.
+    """
+    counts = dict.fromkeys(BAND_NAMES, 0)
+    top = 0
+    for component in json.loads(cbom_json).get("components", []):
+        for prop in component.get("properties", []):
+            if prop["name"] == "ecdat:band" and prop["value"] in counts:
+                counts[prop["value"]] += 1
+            elif prop["name"] == "ecdat:score":
+                top = max(top, int(prop["value"]))
+    return counts, top
+
+
 @app.get("/scans")
 def list_scans() -> list[ScanSummary]:
-    return [
-        ScanSummary(
-            id=scan.id,
-            target=TargetOut(
-                kind=scan.target_kind,
-                ref=scan.target_ref,
-                system=scan.target_system,
-                data_class=scan.target_data_class,
-            ),
-            created_at=scan.created_at,
-            component_count=scan.component_count,
+    summaries = []
+    for scan in store.list_scans():
+        band_counts, max_score = _verdict_summary(scan.cbom_json)
+        summaries.append(
+            ScanSummary(
+                id=scan.id,
+                target=TargetOut(
+                    kind=scan.target_kind,
+                    ref=scan.target_ref,
+                    system=scan.target_system,
+                    data_class=scan.target_data_class,
+                ),
+                created_at=scan.created_at,
+                component_count=scan.component_count,
+                band_counts=band_counts,
+                max_score=max_score,
+            )
         )
-        for scan in store.list_scans()
-    ]
+    return summaries
 
 
 @app.get("/scans/{scan_id}/cbom")

@@ -176,3 +176,28 @@ def test_cors_allows_the_local_dashboard(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_scan_summary_carries_policy_bands(client: TestClient) -> None:
+    """The dashboard reads bands off the summary rather than scoring itself."""
+    post_scan(client)
+
+    (summary,) = client.get("/scans").json()
+
+    assert set(summary["band_counts"]) == {"Critical", "High", "Medium", "Low"}
+    # RSA-2048 is Shor-broken (Medium at the quantum cap); SHA-256 is Low.
+    assert summary["band_counts"]["Medium"] == 1
+    assert summary["band_counts"]["Low"] == 1
+    assert summary["max_score"] == 40
+
+
+def test_the_stored_cbom_carries_verdicts(client: TestClient) -> None:
+    scan_id = post_scan(client)["scan_id"]
+
+    document = json.loads(client.get(f"/scans/{scan_id}/cbom").text)
+    rsa = next(c for c in document["components"] if c["name"] == "RSA-2048")
+    values = {p["name"]: p["value"] for p in rsa["properties"]}
+
+    assert values["ecdat:band"] == "Medium"
+    assert values["ecdat:quantum_status"] == "broken"
+    assert "quantum-shor-broken-asymmetric" in values["ecdat:fired_rules"]
