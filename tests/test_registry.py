@@ -159,12 +159,12 @@ def test_register_returns_the_scanner_so_it_can_be_used_inline(
 # --------------------------------------------------------------------------
 
 
-def test_the_default_registry_has_the_source_scanner() -> None:
-    assert registry.available_ids() == ["source"]
+def test_the_default_registry_lists_every_built_in_scanner() -> None:
+    assert registry.available_ids() == ["container", "source"]
 
 
 def test_module_level_helpers_delegate_to_the_default_registry() -> None:
-    assert [s.id for s in registry.get_scanners(None)] == ["source"]
+    assert [s.id for s in registry.get_scanners(None)] == ["container", "source"]
     assert [s.id for s in registry.get_scanners(["source"])] == ["source"]
 
 

@@ -17,10 +17,14 @@ from core.scanner import ScanContext, Scanner, Target
 from core.schema import Evidence, Finding, Occurrence
 
 
-class _StubScanner:
-    """Structurally a Scanner; emits one hard-coded finding."""
+class _ConformingScanner:
+    """Structurally a Scanner; emits one hard-coded finding.
 
-    id = "test.stub"
+    Named for what it is -- a conformance double. Nothing to do with the
+    retired scanners.stub package (ADR-0005).
+    """
+
+    id = "test.conforming"
     view = "declared"
 
     def supports(self, target: Target) -> bool:
@@ -38,7 +42,7 @@ class _StubScanner:
                     Occurrence(
                         view="declared",
                         locator=f"{target.ref}:1",
-                        detail="rule=stub@0",
+                        detail="rule=conforming@0",
                     )
                 ]
             ),
@@ -46,7 +50,7 @@ class _StubScanner:
 
 
 def test_a_structural_scanner_satisfies_the_protocol() -> None:
-    assert isinstance(_StubScanner(), Scanner)
+    assert isinstance(_ConformingScanner(), Scanner)
 
 
 def test_an_object_missing_scan_does_not_satisfy_the_protocol() -> None:
@@ -61,18 +65,18 @@ def test_an_object_missing_scan_does_not_satisfy_the_protocol() -> None:
 
 
 def test_scan_yields_findings_tagged_with_the_scanner_id() -> None:
-    scanner = _StubScanner()
+    scanner = _ConformingScanner()
     target = Target(kind="repo", ref="/srv/quantumbank", system="quantumbank")
     ctx = ScanContext(knowledge_dir=Path("knowledge"), scratch_dir=Path("/tmp/x"))  # noqa: S108
 
     findings = list(scanner.scan(target, ctx))
 
-    assert [f.scanner_id for f in findings] == ["test.stub"]
+    assert [f.scanner_id for f in findings] == ["test.conforming"]
     assert findings[0].evidence.occurrences[0].locator.startswith(target.ref)
 
 
 def test_supports_discriminates_on_target_kind() -> None:
-    scanner = _StubScanner()
+    scanner = _ConformingScanner()
 
     assert scanner.supports(Target(kind="repo", ref="/srv/quantumbank"))
     assert not scanner.supports(Target(kind="image", ref="quantumbank:1.4"))

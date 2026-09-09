@@ -29,8 +29,13 @@
   scanner can fill with anything, and the normaliser still copies it into
   `evidence.occurrences[].additionalContext` unexamined. The remaining work is
   a redaction/length guard in `core/schema.py` itself, so the invariant holds
-  for the binary, container, process and network scanners before they are
-  written rather than after.
+  for the binary, process and network scanners before they are written rather
+  than after.
+  **Update (Scanner C):** now also enforced for the container scanner, in the
+  `shipped` view -- private keys carry a public-key fingerprint and a redacted
+  snippet, keystores are never opened, and a negative test reads the planted
+  key back out of the fixture and asserts none of its body escaped. Two of
+  six scanner families are covered; the schema-level guard is still owed.
   *Raised: Phase 0, core schema slice. Partially resolved: Scanner A slice,
   see [ADR-0004](docs/adr/0004-source-scanning-semgrep.md).*
 - **Cross-view merging only happens when the normalised locus matches.** The
@@ -106,3 +111,30 @@
   scanner set (and ideally each scanner's version) persisted on the scan row.
   *Raised: scanner-registry slice. See
   [ADR-0005](docs/adr/0005-scanner-registry.md) Consequences.*
+- **Container scanning ignores layer whiteouts.** A file deleted in a later
+  layer still produces a finding from the layer that introduced it. For
+  supply-chain purposes that is arguably right -- the bytes shipped -- but it
+  is not the same claim as "present in the running filesystem", and the two are
+  currently indistinguishable in the CBOM. Needs `.wh.` whiteout handling and a
+  `present_in_final_layer` parameter so a reviewer can tell which claim is
+  being made.
+  *Raised: Scanner C slice. See [ADR-0006](docs/adr/0006-container-scanning.md).*
+- **Each container layer blob is held in memory while it is walked.** Layers
+  are streamed for iteration, but `_open_image` reads each blob into bytes
+  first. Fine for base images and the fixtures; a multi-gigabyte application
+  image will want a spooled temporary file under `ctx.scratch_dir`.
+  *Raised: Scanner C slice.*
+- **GnuTLS and libgcrypt PQC capability is unverified.** `knowledge/libraries.yaml`
+  records `pqc_capable_from: null` for both, with a note, because their
+  post-quantum support was moving and the first supporting version was not
+  confirmed against upstream NEWS. `pqc_capable` is therefore absent rather
+  than false for those libraries -- deliberately, since a guessed version would
+  be an uncited crypto fact. Verify against upstream NEWS and fill both in
+  before any scoring depends on them.
+  *Raised: Scanner C slice.*
+- **`libssl3` and `libcrypto3` are inventoried as two components.** They are
+  one source package shipped as two binaries, and the scanner reports both
+  because the image ships both. `params.source_package` carries the link, but
+  nothing rolls them up, so an OpenSSL count is currently a package count.
+  Belongs to the correlator slice.
+  *Raised: Scanner C slice.*

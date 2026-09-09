@@ -27,6 +27,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from core.scanner import Scanner
+from scanners.container import ContainerScanner
 from scanners.source import SourceScanner
 
 __all__ = [
@@ -135,4 +136,5 @@ def available_ids() -> list[str]:
 # one register() line here -- nothing in api/ or cli.py changes.
 # ---------------------------------------------------------------------------
 
+register(ContainerScanner())
 register(SourceScanner())

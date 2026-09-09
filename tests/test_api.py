@@ -64,6 +64,8 @@ def test_post_scans_finds_real_crypto(client: TestClient) -> None:
 
 
 def test_post_scans_accepts_an_explicit_scanner_subset(client: TestClient) -> None:
+    # The container scanner declines a repo target, so selecting just the
+    # source scanner must give the same result as running both.
     body = post_scan(client, scanners=["source"])
 
     assert body["component_count"] == MINIMAL_COMPONENTS
@@ -92,7 +94,7 @@ def test_get_scanners_lists_the_registered_ids(client: TestClient) -> None:
     response = client.get("/scanners")
 
     assert response.status_code == 200
-    assert response.json() == ["source"]
+    assert response.json() == ["container", "source"]
 
 
 def test_post_scans_rejects_an_unknown_target_kind(client: TestClient) -> None:

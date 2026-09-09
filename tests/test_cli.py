@@ -89,7 +89,7 @@ def test_list_scanners_prints_the_registered_ids(
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert captured.out.split() == ["source"]
+    assert captured.out.split() == ["container", "source"]
     # Nothing was scanned.
     assert store.list_scans() == []
 

@@ -1,0 +1,174 @@
+# ECDAT cryptographic library knowledge pack.
+#
+# Which shipped packages ARE cryptography, what they provide, and whether they
+# can do post-quantum at all. The container scanner reads this to decide which
+# entries in a dpkg/apk database are crypto libraries -- the scanner itself
+# hard-codes no package names, the same way the source scanner hard-codes no
+# algorithm names (ADR-0004).
+#
+# This pack answers the question the drift demo turns on: an image can *say*
+# it is PQC-ready while shipping an OpenSSL that has no ML-KEM in it at all.
+#
+# ---------------------------------------------------------------------------
+# ENTRY SCHEMA
+# ---------------------------------------------------------------------------
+#   name              Canonical library name as it should appear in the CBOM.
+#   packages          Distro package names that provide it. Matched
+#                     case-insensitively against dpkg `Package:` and apk `P:`
+#                     lines. This is how a scanner gets from "libssl3" to
+#                     "OpenSSL" without knowing anything about either.
+#   provides          Algorithms the library implements. Feeds blast-radius
+#                     reasoning: what breaks if this library is the weak link.
+#   pqc_capable_from  First upstream version with usable post-quantum KEM or
+#                     signature support, or `null` if it has none / unverified.
+#                     Compared against the parsed UPSTREAM version, so distro
+#                     revisions (3.0.2-0ubuntu1.10) do not confuse it.
+#   eol               Upstream end-of-support date, or `null`. Distro vendors
+#                     often support past this via backports -- that is a
+#                     separate fact and does not belong in this field.
+#   weak_defaults     Things the library does by default that a reviewer should
+#                     know about. Empty list, never null.
+#   source            Citation. REQUIRED. Per CLAUDE.md there are no uncited
+#                     crypto facts in a knowledge pack.
+#   notes             Optional. Where a fact is NOT verified, say so here
+#                     rather than asserting it in a typed field.
+#
+# ---------------------------------------------------------------------------
+# VERIFICATION STATUS -- read before relying on this pack
+# ---------------------------------------------------------------------------
+# The OpenSSL entry is verified against upstream release material and is the
+# one the drift demo depends on. The GnuTLS and libgcrypt PQC fields are
+# deliberately `null` with a note: their post-quantum support is moving, and
+# recording an unverified version here would be exactly the uncited crypto
+# fact CLAUDE.md forbids. Verify against upstream NEWS before scoring on them.
+# Tracked in PUNCHLIST.
+version: 1
+
+libraries:
+  - name: OpenSSL
+    packages:
+      - libssl3
+      - libssl3t64
+      - libssl1.1
+      - libssl1.0.0
+      - openssl
+      - libcrypto3
+      - libcrypto1.1
+      - openssl-libs
+    provides:
+      - RSA
+      - DSA
+      - ECDSA
+      - ECDH
+      - X25519
+      - Ed25519
+      - AES
+      - ChaCha20-Poly1305
+      - SHA-2
+      - SHA-3
+      - HMAC
+      - ML-KEM
+      - ML-DSA
+      - SLH-DSA
+    # OpenSSL 3.5.0 is the first release to ship ML-KEM (FIPS 203), ML-DSA
+    # (FIPS 204) and SLH-DSA (FIPS 205) as built-in algorithms. Anything below
+    # this cannot negotiate or generate post-quantum keys without an external
+    # provider such as oqs-provider, which is a separate shipped artefact and
+    # would be detected as its own component.
+    pqc_capable_from: "3.5.0"
+    eol: null
+    weak_defaults: []
+    source: >-
+      OpenSSL 3.5.0 release announcement and CHANGES.md (2025-04-08): "Support
+      for the ML-KEM, ML-DSA and SLH-DSA algorithms"; OpenSSL release strategy
+      (openssl.org/policies/general/releasestrat.html) for the LTS designation.
+    notes: >-
+      Per-series end-of-support dates are intentionally not encoded in `eol`
+      because this entry covers every OpenSSL series at once; the 3.0 LTS
+      series and the 1.1.1 series have different dates and distro vendors
+      extend both. Series-level lifecycle belongs in the roadmap pack with the
+      DST deadlines, not here.
+
+  - name: GnuTLS
+    packages:
+      - libgnutls30
+      - libgnutls30t64
+      - gnutls
+      - libgnutls
+    provides:
+      - RSA
+      - ECDSA
+      - ECDH
+      - X25519
+      - Ed25519
+      - AES
+      - ChaCha20-Poly1305
+      - SHA-2
+      - HMAC
+    pqc_capable_from: null
+    eol: null
+    weak_defaults: []
+    source: >-
+      GnuTLS project documentation, "Supported algorithms"
+      (gnutls.org/manual/html_node/Supported-ciphersuites.html).
+    notes: >-
+      UNVERIFIED for post-quantum. GnuTLS has been adding hybrid ML-KEM key
+      exchange in the 3.8.x series, but the exact first version was not
+      confirmed against upstream NEWS when this pack was written, so
+      `pqc_capable_from` is left null rather than guessed. Do not score PQC
+      readiness on this entry until it is verified.
+
+  - name: libgcrypt
+    packages:
+      - libgcrypt20
+      - libgcrypt
+    provides:
+      - RSA
+      - DSA
+      - ECDSA
+      - ECDH
+      - Ed25519
+      - AES
+      - Blowfish
+      - Twofish
+      - SHA-2
+      - SHA-3
+      - HMAC
+    pqc_capable_from: null
+    eol: null
+    weak_defaults:
+      - >-
+        Ships legacy primitives (Blowfish, CAST5, DES, ARCFOUR) as usable
+        algorithms; availability is not deprecation, so a caller can select a
+        64-bit block cipher without warning.
+    source: >-
+      Libgcrypt reference manual, "Available ciphers" and "Available hash
+      algorithms" (gnupg.org/documentation/manuals/gcrypt/).
+    notes: >-
+      UNVERIFIED for post-quantum. The 1.11 series has been adding
+      Kyber/ML-KEM, but the first version was not confirmed against upstream
+      NEWS when this pack was written. Left null deliberately.
+
+  - name: NSS
+    packages:
+      - libnss3
+      - nss
+    provides:
+      - RSA
+      - DSA
+      - ECDSA
+      - ECDH
+      - AES
+      - ChaCha20-Poly1305
+      - SHA-2
+      - HMAC
+    pqc_capable_from: null
+    eol: null
+    weak_defaults: []
+    source: >-
+      Mozilla NSS documentation, "Encryption Technologies Available in NSS"
+      (firefox-source-docs.mozilla.org/security/nss/).
+    notes: >-
+      UNVERIFIED for post-quantum. Included so an NSS-shipping image is
+      inventoried rather than silently missed; PQC scoring is out of scope
+      until the field is verified.

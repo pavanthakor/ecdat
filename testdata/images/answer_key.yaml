@@ -1,0 +1,104 @@
+# Ground truth for the container scanner (Scanner C).
+#
+# TWO LAYERS, and they are scored differently on purpose (ADR-0006).
+#
+# `synthetic:` is EXHAUSTIVE. The tarballs under testdata/images/synthetic/ are
+# committed and never change unless someone regenerates them, so recall and
+# precision are both measurable and precision is asserted at exactly 1.0 -- a
+# finding not declared here is a false positive even if it looks reasonable.
+#
+# `real_images:` is MUST-INCLUDE, not exhaustive. `ubuntu:22.04` and
+# `alpine:3.22` are moving tags: Canonical and Alpine push point updates into
+# them, so pinning an exact libssl patch version would turn a routine upstream
+# release into a red build. These entries assert the facts the demo depends on
+# and tolerate the rest. That asymmetry is the whole reason the synthetic layer
+# exists.
+
+synthetic:
+  dpkg-openssl302.tar:
+    description: >-
+      Ubuntu-shaped image. A real dpkg status stanza declaring libssl3
+      3.0.2-0ubuntu1.10 (upstream 3.0.2 -- below OpenSSL's 3.5.0 PQC floor)
+      alongside libgnutls30, plus libc6 and perl-base that must NOT be
+      reported as cryptographic libraries.
+    findings:
+      - asset_type: library
+        algorithm: OpenSSL
+        version: "3.0.2"
+        package: libssl3
+        package_version: 3.0.2-0ubuntu1.10
+        pqc_capable: false
+        count: 1
+      - asset_type: library
+        algorithm: GnuTLS
+        version: "3.7.3"
+        package: libgnutls30
+        package_version: 3.7.3-4ubuntu1.5
+        count: 1
+
+  apk-openssl357.tar:
+    description: >-
+      Alpine-shaped image. Real apk installed records declaring libssl3 and
+      libcrypto3 at 3.5.7-r0 (upstream 3.5.7 -- at or above the PQC floor),
+      plus musl and busybox which must not be reported. libssl3 and libcrypto3
+      are two shipped packages from one source package; both are inventoried,
+      because the image really does ship both.
+    findings:
+      - asset_type: library
+        algorithm: OpenSSL
+        version: "3.5.7"
+        package: libssl3
+        package_version: 3.5.7-r0
+        pqc_capable: true
+        count: 1
+      - asset_type: library
+        algorithm: OpenSSL
+        version: "3.5.7"
+        package: libcrypto3
+        package_version: 3.5.7-r0
+        pqc_capable: true
+        count: 1
+
+  certs-and-key.tar:
+    description: >-
+      Two layers; crypto material only in the second, so the scanner has to
+      walk past the first. A genuinely valid self-signed certificate and the
+      RSA private key that signed it.
+    findings:
+      - asset_type: certificate
+        algorithm: RSA
+        key_size: 2048
+        subject_common_name: api.quantumbank.invalid
+        signature_algorithm: sha256WithRSAEncryption
+        not_valid_before: "2024-01-01T00:00:00+00:00"
+        not_valid_after: "2034-01-01T00:00:00+00:00"
+        path: etc/ssl/certs/api.quantumbank.pem
+        count: 1
+      - asset_type: key
+        algorithm: RSA
+        key_size: 2048
+        path: etc/ssl/private/api.quantumbank.key
+        redacted: true
+        count: 1
+
+# Marked `docker`; skipped automatically when Docker or the image is absent.
+# `version_prefix` rather than an exact version: see the header.
+real_images:
+  ubuntu:22.04:
+    must_include:
+      - asset_type: library
+        algorithm: OpenSSL
+        version_prefix: "3.0."
+        package: libssl3
+        pqc_capable: false
+  alpine:3.22:
+    must_include:
+      - asset_type: library
+        algorithm: OpenSSL
+        version_prefix: "3.5."
+        package: libssl3
+        pqc_capable: true
+
+# Never permitted in any finding from any image.
+secret_sentinels:
+  - "PRIVATE KEY-----"
