@@ -17,6 +17,7 @@ appear nowhere in any Finding (PUNCHLIST #3, extended from source to shipped).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tarfile
@@ -522,8 +523,31 @@ def test_recall_and_precision_over_the_synthetic_images(
 # --------------------------------------------------------------------------
 
 
+#: Opt-in switch for the Docker-backed integration tests.
+#:
+#: CLAUDE.md reserves docker (like sudo, tcpdump and eBPF attach) for the human
+#: to run personally. Gating on "is Docker installed?" is not good enough: on a
+#: developer machine that is nearly always true, so the tests would shell out
+#: to `docker save` on every `make test` without anyone having asked. Presence
+#: is a capability check, not consent. This variable is the consent.
+DOCKER_OPT_IN_ENV = "ECDAT_RUN_DOCKER_TESTS"
+
+
+def _docker_opted_in() -> bool:
+    return os.environ.get(DOCKER_OPT_IN_ENV) == "1"
+
+
 def _docker(*args: str, timeout: int) -> subprocess.CompletedProcess[bytes] | None:
-    """Run a docker command, or None if docker is not usable at all."""
+    """Run a docker command, or None if docker is not usable at all.
+
+    Refuses to run at all without the opt-in, so no code path in this module
+    can reach a subprocess by accident.
+    """
+    if not _docker_opted_in():
+        raise AssertionError(
+            f"docker was invoked without {DOCKER_OPT_IN_ENV}=1; "
+            "the opt-in gate is not holding"
+        )
     binary = shutil.which("docker")
     if binary is None:
         return None
@@ -550,6 +574,11 @@ def _has_image(reference: str) -> bool:
 def test_real_image_libraries(
     reference: str, context: ScanContext, tmp_path: Path, capsys: Any
 ) -> None:
+    if not _docker_opted_in():
+        pytest.skip(
+            f"docker tests are opt-in: set {DOCKER_OPT_IN_ENV}=1 to run them "
+            "(they shell out to `docker save`)"
+        )
     if not _docker_available():
         pytest.skip("docker is not available")
     if not _has_image(reference):
@@ -590,3 +619,24 @@ def test_real_image_libraries(
         )
         assert matches[0].params["pqc_capable"] is wanted["pqc_capable"]
         assert matches[0].view == "shipped"
+
+
+def test_docker_tests_are_opt_in_not_merely_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gate must be consent, not capability.
+
+    A regression here means `make test` starts shelling out to docker on any
+    machine that happens to have it installed, which is exactly what CLAUDE.md
+    reserves for the human.
+    """
+    monkeypatch.delenv(DOCKER_OPT_IN_ENV, raising=False)
+    assert not _docker_opted_in()
+    with pytest.raises(AssertionError, match=DOCKER_OPT_IN_ENV):
+        _docker("info", timeout=5)
+
+    monkeypatch.setenv(DOCKER_OPT_IN_ENV, "0")
+    assert not _docker_opted_in()
+
+    monkeypatch.setenv(DOCKER_OPT_IN_ENV, "1")
+    assert _docker_opted_in()
