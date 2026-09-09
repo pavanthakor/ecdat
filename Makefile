@@ -2,23 +2,36 @@
 # tcpdump, eBPF attach) personally; nothing here needs root.
 
 PY ?= .venv/bin/python
+SHELLCHECK ?= .venv/bin/shellcheck
 
 .PHONY: help install lint format typecheck test validate golden serve check
 
 help:
-	@echo "install    install runtime + dev dependencies into .venv"
-	@echo "lint       ruff check + format check"
-	@echo "format     ruff format (rewrites files)"
-	@echo "typecheck  mypy over core/, api/, scanners/, cli.py and tests/"
-	@echo "test       full pytest run"
-	@echo "validate   fail if any produced CBOM does not validate against"
-	@echo "           the official CycloneDX 1.6 JSON schema"
-	@echo "golden     regenerate tests/golden/*.cbom.json (review the diff!)"
-	@echo "check      lint + typecheck + test + validate  (what CI runs)"
-	@echo "sign-packs re-sign policy packs with the committed DEV key"
-	@echo "prove-pillar2  end-to-end: eBPF handshake -> spool -> observed CBOM (sudo)"
-	@echo "kpi        score ECDAT against the QuantumBank seeded repo"
-	@echo "serve      run the API on http://127.0.0.1:8000"
+	@echo "ECDAT -- make targets"
+	@echo ""
+	@echo "  SETUP (new machine -- see docs/ONBOARDING.md)"
+	@echo "    setup       install everything: apt, docker, node, semgrep, .venv"
+	@echo "    verify      read-only health check of this machine"
+	@echo "    images      docker pull the container test images"
+	@echo "    install     (re)install Python deps into an existing .venv"
+	@echo ""
+	@echo "  DEVELOP"
+	@echo "    lint        ruff check + format check + shellcheck"
+	@echo "    format      ruff format (rewrites files)"
+	@echo "    typecheck   mypy over the source packages and tests"
+	@echo "    test        full pytest run"
+	@echo "    check       lint + typecheck + test + validate (what CI runs)"
+	@echo ""
+	@echo "  PROVE"
+	@echo "    validate    fail if any produced CBOM is not valid CycloneDX 1.6"
+	@echo "    kpi         score ECDAT against the QuantumBank seeded repo"
+	@echo "    prove-pillar2  eBPF handshake -> spool -> observed CBOM (needs sudo)"
+	@echo "    golden      regenerate tests/golden/*.cbom.json (review the diff!)"
+	@echo "    sign-packs  re-sign policy packs with the committed DEV key"
+	@echo ""
+	@echo "  RUN"
+	@echo "    serve       run the API on http://127.0.0.1:8000"
+	@echo ""
 
 install:
 	$(PY) -m pip install -r requirements-dev.txt
@@ -26,6 +39,9 @@ install:
 lint:
 	$(PY) -m ruff check .
 	$(PY) -m ruff format --check .
+	@# shellcheck ships as a wheel (shellcheck-py), so the binary lands in the
+	@# venv and `make lint` needs no apt package.
+	$(SHELLCHECK) -x scripts/*.sh
 
 format:
 	$(PY) -m ruff format .
@@ -66,3 +82,12 @@ prove-pillar2:
 # the misses and known gaps alongside the numbers. See ADR-0014.
 kpi:
 	ECDAT_DB=$${ECDAT_DB:-.ecdat-kpi.db} $(PY) -m kpi.harness
+
+setup:
+	scripts/setup.sh
+
+verify:
+	scripts/verify.sh
+
+images:
+	scripts/pull-images.sh

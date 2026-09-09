@@ -6,6 +6,18 @@
 cyclonedx-python-lib[validation]>=11.12,<12
 pydantic>=2.11,<3
 
+# Certificate parsing (scanners/container) and Ed25519 pack signatures
+# (policy/sign.py). Was previously satisfied only TRANSITIVELY, via semgrep ->
+# pyOpenSSL -> cryptography; a direct import needs a direct requirement, or a
+# clean machine reproduces by luck.
+cryptography>=42,<51
+
+# Knowledge packs and policy packs are YAML, and four modules in the scan path
+# read them (scanners/container, policy/engine, policy/apply, kpi/harness).
+# It was listed only in requirements-dev.txt, which would have made a
+# production install fail on the first scan.
+pyyaml>=6.0
+
 # The API and its persistence.
 fastapi>=0.115,<1
 sqlalchemy>=2.0,<3

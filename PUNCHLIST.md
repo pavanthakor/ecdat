@@ -400,3 +400,23 @@
   "invented" is true. The fix is socket-level attribution (local address/port
   at handshake time) in the probe.
   *Raised: KPI slice. See ADR-0012 and ADR-0014.*
+- **`scripts/setup.sh` is unverified on a truly fresh machine.** It is
+  idempotent, non-destructive, shellcheck-clean, and its dry run
+  (`scripts/setup.sh --check`) is verified on the development machine -- but
+  every step there reports "already installed", which is exactly the path a
+  fresh machine will not take. Only a teammate running it on a clean Ubuntu
+  install proves the apt package list, the Docker repository setup, the
+  nodesource step and the first-ever venv creation. Until then, treat the
+  onboarding path as designed rather than proven, and report the step and the
+  remedy it printed if it fails.
+  *Raised: onboarding slice. See [docs/ONBOARDING.md](../docs/ONBOARDING.md).*
+- **`cryptography` and `pyyaml` were missing from `requirements.txt`.**
+  **Resolved**, and worth recording because a clean machine would have hit both:
+  `cryptography` (certificate parsing in the container scanner, Ed25519 pack
+  signatures in `policy/sign.py`) was satisfied only TRANSITIVELY via
+  semgrep -> pyOpenSSL, and `pyyaml` -- imported by four modules in the scan
+  path -- was listed only in `requirements-dev.txt`, so a production install
+  would have failed on the first scan. A direct import needs a direct
+  requirement; neither was caught earlier because the development venv had both
+  by accident.
+  *Raised and resolved: onboarding slice.*

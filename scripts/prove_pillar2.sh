@@ -44,7 +44,7 @@ python3 -m agent.agent --self-test --controls --spool "$SPOOL"
 
 echo
 echo "spool contents:"
-ls -la "$SPOOL" | sed 's/^/    /'
+find "$SPOOL" -maxdepth 1 -type f -printf '    %f  (%s bytes)\n' | sort
 
 echo
 echo "=============================================================="
