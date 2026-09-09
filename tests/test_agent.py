@@ -276,11 +276,19 @@ def test_the_parser_accepts_a_target_pid() -> None:
     assert args.target_pid == 2231
 
 
-def test_the_parser_requires_a_libssl_path() -> None:
-    from agent.agent import build_parser
+def test_libssl_path_defaults_so_self_test_is_one_flag() -> None:
+    """`sudo python3 -m agent.agent --self-test` must need nothing else.
 
-    with pytest.raises(SystemExit):
-        build_parser().parse_args([])
+    The whole point of --self-test is collapsing a three-terminal race into one
+    command; making the operator also supply a path they have to look up first
+    would put half the race back.
+    """
+    from agent.agent import DEFAULT_LIBSSL, build_parser
+
+    args = build_parser().parse_args(["--self-test"])
+
+    assert args.self_test is True
+    assert args.libssl_path == DEFAULT_LIBSSL
 
 
 def test_the_probe_source_is_readable_without_bcc() -> None:
@@ -464,3 +472,138 @@ def test_bcc_actually_exposes_that_decoder() -> None:
         pytest.skip("bcc is not importable from /usr/bin/python3")
 
     assert result.stdout.strip() == "True False"
+
+
+# --------------------------------------------------------------------------
+# Diagnostics added after the second attach proof captured nothing.
+# --------------------------------------------------------------------------
+
+
+def test_the_parser_exposes_the_diagnostic_switches() -> None:
+    from agent.agent import build_parser
+
+    args = build_parser().parse_args(
+        ["--self-test", "--controls", "--attach-by-address"]
+    )
+
+    assert args.self_test is True
+    assert args.controls is True
+    assert args.attach_by_address is True
+
+
+def test_the_probe_carries_a_probe_id_so_events_name_their_source() -> None:
+    """With controls attached, an event must say WHICH probe produced it."""
+    from agent.probe_ssl import PROBE_IDS, PROBE_SOURCE, SYMBOL
+
+    assert PROBE_IDS[0] == SYMBOL
+    assert set(PROBE_IDS.values()) >= {"SSL_new", "SSL_read", "SSL_write"}
+    assert "u32 probe_id;" in PROBE_SOURCE
+    assert "event.probe_id = probe_id;" in PROBE_SOURCE
+
+
+def test_every_control_symbol_has_a_probe_function() -> None:
+    from agent.agent import _CONTROL_FNS
+    from agent.probe_ssl import CONTROL_SYMBOLS, PROBE_SOURCE
+
+    assert len(_CONTROL_FNS) == len(CONTROL_SYMBOLS)
+    for fn_name in _CONTROL_FNS:
+        assert f"int {fn_name}(struct pt_regs *ctx)" in PROBE_SOURCE
+
+
+def test_control_symbols_exist_in_the_real_libssl() -> None:
+    """A control that is not exported would be a useless control."""
+    from agent.elfsym import resolve_dynamic_symbol
+    from agent.probe_ssl import CONTROL_SYMBOLS
+
+    libssl = Path("/usr/lib/x86_64-linux-gnu/libssl.so.3")
+    if not libssl.exists():
+        pytest.skip("no libssl at the expected path")
+
+    for symbol in CONTROL_SYMBOLS:
+        offset = resolve_dynamic_symbol(libssl, symbol)
+        assert offset, f"control symbol {symbol} does not resolve"
+
+
+def test_report_symbol_offsets_prints_a_non_zero_offset(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The headline diagnostic: a real number the operator can read."""
+    from agent.agent import report_symbol_offsets
+
+    libssl = Path("/usr/lib/x86_64-linux-gnu/libssl.so.3")
+    if not libssl.exists():
+        pytest.skip("no libssl at the expected path")
+
+    report_symbol_offsets(libssl, ["SSL_do_handshake"])
+
+    printed = capsys.readouterr().err
+    assert "resolved SSL_do_handshake at libssl+0x" in printed
+    assert "libssl+0x0\n" not in printed
+
+
+def test_report_symbol_offsets_names_a_missing_symbol(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent.agent import report_symbol_offsets
+
+    libc = Path("/lib/x86_64-linux-gnu/libc.so.6")
+    if not libc.exists():
+        pytest.skip("no libc at the expected path")
+
+    report_symbol_offsets(libc, ["SSL_do_handshake"])
+
+    assert "NOT EXPORTED" in capsys.readouterr().err
+
+
+def test_the_poll_loop_loops_with_a_timeout() -> None:
+    """A single poll can return before the event exists.
+
+    perf_buffer_poll drains whatever is ready and returns; the event we are
+    waiting for routinely arrives later. Polling once would report "captured
+    nothing" for a probe that fires half a second afterwards.
+    """
+    source = (Path(__file__).resolve().parent.parent / "agent" / "agent.py").read_text()
+
+    assert "while True:" in source
+    assert "perf_buffer_poll(timeout=POLL_TIMEOUT_MS)" in source
+
+    from agent.agent import POLL_TIMEOUT_MS, SELF_TEST_TIMEOUT_S
+
+    assert POLL_TIMEOUT_MS > 0
+    assert SELF_TEST_TIMEOUT_S >= 5
+
+
+def test_the_event_counter_increments_before_decoding() -> None:
+    """An undecodable event must not be reported as "nothing arrived".
+
+    Those are different faults with different fixes, and ctypes callbacks
+    swallow exceptions, so a decode error would otherwise be invisible.
+    """
+    source = (Path(__file__).resolve().parent.parent / "agent" / "agent.py").read_text()
+
+    body = source[source.index("def handle(") : source.index("events_table.open_perf")]
+    increment = body.index('counters["seen"] += 1')
+    decode = body.index("_decode(")
+
+    assert increment < decode, "seen is counted after decoding; a decode error "
+    assert 'counters["decode_errors"] += 1' in body
+
+
+def test_the_self_test_script_is_syntactically_valid() -> None:
+    """It is executed by a child interpreter, so a syntax error would surface
+    as a mystified "the handshake child FAILED"."""
+    import ast
+
+    from agent.agent import _SELF_TEST_SCRIPT
+
+    ast.parse(_SELF_TEST_SCRIPT)
+    assert "ssl.SSLContext" in _SELF_TEST_SCRIPT
+    assert "127.0.0.1" in _SELF_TEST_SCRIPT, "self-test must stay on loopback"
+
+
+def test_the_self_test_cleans_up_after_itself() -> None:
+    source = (Path(__file__).resolve().parent.parent / "agent" / "agent.py").read_text()
+    body = source[source.index("def _run_self_test(") :]
+
+    assert "tempfile.TemporaryDirectory" in body, "cert material must be temporary"
+    assert "child.kill()" in body, "a hung handshake child must be killed"

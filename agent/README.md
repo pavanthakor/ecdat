@@ -72,6 +72,46 @@ entirely — punchlisted.
 
 ---
 
+## The fast path: one command
+
+```bash
+cd /home/pavan/projects/ecdat
+sudo python3 -m agent.agent --self-test --controls
+```
+
+This attaches the probes, causes a TLS handshake itself in a child process, and
+reports PASS or FAIL. There is no terminal ordering to get wrong, and it cleans
+up its certificate and child process on the way out.
+
+It prints the resolved symbol offsets first, so a bad address is visible
+immediately:
+
+```
+symbol offsets in /usr/lib/x86_64-linux-gnu/libssl.so.3:
+  resolved SSL_do_handshake at libssl+0x425e0
+  ...
+attached: uprobe:SSL_do_handshake, uretprobe:SSL_do_handshake, ... [by symbol name]
+self-test: probes attached; running a local TLS handshake in a child process...
+self-test: handshake ok: TLSv1.3 TLS_AES_256_GCM_SHA384
+captured N event(s)
+  SSL_do_handshake: N
+self-test: PASS -- SSL_do_handshake fired N time(s) on a real handshake.
+```
+
+**Reading a FAIL:**
+
+| Message | Meaning | Next step |
+|---|---|---|
+| `PASS` | The probe works. | Done. |
+| `FAIL -- events arrived, but none from SSL_do_handshake` | Pipeline is fine; that symbol's probe does not fire. | Try `--attach-by-address`. |
+| `FAIL -- a handshake completed and NO probe fired` | Fault is upstream: attach, perf buffer, or poll. | Re-run with `--controls` if you omitted it. |
+| `N event(s) arrived but could not be decoded` | The probe fires and the buffer works; the reader is wrong. | Paste the warning; that is a code bug. |
+
+The manual walkthrough below still works and is worth keeping for observing a
+*real* workload rather than a synthetic one.
+
+---
+
 ## Step 1 — make a throwaway certificate
 
 Test material only. It is generated into `/tmp`, is self-signed, names

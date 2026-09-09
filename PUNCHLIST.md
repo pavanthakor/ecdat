@@ -259,3 +259,13 @@
   agent is a self-contained binary with no Python and removes the clash
   entirely, along with the runtime kernel-header dependency.
   *Raised: eBPF agent slice 1, after the first manual attach proof.*
+- **The uprobe attaches but captures nothing, and the cause is still open.**
+  Two rounds of diagnosis have ruled out: wrong library (same inode on both
+  peers), wrong client, symbol resolution (libbcc, objdump and an independent
+  ELF parse all agree on `SSL_do_handshake` at `libssl+0x425e0`), and
+  reachability (`SSL_connect` and `SSL_accept` both `jmp` straight to that
+  address). The agent now carries the instrumentation to localise what is left
+  -- `--self-test`, `--controls`, `--attach-by-address`, per-probe counters and
+  separate decode-error accounting -- but the fault is not yet identified and
+  the probe remains unproven.
+  *Raised: eBPF agent slice 1, after the second manual attach proof.*

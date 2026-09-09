@@ -39,6 +39,26 @@ __all__ = ["EVENT_STRUCT_FIELDS", "PROBE_SOURCE", "SYMBOL", "VERSION_LEN"]
 #: builds apply, and attach by name works without debug symbols.
 SYMBOL = "SSL_do_handshake"
 
+#: Control symbols, attached alongside the real one by ``--controls``.
+#:
+#: The first attach proof attached cleanly and captured nothing, which is
+#: ambiguous between three very different faults: the probe never fires, it
+#: fires but the event never reaches the buffer, or it arrives and the reader
+#: drops it. Attaching simple, certainly-exercised symbols and counting them
+#: separates those cases in a single run. Every one of these is called during a
+#: normal TLS session, so if none of them fire the fault is not specific to
+#: SSL_do_handshake.
+CONTROL_SYMBOLS = ("SSL_new", "SSL_read", "SSL_write")
+
+#: Probe id -> symbol, so a captured event says which probe produced it.
+PROBE_IDS = {0: SYMBOL, 1: "SSL_new", 2: "SSL_read", 3: "SSL_write"}
+_SYMBOL_IDS = {symbol: probe_id for probe_id, symbol in PROBE_IDS.items()}
+
+
+def probe_id_for(symbol: str) -> int:
+    return _SYMBOL_IDS[symbol]
+
+
 #: The size ``bpf_get_current_comm`` writes. This is the helper's documented
 #: contract, not an assumption about the kernel: the comm buffer has been 16
 #: bytes since the helper existed, and bcc's own examples hard-code it.
@@ -101,6 +121,7 @@ struct handshake_event_t {{
     u32 pid;              /* userspace process id (kernel tgid) */
     u32 tid;              /* userspace thread id  (kernel pid)  */
     u32 phase;            /* PHASE_ENTRY | PHASE_RETURN         */
+    u32 probe_id;         /* index into PROBE_IDS                */
     s32 retval;           /* SSL_do_handshake result; entry = 0 */
     u64 ssl_ptr;          /* opaque correlation handle, never dereferenced */
     char comm[16];               /* bpf_get_current_comm's documented size */
@@ -114,7 +135,8 @@ BPF_PERF_OUTPUT(handshake_events);
  * Keyed by pid_tgid, so two threads handshaking at once do not collide. */
 BPF_HASH(inflight, u64, u64);
 
-static inline int emit(struct pt_regs *ctx, u32 phase, s32 retval, u64 ssl_ptr)
+static inline int emit(struct pt_regs *ctx, u32 probe_id, u32 phase,
+                       s32 retval, u64 ssl_ptr)
 {{
     u64 id = bpf_get_current_pid_tgid();
     u32 tgid = id >> 32;
@@ -129,6 +151,7 @@ static inline int emit(struct pt_regs *ctx, u32 phase, s32 retval, u64 ssl_ptr)
     event.pid = tgid;
     event.tid = (u32)id;
     event.phase = phase;
+    event.probe_id = probe_id;
     event.retval = retval;
     event.ssl_ptr = ssl_ptr;
     bpf_get_current_comm(&event.comm, sizeof(event.comm));
@@ -143,7 +166,7 @@ int on_handshake_entry(struct pt_regs *ctx)
     u64 id = bpf_get_current_pid_tgid();
     u64 ssl = (u64)PT_REGS_PARM1(ctx);   /* the SSL* argument, not read */
     inflight.update(&id, &ssl);
-    return emit(ctx, PHASE_ENTRY, 0, ssl);
+    return emit(ctx, 0, PHASE_ENTRY, 0, ssl);
 }}
 
 int on_handshake_return(struct pt_regs *ctx)
@@ -156,7 +179,25 @@ int on_handshake_return(struct pt_regs *ctx)
     if (stashed)
         inflight.delete(&id);
 
-    return emit(ctx, PHASE_RETURN, ret, ssl);
+    return emit(ctx, 0, PHASE_RETURN, ret, ssl);
+}}
+
+/* Controls. Deliberately as simple as an entry probe can be: no map lookup,
+ * no argument read. If these fire and the handshake probe does not, the fault
+ * is that symbol's; if none fire, the fault is the pipeline's. */
+int on_control_new(struct pt_regs *ctx)
+{{
+    return emit(ctx, 1, PHASE_ENTRY, 0, 0);
+}}
+
+int on_control_read(struct pt_regs *ctx)
+{{
+    return emit(ctx, 2, PHASE_ENTRY, 0, 0);
+}}
+
+int on_control_write(struct pt_regs *ctx)
+{{
+    return emit(ctx, 3, PHASE_ENTRY, 0, 0);
 }}
 """
 

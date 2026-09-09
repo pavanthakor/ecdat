@@ -175,6 +175,76 @@ compiles or whether a third-party Python API exists. Reading the dependency is
 the cheapest substitute for running it; the manual proof is the only thing that
 settles the rest.
 
+## What the second attach proof found: attach succeeded, zero events
+
+The probe attached cleanly and captured nothing across five real TLS 1.3
+handshakes, with the library confirmed identical by inode on both peers. The
+leading theory was symbol resolution -- that bcc resolved the versioned
+`SSL_do_handshake@@OPENSSL_3.0.0` to the wrong address, or through an IFUNC/PLT
+indirection, so the uprobe sat somewhere never executed.
+
+**That theory is disproved, and it cost no round trip to disprove.** Both checks
+run without root:
+
+* `libbcc`'s own `bcc_resolve_symname` returns `0x425e0` for
+  `SSL_do_handshake`, exactly matching `objdump -T` and an independent ELF
+  parse. Not zero, not an alias, no IFUNC (`nm` reports `T`, not `i`).
+* Disassembly shows both callers reach it:
+  `SSL_connect+0x22: jmp 425e0 <SSL_do_handshake@@OPENSSL_3.0.0>` and
+  `SSL_accept+0x22: jmp 425e0`. The address is right *and* it is executed on
+  every handshake.
+
+So the fault is elsewhere, and "attached but silent" is ambiguous between three
+unrelated causes with three different fixes: the probe never fires, it fires but
+the event never reaches userspace, or the event arrives and the reader drops it.
+Rather than guess again, this round makes the next run *decisive*.
+
+### The diagnostics, and what each one rules out
+
+**Symbol offsets printed every run** (`agent/elfsym.py`, a dependency-free ELF64
+dynsym reader -- the agent runs on the system interpreter, so pyelftools is not
+available). A uprobe at offset 0 sits on the ELF header, is never executed, and
+looks exactly like a healthy attach. Printing a real number makes that visible
+in one line.
+
+**Control probes** (`--controls`) on `SSL_new`, `SSL_read` and `SSL_write` --
+simple entry probes with no map lookup and no argument read, all certainly
+called during a TLS session. If controls fire and `SSL_do_handshake` does not,
+the fault is that symbol's. If nothing fires, the fault is the pipeline's. Each
+event carries a `probe_id` so it names its own source.
+
+**Attach by address** (`--attach-by-address`) passes the ELF-resolved file
+offset instead of the symbol name, removing bcc's name resolution from the
+picture entirely.
+
+**Counting before decoding.** The event counter now increments *before* the
+event is decoded, and decode failures are counted and printed separately. ctypes
+callbacks swallow exceptions by design, so an `AttributeError` in the decoder
+previously produced exactly the observed symptom -- "captured 0 events" -- while
+the probe was working perfectly. That conflation is now impossible to make.
+
+### `--self-test` removes the race
+
+The three-terminal walkthrough asks the operator to attach *between* starting a
+server and running a client. That is a race, and a race is a poor foundation for
+a go/no-go answer. `--self-test` attaches first, then spawns a TLS handshake in
+a child process against a throwaway cert in a temporary directory, drains, and
+reports PASS or FAIL with a diagnosis. One command, no ordering to get wrong,
+everything cleaned up on the way out. `--libssl-path` gained a default so
+`sudo python3 -m agent.agent --self-test` needs nothing else.
+
+The poll loop was re-checked and is a loop with a real 200 ms timeout, not a
+single poll -- `perf_buffer_poll` returns as soon as it has drained what is
+ready, which is routinely before the awaited event exists.
+
+### The lesson
+
+Two rounds of this have now been resolved by reading something locally rather
+than by asking the human to run something again: the `nm` versioned-symbol bug,
+the non-existent `event_data_type`, and now the address theory. Root-free
+inspection is far cheaper than a round trip, and the remaining unknowns are
+exactly the ones that genuinely require the kernel.
+
 ## Consequences
 
 * Pillar 2's central technical risk is isolated to one command a human runs

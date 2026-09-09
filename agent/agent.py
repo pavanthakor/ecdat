@@ -1,14 +1,12 @@
-"""The runtime agent: attach one uprobe, drain events, print JSON lines.
+"""The runtime agent: attach uprobes to libssl, drain events, print JSON lines.
 
-    sudo python3 -m agent.agent --libssl-path /usr/lib/.../libssl.so.3 --once
+    sudo python3 -m agent.agent --self-test          # one-command go/no-go
+    sudo python3 -m agent.agent --libssl-path <p> --once
 
 Run it with ``-m`` from the repository root. ``python3 agent/agent.py`` puts the
 ``agent/`` DIRECTORY on ``sys.path`` rather than its parent, so this module's
 own ``from agent.probe_ssl import ...`` cannot resolve -- which is how the first
 manual attach proof failed before it reached the kernel.
-
-Read the walkthrough in ``agent/README.md``; this module is the loader it
-drives. Slice 1 proves attach and delivery on a real handshake (ADR-0009).
 
 **Two imports are deliberately lazy, for opposite reasons.**
 
@@ -24,14 +22,18 @@ right. It is not: the attach proof needs bcc and nothing else.
 
 Tests assert both boundaries hold.
 
-**Every failure is a sentence, not a traceback.** An operator running this under
-sudo for the first time will hit a missing symbol, a missing library or a
-missing privilege, and the difference between a useful tool and an abandoned one
-is whether the message says what to do next.
+**Diagnostics, after the second attach proof captured nothing.** A clean attach
+with zero events is ambiguous between three unrelated faults, so the agent now
+distinguishes them in one run: it prints the symbol offset it resolved itself
+(a uprobe at offset 0 sits on the ELF header and never fires), it can attach
+control probes to simpler symbols, it counts events per probe, and it reports
+decode failures separately from "nothing arrived". See ADR-0009.
 
 **Read-only, and no network.** The agent attaches probes, reads a perf buffer
 and writes JSON to stdout. It never writes to the observed process, never reads
-payload, and never opens a socket.
+payload, and never opens a socket. ``--self-test`` makes a loopback TLS
+connection to a server it starts itself, which is the one deliberate exception
+and is entirely local.
 """
 
 from __future__ import annotations
@@ -42,23 +44,45 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
+import tempfile
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from agent.probe_ssl import SYMBOL, build_source
+from agent.elfsym import ElfError, resolve_dynamic_symbol
+from agent.probe_ssl import CONTROL_SYMBOLS, PROBE_IDS, SYMBOL, build_source
 
-__all__ = ["AgentError", "build_parser", "main", "resolve_libssl"]
+__all__ = [
+    "AgentError",
+    "build_parser",
+    "main",
+    "report_symbol_offsets",
+    "resolve_libssl",
+]
 
 #: Human-readable phase names, matching probe_ssl's PHASE_* constants.
 _PHASES = {0: "entry", 1: "return"}
+
+#: Perf-buffer poll timeout. Short enough that --once feels immediate, long
+#: enough not to spin.
+POLL_TIMEOUT_MS = 200
+
+#: How long --self-test waits for events after its handshake completes.
+SELF_TEST_TIMEOUT_S = 20.0
+
+#: Used when --libssl-path is omitted, so --self-test is a single flag.
+DEFAULT_LIBSSL = "/usr/lib/x86_64-linux-gnu/libssl.so.3"
+
+#: BPF C function name per control symbol.
+_CONTROL_FNS = ("on_control_new", "on_control_read", "on_control_write")
 
 _INSTALL_HINT = (
     "bcc is not importable. It ships with the distro rather than with pip: on "
     "Debian/Ubuntu `sudo apt install python3-bpfcc`, on Fedora "
     "`sudo dnf install bcc-tools python3-bcc`. Note that bcc installs into the "
-    "SYSTEM python, so run this agent with `sudo python3`, not with a venv "
-    "interpreter."
+    "SYSTEM python, so run this agent with `sudo python3 -m agent.agent`, not "
+    "with a venv interpreter."
 )
 
 
@@ -72,12 +96,7 @@ class AgentError(RuntimeError):
 
 
 def resolve_libssl(path: str) -> Path:
-    """Resolve and sanity-check the library to attach to.
-
-    Checked here rather than left to bcc because bcc's failure for a missing
-    file is a bare exception from deep inside its own loader, and the operator
-    needs to know it was *their path* that was wrong.
-    """
+    """Resolve and sanity-check the library to attach to."""
     resolved = Path(path).expanduser()
     if not resolved.exists():
         raise AgentError(
@@ -93,47 +112,53 @@ def resolve_libssl(path: str) -> Path:
 
 
 def check_symbol(libssl: Path, symbol: str = SYMBOL) -> None:
-    """Warn early if the symbol is not attachable in this library.
+    """Fail early if the symbol is not attachable in this library.
 
-    Distro libssl builds are stripped, but ``SSL_do_handshake`` is a *dynamic*
-    symbol and survives stripping. If it is missing, the library is statically
-    linked, unusually built, or not libssl at all -- and attach would fail later
-    with a much less obvious message.
-
-    Best-effort: if ``nm`` is unavailable this says nothing and lets the attach
-    speak for itself.
+    Resolved from the ELF rather than by shelling out: the agent already needs
+    an independent resolver for the offset diagnostic, and one code path is
+    better than two that can disagree.
     """
-    nm = shutil.which("nm")
-    if nm is None:
-        return
     try:
-        result = subprocess.run(  # noqa: S603 - argv list, no shell, resolved path
-            [nm, "-D", "--defined-only", str(libssl)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return
-    if result.returncode != 0:
-        return
-    # nm prints versioned symbols as `SSL_do_handshake@@OPENSSL_3.0.0`, so an
-    # exact-suffix match silently reports every real distro libssl as missing
-    # the symbol. Compare the bare name.
-    found = any(
-        line.rsplit(" ", 1)[-1].split("@", 1)[0] == symbol
-        for line in result.stdout.splitlines()
-        if " " in line
-    )
-    if not found:
+        offset = resolve_dynamic_symbol(libssl, symbol)
+    except ElfError as exc:
+        raise AgentError(f"could not read {libssl} as an ELF object: {exc}") from exc
+
+    if offset is None:
         raise AgentError(
-            f"{symbol} is not an exported dynamic symbol of {libssl}\n"
+            f"{symbol} is not an exported function symbol of {libssl}\n"
             "  A uprobe attaches by symbol name, so it cannot attach here. "
             "Likely causes: the binary links OpenSSL statically, it is a "
             "different TLS library (GnuTLS, NSS), or this is not libssl.\n"
             f"  Check with:  nm -D --defined-only {libssl} | grep {symbol}"
         )
+
+
+def report_symbol_offsets(libssl: Path, symbols: Sequence[str]) -> None:
+    """Print where each symbol lives, resolved independently of bcc.
+
+    The second attach proof attached cleanly and captured nothing, and the
+    leading theory was that bcc had resolved the versioned
+    ``SSL_do_handshake@@OPENSSL_3.0.0`` to the wrong place -- a uprobe at offset
+    0 sits on the ELF header, which nothing executes, and looks exactly like a
+    healthy attach. Printing a real, non-zero number every run settles that in
+    one line instead of a round trip through a human with sudo.
+    """
+    for symbol in symbols:
+        try:
+            offset = resolve_dynamic_symbol(libssl, symbol)
+        except ElfError as exc:
+            print(f"  {symbol}: could not resolve ({exc})", file=sys.stderr)
+            continue
+        if offset is None:
+            print(f"  {symbol}: NOT EXPORTED by {libssl}", file=sys.stderr)
+        elif offset == 0:
+            print(
+                f"  {symbol}: resolved to offset 0 -- a uprobe here would sit "
+                "on the ELF header and never fire",
+                file=sys.stderr,
+            )
+        else:
+            print(f"  resolved {symbol} at libssl+0x{offset:x}", file=sys.stderr)
 
 
 def check_privileges() -> None:
@@ -142,7 +167,7 @@ def check_privileges() -> None:
         raise AgentError(
             "attaching an eBPF probe requires root.\n"
             "  Re-run from the repository root with:\n"
-            "    sudo python3 -m agent.agent --libssl-path <path> --once"
+            "    sudo python3 -m agent.agent --self-test"
         )
 
 
@@ -183,7 +208,7 @@ def _load_bpf(source: str) -> Any:
 def _decode(raw_event: Any, libssl_path: str) -> dict[str, Any]:
     """One perf-buffer record as a plain dict, ready for the pure mapping."""
     return {
-        "probe": SYMBOL,
+        "probe": PROBE_IDS.get(int(raw_event.probe_id), "unknown"),
         "phase": _PHASES.get(int(raw_event.phase), "unknown"),
         "pid": int(raw_event.pid),
         "tid": int(raw_event.tid),
@@ -207,13 +232,14 @@ def _decode(raw_event: Any, libssl_path: str) -> dict[str, Any]:
 
 def _event_line(event: dict[str, Any]) -> str:
     """The documented output: one JSON object per line."""
+    comm = event["comm"]
     return json.dumps(
         {
             "pid": event["pid"],
             "tid": event["tid"],
-            "comm": event["comm"].decode("utf-8", "replace").split("\x00", 1)[0]
-            if isinstance(event["comm"], bytes)
-            else event["comm"],
+            "comm": comm.decode("utf-8", "replace").split("\x00", 1)[0]
+            if isinstance(comm, bytes)
+            else comm,
             "timestamp": event["timestamp_ns"],
             "probe": event["probe"],
             "phase": event["phase"],
@@ -226,6 +252,215 @@ def _event_line(event: dict[str, Any]) -> str:
     )
 
 
+def _report(seen: int, per_probe: dict[str, int], decode_errors: int) -> None:
+    """What actually happened, in a form that localises a failure."""
+    print(f"captured {seen} event(s)", file=sys.stderr)
+    for probe, count in sorted(per_probe.items()):
+        print(f"  {probe}: {count}", file=sys.stderr)
+    if decode_errors:
+        print(
+            f"  {decode_errors} event(s) arrived but could not be decoded -- "
+            "the probe fires and the buffer works; the reader is at fault",
+            file=sys.stderr,
+        )
+    if not seen:
+        print(
+            "  nothing fired. If controls were attached (--controls) and they "
+            f"did not fire either, the fault is not specific to {SYMBOL}.",
+            file=sys.stderr,
+        )
+
+
+# ---------------------------------------------------------------------------
+# --self-test: cause a handshake ourselves, after attaching
+# ---------------------------------------------------------------------------
+
+#: A self-contained TLS server+client, run as a CHILD process so the handshake
+#: happens in a process started after the probes are attached -- the ordering
+#: the three-terminal walkthrough kept getting wrong.
+_SELF_TEST_SCRIPT = """
+import socket, ssl, sys, threading
+
+cert, key = sys.argv[1], sys.argv[2]
+ready = threading.Event()
+port = [0]
+
+def server():
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(cert, key)
+    sock = socket.socket()
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    port[0] = sock.getsockname()[1]
+    sock.listen(1)
+    ready.set()
+    with ctx.wrap_socket(sock, server_side=True) as tls:
+        try:
+            conn, _ = tls.accept()
+            conn.recv(16)
+            conn.send(b"ok")
+            conn.close()
+        except OSError:
+            pass
+
+thread = threading.Thread(target=server, daemon=True)
+thread.start()
+ready.wait(10)
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+conn = ctx.wrap_socket(
+    socket.create_connection(("127.0.0.1", port[0]), timeout=10),
+    server_hostname="localhost",
+)
+conn.send(b"hello")
+conn.recv(16)
+print("handshake ok: %s %s" % (conn.version(), conn.cipher()[0]), flush=True)
+conn.close()
+thread.join(2)
+"""
+
+
+def _make_test_cert(directory: Path) -> tuple[Path, Path] | None:
+    """A throwaway self-signed cert, via openssl. None if it cannot be made."""
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        return None
+    cert = directory / "self-test.crt"
+    key = directory / "self-test.key"
+    result = subprocess.run(  # noqa: S603 - argv list, no shell, resolved path
+        [
+            openssl,
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "1",
+            "-subj",
+            "/CN=localhost",
+        ],
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    if result.returncode != 0 or not cert.exists():
+        return None
+    return cert, key
+
+
+def _run_self_test(
+    bpf: Any,
+    seen: Callable[[], int],
+    per_probe: dict[str, int],
+    decode_errors: Callable[[], int],
+) -> int:
+    """Attach, cause a handshake ourselves, and report PASS or FAIL.
+
+    The three-terminal walkthrough has a timing race in it -- the operator must
+    attach between starting a server and running a client -- and a race is a
+    poor foundation for a go/no-go answer. Here the probes are already attached
+    before the handshake process exists, so the ordering cannot be wrong.
+
+    Everything it creates lives in a temporary directory that is removed on the
+    way out, and the child is killed if it hangs.
+    """
+    with tempfile.TemporaryDirectory(prefix="ecdat-self-test-") as workdir:
+        directory = Path(workdir)
+        material = _make_test_cert(directory)
+        if material is None:
+            print(
+                "self-test: could not generate a test certificate (is openssl "
+                "installed?). Fall back to the manual walkthrough in "
+                "agent/README.md.",
+                file=sys.stderr,
+            )
+            return 2
+        cert, key = material
+
+        script = directory / "handshake.py"
+        script.write_text(_SELF_TEST_SCRIPT, encoding="utf-8")
+
+        print(
+            "self-test: probes attached; running a local TLS handshake in a "
+            "child process...",
+            file=sys.stderr,
+        )
+        child = subprocess.Popen(  # noqa: S603 - our own script, our own paths
+            [sys.executable, str(script), str(cert), str(key)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            stdout, stderr = child.communicate(timeout=SELF_TEST_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            stdout, stderr = child.communicate()
+            print("self-test: the handshake child timed out", file=sys.stderr)
+
+        if stdout.strip():
+            print(f"self-test: {stdout.strip()}", file=sys.stderr)
+        if child.returncode != 0:
+            print(
+                "self-test: the handshake child FAILED, so there was nothing "
+                f"to observe:\n{stderr.strip()[:500]}",
+                file=sys.stderr,
+            )
+            return 2
+
+        # The handshake has already happened; this is the window in which its
+        # events must arrive.
+        deadline = time.monotonic() + SELF_TEST_TIMEOUT_S
+        while time.monotonic() < deadline:
+            bpf.perf_buffer_poll(timeout=POLL_TIMEOUT_MS)
+            if seen():
+                # Keep draining briefly, so the summary counts the whole
+                # handshake rather than only its first event.
+                grace = time.monotonic() + 1.0
+                while time.monotonic() < grace:
+                    bpf.perf_buffer_poll(timeout=POLL_TIMEOUT_MS)
+                break
+
+    _report(seen(), per_probe, decode_errors())
+
+    handshake_events = per_probe.get(SYMBOL, 0)
+    if handshake_events:
+        print(
+            f"self-test: PASS -- {SYMBOL} fired {handshake_events} time(s) on a "
+            "real handshake.",
+            file=sys.stderr,
+        )
+        return 0
+
+    if seen():
+        print(
+            f"self-test: FAIL -- events arrived, but none from {SYMBOL}. The "
+            "pipeline works; that symbol's probe does not fire.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        "self-test: FAIL -- a handshake completed and NO probe fired. The fault "
+        "is upstream of the symbol: attach, the perf buffer, or the poll loop. "
+        "Re-run with --controls to narrow it.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+# ---------------------------------------------------------------------------
+# The run
+# ---------------------------------------------------------------------------
+
+
 def run(args: argparse.Namespace) -> int:
     """Attach, drain, print. Returns a process exit code."""
     libssl = resolve_libssl(args.libssl_path)
@@ -233,48 +468,87 @@ def run(args: argparse.Namespace) -> int:
     check_privileges()
     check_btf()
 
+    wanted = [SYMBOL, *(CONTROL_SYMBOLS if args.controls else ())]
+    print(f"symbol offsets in {libssl}:", file=sys.stderr)
+    report_symbol_offsets(libssl, wanted)
+
     bpf = _load_bpf(build_source(args.target_pid))
+    attached: list[str] = []
 
-    try:
-        bpf.attach_uprobe(name=str(libssl), sym=SYMBOL, fn_name="on_handshake_entry")
-    except Exception as exc:
+    def attach(symbol: str, fn_name: str, *, entry: bool = True) -> bool:
+        """Attach one probe. Returns whether it took.
+
+        With --attach-by-address the offset resolved from the ELF is passed
+        directly, so a disagreement between bcc's name resolution and ours can
+        be taken out of the picture without another round trip.
+        """
+        kind = "uprobe" if entry else "uretprobe"
+        kwargs: dict[str, Any] = {"name": str(libssl), "fn_name": fn_name}
+        if args.attach_by_address:
+            offset = resolve_dynamic_symbol(libssl, symbol)
+            if offset is None:
+                print(
+                    f"warning: {symbol} is not exported; cannot attach by address",
+                    file=sys.stderr,
+                )
+                return False
+            kwargs["addr"] = offset
+        else:
+            kwargs["sym"] = symbol
+
+        try:
+            if entry:
+                bpf.attach_uprobe(**kwargs)
+            else:
+                bpf.attach_uretprobe(**kwargs)
+        except Exception as exc:  # report and continue
+            print(
+                f"warning: {kind} on {symbol} did not attach ({exc})",
+                file=sys.stderr,
+            )
+            return False
+        attached.append(f"{kind}:{symbol}")
+        return True
+
+    if not attach(SYMBOL, "on_handshake_entry"):
         raise AgentError(
-            f"could not attach a uprobe to {SYMBOL} in {libssl}.\n"
-            f"  Underlying error: {exc}"
-        ) from exc
+            f"could not attach a uprobe to {SYMBOL} in {libssl}; see the warning above."
+        )
+    attach(SYMBOL, "on_handshake_return", entry=False)
 
-    # Best-effort: the entry probe alone proves attach and delivery, so a
-    # uretprobe that will not attach must not sink the run.
-    try:
-        bpf.attach_uretprobe(
-            name=str(libssl), sym=SYMBOL, fn_name="on_handshake_return"
-        )
-        probes = "uprobe+uretprobe"
-    except Exception as exc:
-        print(
-            f"warning: uretprobe on {SYMBOL} did not attach ({exc}); "
-            "continuing with the entry probe only. Return codes will be absent.",
-            file=sys.stderr,
-        )
-        probes = "uprobe"
+    if args.controls:
+        # Controls separate "this symbol never fires" from "nothing fires".
+        for symbol, fn_name in zip(CONTROL_SYMBOLS, _CONTROL_FNS, strict=True):
+            attach(symbol, fn_name)
 
     print(
-        f"attached {probes} to {SYMBOL} in {libssl}"
+        f"attached: {', '.join(attached)}"
         + (f" (pid {args.target_pid} only)" if args.target_pid else "")
-        + ". Waiting for a TLS handshake; Ctrl-C to stop.",
+        + (" [by address]" if args.attach_by_address else " [by symbol name]"),
         file=sys.stderr,
     )
 
-    seen = 0
-
+    counters = {"seen": 0, "decode_errors": 0}
+    per_probe: dict[str, int] = {}
     events_table = bpf["handshake_events"]
 
     def handle(_cpu: int, data: Any, _size: int) -> None:
-        nonlocal seen
-        # bcc's documented decoder: it derives the ctypes struct from the BPF C
-        # so the layout is never restated in Python and cannot drift from it.
-        event = _decode(events_table.event(data), str(libssl))
-        seen += 1
+        # Counted BEFORE decoding. A decode failure must not be reported as
+        # "captured nothing" -- those are different faults with different
+        # fixes, and conflating them is what makes a silent probe hard to
+        # diagnose.
+        counters["seen"] += 1
+        try:
+            # bcc's documented decoder derives the ctypes struct from the BPF C,
+            # so the layout is never restated in Python.
+            event = _decode(events_table.event(data), str(libssl))
+        except Exception as exc:  # ctypes callbacks swallow exceptions
+            counters["decode_errors"] += 1
+            print(f"warning: could not decode an event: {exc!r}", file=sys.stderr)
+            return
+
+        probe = str(event["probe"])
+        per_probe[probe] = per_probe.get(probe, 0) + 1
 
         if args.json:
             print(_event_line(event), flush=True)
@@ -291,16 +565,29 @@ def run(args: argparse.Namespace) -> int:
 
     events_table.open_perf_buffer(handle)
 
+    if args.self_test:
+        return _run_self_test(
+            bpf,
+            lambda: counters["seen"],
+            per_probe,
+            lambda: counters["decode_errors"],
+        )
+
+    print("Waiting for a TLS handshake; Ctrl-C to stop.", file=sys.stderr)
     try:
+        # A LOOP with a real timeout. perf_buffer_poll returns as soon as it has
+        # drained whatever is ready, which is routinely before the event we are
+        # waiting for exists; polling once would report "nothing" for a probe
+        # that fires half a second later.
         while True:
-            bpf.perf_buffer_poll(timeout=200)
-            if args.once and seen:
+            bpf.perf_buffer_poll(timeout=POLL_TIMEOUT_MS)
+            if args.once and counters["seen"]:
                 break
     except KeyboardInterrupt:
         print("", file=sys.stderr)
 
-    print(f"captured {seen} event(s)", file=sys.stderr)
-    return 0 if seen else 1
+    _report(counters["seen"], per_probe, counters["decode_errors"])
+    return 0 if counters["seen"] else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -310,14 +597,17 @@ def build_parser() -> argparse.ArgumentParser:
             "Observe TLS handshakes via an eBPF uprobe on libssl. Read-only: "
             "attaches, reads, and never modifies the observed process."
         ),
-        epilog="Needs root. See agent/README.md for the full walkthrough.",
+        epilog=(
+            "Needs root. Start with --self-test. "
+            "See agent/README.md for the full walkthrough."
+        ),
     )
     parser.add_argument(
         "--libssl-path",
-        required=True,
+        default=DEFAULT_LIBSSL,
         help=(
             "path to the libssl.so the TARGET process loaded (find it with "
-            "`cat /proc/<pid>/maps | grep libssl`)"
+            f"`cat /proc/<pid>/maps | grep libssl`). Default: {DEFAULT_LIBSSL}"
         ),
     )
     parser.add_argument(
@@ -328,9 +618,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="only report handshakes from this process (default: all)",
     )
     parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help=(
+            "attach, then cause a TLS handshake in a child process and report "
+            "PASS/FAIL. One command, no terminal ordering to get wrong"
+        ),
+    )
+    parser.add_argument(
+        "--controls",
+        action="store_true",
+        help=(
+            f"also attach probes to {', '.join(CONTROL_SYMBOLS)}. If those fire "
+            f"and {SYMBOL} does not, the fault is that symbol's"
+        ),
+    )
+    parser.add_argument(
+        "--attach-by-address",
+        action="store_true",
+        help=(
+            "attach at the file offset resolved from the ELF instead of by "
+            "symbol name, to rule out a name-resolution difference"
+        ),
+    )
+    parser.add_argument(
         "--once",
         action="store_true",
-        help="exit after the first event; this is the slice-1 attach proof",
+        help="exit after the first event",
     )
     parser.add_argument(
         "--json",
