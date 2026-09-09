@@ -1,4 +1,10 @@
-"""API tests: the pipe as the dashboard will drive it."""
+"""API tests: the pipe as the dashboard will drive it.
+
+Scans run the real source scanner over ``testdata/minimal_repo``, which holds
+exactly two crypto call sites (an RSA-2048 keygen and a SHA-256 digest). That
+keeps the component counts below exact rather than approximate, while still
+proving a real detection reached the CBOM.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +18,10 @@ from fastapi.testclient import TestClient
 
 from api.app import app
 
+#: Two crypto call sites -> two components. See the module docstring.
+MINIMAL_REPO = "testdata/minimal_repo"
+MINIMAL_COMPONENTS = 2
+
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
@@ -20,7 +30,7 @@ def client() -> Iterator[TestClient]:
 
 
 def post_scan(client: TestClient, **body: object) -> dict[str, object]:
-    payload = {"kind": "repo", "ref": "/srv/quantumbank", **body}
+    payload = {"kind": "repo", "ref": MINIMAL_REPO, **body}
     response = client.post("/scans", json=payload)
     assert response.status_code == 201, response.text
     return dict(response.json())
@@ -33,12 +43,56 @@ def test_health_is_ok(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_post_scans_runs_the_stub_and_returns_a_scan_id(client: TestClient) -> None:
+def test_post_scans_defaults_to_every_registered_scanner(
+    client: TestClient,
+) -> None:
     body = post_scan(client)
 
     assert isinstance(body["scan_id"], str)
     assert body["scan_id"]
-    assert body["component_count"] == 1
+    assert body["component_count"] == MINIMAL_COMPONENTS
+
+
+def test_post_scans_finds_real_crypto(client: TestClient) -> None:
+    """The default scan is a real detection, not a fixed placeholder finding."""
+    scan_id = post_scan(client)["scan_id"]
+
+    document = json.loads(client.get(f"/scans/{scan_id}/cbom").text)
+    names = {component["name"] for component in document["components"]}
+
+    assert names == {"RSA-2048", "SHA-256"}
+
+
+def test_post_scans_accepts_an_explicit_scanner_subset(client: TestClient) -> None:
+    body = post_scan(client, scanners=["source"])
+
+    assert body["component_count"] == MINIMAL_COMPONENTS
+
+
+def test_post_scans_with_an_empty_scanner_list_runs_nothing(
+    client: TestClient,
+) -> None:
+    body = post_scan(client, scanners=[])
+
+    assert body["component_count"] == 0
+
+
+def test_post_scans_rejects_an_unknown_scanner_id(client: TestClient) -> None:
+    response = client.post(
+        "/scans", json={"kind": "repo", "ref": MINIMAL_REPO, "scanners": ["nope"]}
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "nope" in detail
+    assert "source" in detail
+
+
+def test_get_scanners_lists_the_registered_ids(client: TestClient) -> None:
+    response = client.get("/scanners")
+
+    assert response.status_code == 200
+    assert response.json() == ["source"]
 
 
 def test_post_scans_rejects_an_unknown_target_kind(client: TestClient) -> None:
@@ -94,11 +148,11 @@ def test_list_scans_summarises_newest_first(client: TestClient) -> None:
     assert [s["id"] for s in summaries] == [second, first]
     assert summaries[0]["target"] == {
         "kind": "repo",
-        "ref": "/srv/quantumbank",
+        "ref": MINIMAL_REPO,
         "system": "ledger",
         "data_class": None,
     }
-    assert summaries[0]["component_count"] == 1
+    assert summaries[0]["component_count"] == MINIMAL_COMPONENTS
     assert (
         summaries[0]["created_at"].endswith("Z")
         or "+00:00" in (summaries[0]["created_at"])

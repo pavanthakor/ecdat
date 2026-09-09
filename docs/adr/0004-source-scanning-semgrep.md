@@ -147,6 +147,8 @@ has no idea a key literal is on its line. Layer 1 alone would have leaked it.
 * The stub scanner is now redundant. It is **not** removed in this slice —
   doing so changes the API and CLI default scanner lists, which is outside this
   frame. Flagged in PUNCHLIST for the next slice.
+  *(Done: [ADR-0005](0005-scanner-registry.md) removed it and replaced both
+  hard-coded lists with a registry.)*
 
 ### What it costs
 

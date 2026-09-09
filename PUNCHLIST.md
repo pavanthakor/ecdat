@@ -51,15 +51,19 @@
   inline. Per CLAUDE.md this is knowledge-pack material and should move to
   `knowledge/` with the rest, once that format exists.
   *Raised: Phase 0, CBOM normaliser slice.*
-- **`scanners/stub` is a placeholder and must be deleted. NOW ACTIONABLE.**
-  It detects nothing and returns one hand-written RSA-2048 finding for every
-  target, purely to exercise the pipe. Scanner A has landed, so the condition
-  on this item is met -- but removing the package also means editing the
-  default scanner lists in `api/app.py` and `cli.py` and deleting
-  `tests/test_stub_scanner.py`, which is a behaviour change outside the Scanner
-  A frame. Deliberately left for its own slice rather than smuggled into this
-  one.
-  *Raised: Phase 0, scan pipe slice. Unblocked: Scanner A slice.*
+- ~~**`scanners/stub` is a placeholder and must be deleted.**~~ **Resolved** in
+  the scanner-registry slice. The package and `tests/test_stub_scanner.py` are
+  gone, and the hard-coded scanner lists that made deleting it awkward are gone
+  with them: `core/registry.py` is now the single source of truth, and both
+  `api/app.py` and `cli.py` ask it rather than naming plugins themselves.
+  Adding a scanner is one import and one `register(...)` line in
+  `core/registry.py` -- no change to the API or CLI. The orchestration tests
+  that used the stub as "a scanner that yields one predictable finding" now use
+  a test-local `FixedScanner`, and the end-to-end pipe test was repointed to
+  the real source scanner over `testdata/minimal_repo` rather than dropped.
+  `tests/test_registry.py` asserts, by parsing the AST of every module, that
+  nothing imports `scanners.stub` again.
+  *Raised: Phase 0, scan pipe slice. Resolved: scanner-registry slice.*
 - **`POST /scans` is synchronous.** The request blocks until the whole scan
   finishes, which is acceptable for a stub and not for a real repo, image or
   host scan. Needs a job model: accept, return a scan id immediately, and let
@@ -94,3 +98,11 @@
   `mode_flags`, but the *why* -- which is written in the rule and is the useful
   part -- is dropped. The policy engine will want the reason, not the bit.
   *Raised: Scanner A slice.*
+- **The scan record does not say which scanners ran.** `core/registry.py` knows
+  what is available and the structured log says what ran, but `store.Scan` keeps
+  only the CBOM and the target. So "was this estate ever scanned for binaries,
+  or does it just have no binary findings?" cannot be answered from the
+  database -- and those two states look identical in the dashboard. Needs the
+  scanner set (and ideally each scanner's version) persisted on the scan row.
+  *Raised: scanner-registry slice. See
+  [ADR-0005](docs/adr/0005-scanner-registry.md) Consequences.*

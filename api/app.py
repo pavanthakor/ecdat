@@ -11,17 +11,16 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from core import store
+from core import registry, store
 from core.logs import configure_logging, get_logger
 from core.orchestrator import default_context, run_scan
-from core.scanner import Scanner, Target
-from scanners.stub import StubScanner
+from core.scanner import Target
 
 __all__ = ["app"]
 
@@ -45,6 +44,11 @@ class TargetIn(BaseModel):
     ref: str = Field(min_length=1)
     system: str | None = None
     data_class: str | None = None
+    #: Which plugins to run. Omitted (``None``) means every registered scanner,
+    #: which is the normal case. An explicit list selects a subset -- and an
+    #: explicit empty list selects none, which is honoured rather than treated
+    #: as "unset", so a caller can ask for a scan that detects nothing.
+    scanners: list[str] | None = None
 
 
 class ScanCreated(BaseModel):
@@ -64,15 +68,6 @@ class ScanSummary(BaseModel):
     target: TargetOut
     created_at: datetime
     component_count: int
-
-
-def get_scanners() -> list[Scanner]:
-    """The plugins a scan runs.
-
-    One stub today. Override in tests via ``app.dependency_overrides``; replace
-    when the real scanners land.
-    """
-    return [StubScanner()]
 
 
 @asynccontextmanager
@@ -103,10 +98,22 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/scanners")
+def list_scanners() -> list[str]:
+    """Every scanner the server can run, for the dashboard to offer."""
+    return registry.available_ids()
+
+
 @app.post("/scans", status_code=status.HTTP_201_CREATED)
-def create_scan(
-    body: TargetIn, scanners: Annotated[list[Scanner], Depends(get_scanners)]
-) -> ScanCreated:
+def create_scan(body: TargetIn) -> ScanCreated:
+    try:
+        scanners = registry.get_scanners(body.scanners)
+    except registry.UnknownScannerError as exc:
+        # A typo in a scanner id is the client's mistake, and silently running
+        # the wrong set would be worse than refusing: a scan that quietly
+        # skipped a whole view still looks like a clean inventory.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     target = Target(
         kind=body.kind,
         ref=body.ref,
