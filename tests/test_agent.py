@@ -703,3 +703,123 @@ def test_the_run_tears_down_in_a_finally() -> None:
 
     assert "finally:" in body
     assert "_shutdown(bpf, events_table)" in body
+
+
+# --------------------------------------------------------------------------
+# --spool: the producer half of the seam (ADR-0010).
+# Root-free: writing a JSON line to a directory needs no privileges.
+# --------------------------------------------------------------------------
+
+
+def test_the_parser_accepts_a_spool_directory(tmp_path: Path) -> None:
+    from agent.agent import build_parser
+
+    args = build_parser().parse_args(["--self-test", "--spool", str(tmp_path)])
+
+    assert args.spool == str(tmp_path)
+
+
+def test_spool_defaults_to_off() -> None:
+    from agent.agent import build_parser
+
+    assert build_parser().parse_args(["--self-test"]).spool is None
+
+
+def test_a_spooled_event_is_one_json_line(tmp_path: Path) -> None:
+    from agent.agent import SpoolWriter
+
+    writer = SpoolWriter(tmp_path)
+    writer.write({"pid": 42, "comm": "openssl", "probe": "SSL_do_handshake"})
+
+    files = list(tmp_path.glob("*.jsonl"))
+    assert len(files) == 1
+    body = files[0].read_text(encoding="utf-8")
+    assert body.endswith("\n")
+    assert json.loads(body) == {
+        "pid": 42,
+        "comm": "openssl",
+        "probe": "SSL_do_handshake",
+    }
+
+
+def test_spool_filenames_are_unique_across_events(tmp_path: Path) -> None:
+    """A filename carries host+pid+timestamp+seq so a re-run never overwrites
+    a record the consumer has not read yet."""
+    from agent.agent import SpoolWriter
+
+    writer = SpoolWriter(tmp_path)
+    for index in range(25):
+        writer.write({"pid": index, "comm": "x"})
+
+    assert len(list(tmp_path.glob("*.jsonl"))) == 25
+
+
+def test_spool_filenames_survive_a_second_writer(tmp_path: Path) -> None:
+    from agent.agent import SpoolWriter
+
+    SpoolWriter(tmp_path).write({"pid": 1, "comm": "x"})
+    SpoolWriter(tmp_path).write({"pid": 2, "comm": "x"})
+
+    assert len(list(tmp_path.glob("*.jsonl"))) == 2
+
+
+def test_no_temp_file_survives_a_successful_write(tmp_path: Path) -> None:
+    from agent.agent import SpoolWriter
+    from agent.spool_format import TEMP_PREFIX
+
+    SpoolWriter(tmp_path).write({"pid": 1, "comm": "x"})
+
+    assert not list(tmp_path.glob(f"{TEMP_PREFIX}*"))
+
+
+def test_the_spool_write_is_atomic(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A crash before the rename must leave NOTHING readable as a spool line.
+
+    This is the whole reason for temp+rename: the consumer polls a directory it
+    does not coordinate with, so a partially written file it can see is a
+    partially written record it will read.
+    """
+    import agent.agent as agent_module
+    from agent.spool_format import TEMP_PREFIX, TEMP_SUFFIX
+
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise OSError("crashed before rename")
+
+    # Patched on the os module the agent actually calls through.
+    monkeypatch.setattr("os.rename", explode)
+    writer = agent_module.SpoolWriter(tmp_path)
+
+    with pytest.raises(OSError):
+        writer.write({"pid": 1, "comm": "x"})
+
+    # Note pathlib globs DO match dotfiles, unlike a shell glob -- which is
+    # why a temp file must not end in a spool suffix either.
+    readable = [
+        path
+        for path in tmp_path.glob("*.jsonl")
+        if not path.name.startswith(TEMP_PREFIX)
+    ]
+    assert readable == [], "a readable spool file survived a failed write"
+    assert list(tmp_path.glob("*.jsonl")) == [], "temp files must not look like records"
+
+    leftovers = list(tmp_path.glob(f"{TEMP_PREFIX}*"))
+    assert leftovers, "the partial write should remain as a .tmp-* for triage"
+    assert leftovers[0].suffix == TEMP_SUFFIX
+
+
+def test_the_spool_directory_is_created_if_absent(tmp_path: Path) -> None:
+    from agent.agent import SpoolWriter
+
+    target = tmp_path / "does" / "not" / "exist"
+    SpoolWriter(target).write({"pid": 1, "comm": "x"})
+
+    assert len(list(target.glob("*.jsonl"))) == 1
+
+
+def test_the_spool_line_matches_what_json_prints() -> None:
+    """One serialisation, so producer and consumer cannot drift apart."""
+    source = (Path(__file__).resolve().parent.parent / "agent" / "agent.py").read_text()
+    body = source[source.index("def handle(") : source.index("events_table.open_perf")]
+
+    assert "_event_line(event)" in body
+    assert "spool.write(" in body or "_spool_payload" in body

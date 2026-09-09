@@ -16,6 +16,7 @@ help:
 	@echo "golden     regenerate tests/golden/*.cbom.json (review the diff!)"
 	@echo "check      lint + typecheck + test + validate  (what CI runs)"
 	@echo "sign-packs re-sign policy packs with the committed DEV key"
+	@echo "prove-pillar2  end-to-end: eBPF handshake -> spool -> observed CBOM (sudo)"
 	@echo "serve      run the API on http://127.0.0.1:8000"
 
 install:
@@ -53,3 +54,9 @@ check: lint typecheck test validate
 # is committed and is NOT a production key -- see policy/sign.py and ADR-0007.
 sign-packs:
 	$(PY) -m policy.sign
+
+# The Pillar 2 end-to-end proof: a real TLS handshake -> eBPF uprobe -> spool
+# -> scan -> observed component in a stored CBOM. Needs root for the agent half
+# only; the scan half drops back to the invoking user. See ADR-0010.
+prove-pillar2:
+	sudo scripts/prove_pillar2.sh

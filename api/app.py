@@ -47,7 +47,7 @@ LOCAL_DASHBOARD_ORIGINS = [
 class TargetIn(BaseModel):
     """A thing to scan, as the dashboard describes it."""
 
-    kind: Literal["repo", "directory", "image", "host", "endpoint"]
+    kind: Literal["repo", "directory", "image", "host", "endpoint", "spool"]
     ref: str = Field(min_length=1)
     system: str | None = None
     data_class: str | None = None

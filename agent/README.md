@@ -81,7 +81,43 @@ decode errors, client and server threads distinguished by `tid`.
 Every earlier "attached but captured 0 events" was the **three-terminal timing
 race** in the manual walkthrough below — not the probe. Use `--self-test`.
 
-## The fast path: one command
+## The Pillar 2 end-to-end proof (canonical)
+
+A real TLS handshake, observed by an eBPF uprobe, becoming an **observed
+component in a stored CBOM** — in one command:
+
+```bash
+cd /home/pavan/projects/ecdat
+sudo scripts/prove_pillar2.sh          # or: make prove-pillar2
+```
+
+It sequences itself, so there is no terminal ordering to get wrong:
+
+1. **(root)** `agent --self-test --controls --spool /tmp/ecdat-spool` — attach
+   probes, cause a TLS handshake in a child process, write each observed event
+   as one atomic JSON line into the spool.
+2. **(drops back to your user)** `ecdat scan /tmp/ecdat-spool --kind spool` —
+   ingest those lines as observed Findings, score them, store the CBOM.
+3. Print the observed component and show the records moved to `consumed/`.
+
+The agent chowns the spool to `$SUDO_USER` so step 2 never needs root — the scan
+path stays unprivileged, which is the whole reason the seam is a directory and
+not an HTTP endpoint (ADR-0010).
+
+Expected tail:
+
+```
+  name      : TLS
+  view      : observed
+  locator   : host:<yours>:pid<N>
+  detail    : probe=SSL_do_handshake observed_version=pending observed_cipher=pending
+  PASS: a real TLS handshake reached the store as an observed component.
+```
+
+`observed_version`/`observed_cipher` are `pending` **by design** until
+enrichment lands (slice 2).
+
+## Just the probe: one command
 
 ```bash
 cd /home/pavan/projects/ecdat

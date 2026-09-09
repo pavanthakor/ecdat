@@ -54,8 +54,14 @@ from typing import Any
 from agent.elfsym import ElfError, resolve_dynamic_symbol
 from agent.probe_ssl import CONTROL_SYMBOLS, PROBE_IDS, SYMBOL, build_source
 
+# The wire format, shared with the consumer. A plain module with no pydantic in
+# it, so importing it here does not break the agent's ability to run on the
+# system interpreter (ADR-0009).
+from agent.spool_format import TEMP_PREFIX, TEMP_SUFFIX, local_stem
+
 __all__ = [
     "AgentError",
+    "SpoolWriter",
     "build_parser",
     "main",
     "report_symbol_offsets",
@@ -89,6 +95,81 @@ _INSTALL_HINT = (
 
 class AgentError(RuntimeError):
     """A condition that stops the agent, reported in words rather than a stack."""
+
+
+class SpoolWriter:
+    """Writes each observed event as one JSON line into a spool directory.
+
+    This is the producer half of the seam (ADR-0010). The agent runs as root
+    and attaches eBPF; the scan path does not, and handing a privileged sensor
+    an API credential to carry would undo that. So this writes files and
+    nothing else -- no socket, no client, no token.
+
+    **Atomic by temp-and-rename.** Each record is written to
+    ``.tmp-<uniq>.partial`` and then renamed into place. Rename within a
+    directory is atomic on POSIX, so the consumer -- which polls a directory
+    it does not coordinate with -- can never observe a half-written record. A
+    crash leaves the
+    ``.tmp-`` file behind, which the consumer ignores and a human can inspect.
+
+    **Filenames cannot collide.** ``<host>-<pid>-<timestamp_ns>-<seq>`` is
+    unique across hosts, across concurrent agents, and across re-runs, so a
+    later record can never overwrite an earlier one the consumer has not read.
+    """
+
+    def __init__(self, directory: Path | str) -> None:
+        self.directory = Path(directory)
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self._seq = 0
+        self.written = 0
+        _chown_to_invoking_user(self.directory)
+
+    def write(self, event: dict[str, Any]) -> Path:
+        """Write one event. Raises on I/O failure rather than losing it quietly."""
+        self._seq += 1
+        stem = local_stem(self._seq)
+        temp = self.directory / f"{TEMP_PREFIX}{stem}{TEMP_SUFFIX}"
+        final = self.directory / f"{stem}.jsonl"
+
+        payload = json.dumps(event, sort_keys=True) + "\n"
+        with temp.open("w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            # The rename is only atomic with respect to a file that is already
+            # on disk; without this a crash could rename an empty inode into
+            # place, which is precisely the readable-but-partial record the
+            # temp-and-rename dance exists to prevent.
+            os.fsync(handle.fileno())
+
+        # os.rename, not Path.rename: identical syscall, but the atomicity
+        # of this one line is the entire reason for the temp file, and the
+        # POSIX spelling is what says so to a reader.
+        os.rename(temp, final)  # noqa: PTH104
+        _chown_to_invoking_user(final)
+        self.written += 1
+        return final
+
+
+def _chown_to_invoking_user(path: Path) -> None:
+    """Hand ownership to the user who ran sudo, if there is one.
+
+    The agent must be root to attach probes, but the consumer must not be -- and
+    the consumer has to MOVE files into ``consumed/``, which needs write
+    permission on the directory, not just on the files. Leaving a root-owned
+    spool would mean the only way to ingest it is to run the scan as root too,
+    which drags the privilege back into the part of the system that was
+    carefully kept clear of it.
+
+    Best-effort and silent on failure: not running under sudo is the normal
+    case for the tests, and a chown that cannot happen is not a reason to lose
+    an observation.
+    """
+    sudo_uid = os.environ.get("SUDO_UID")
+    sudo_gid = os.environ.get("SUDO_GID")
+    if not sudo_uid or os.geteuid() != 0:
+        return
+    with contextlib.suppress(OSError, ValueError):
+        os.chown(path, int(sudo_uid), int(sudo_gid or sudo_uid))
 
 
 # ---------------------------------------------------------------------------
@@ -253,11 +334,18 @@ def _event_line(event: dict[str, Any]) -> str:
     )
 
 
-def _report(seen: int, per_probe: dict[str, int], decode_errors: int) -> None:
+def _report(
+    seen: int,
+    per_probe: dict[str, int],
+    decode_errors: int,
+    spooled: int = 0,
+) -> None:
     """What actually happened, in a form that localises a failure."""
     print(f"captured {seen} event(s)", file=sys.stderr)
     for probe, count in sorted(per_probe.items()):
         print(f"  {probe}: {count}", file=sys.stderr)
+    if spooled:
+        print(f"  spooled {spooled} event(s) to disk", file=sys.stderr)
     if decode_errors:
         print(
             f"  {decode_errors} event(s) arrived but could not be decoded -- "
@@ -404,6 +492,8 @@ def _run_self_test(
     seen: Callable[[], int],
     per_probe: dict[str, int],
     decode_errors: Callable[[], int],
+    spooled: Callable[[], int] = lambda: 0,
+    spool: SpoolWriter | None = None,
 ) -> int:
     """Attach, cause a handshake ourselves, and report PASS or FAIL.
 
@@ -472,7 +562,15 @@ def _run_self_test(
                     bpf.perf_buffer_poll(timeout=POLL_TIMEOUT_MS)
                 break
 
-    _report(seen(), per_probe, decode_errors())
+    _report(seen(), per_probe, decode_errors(), spooled())
+
+    if spool is not None:
+        print(
+            f"self-test: {spooled()} record(s) written to {spool.directory}\n"
+            "  Ingest them with:\n"
+            f"    .venv/bin/python cli.py scan {spool.directory} --kind spool",
+            file=sys.stderr,
+        )
 
     handshake_events = per_probe.get(SYMBOL, 0)
     if handshake_events:
@@ -572,9 +670,13 @@ def run(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
 
-    counters = {"seen": 0, "decode_errors": 0}
+    counters = {"seen": 0, "decode_errors": 0, "spooled": 0}
     per_probe: dict[str, int] = {}
     events_table = bpf["handshake_events"]
+
+    spool = SpoolWriter(args.spool) if args.spool else None
+    if spool is not None:
+        print(f"spooling observed events to {spool.directory}", file=sys.stderr)
 
     def handle(_cpu: int, data: Any, _size: int) -> None:
         # Counted BEFORE decoding. A decode failure must not be reported as
@@ -594,8 +696,21 @@ def run(args: argparse.Namespace) -> int:
         probe = str(event["probe"])
         per_probe[probe] = per_probe.get(probe, 0) + 1
 
+        line = _event_line(event)
         if args.json:
-            print(_event_line(event), flush=True)
+            print(line, flush=True)
+
+        if spool is not None:
+            # The SAME serialisation stdout gets, so producer and consumer
+            # cannot drift apart: what a human reads in the terminal is byte
+            # for byte what the scanner will ingest.
+            try:
+                spool.write(json.loads(line))
+                counters["spooled"] += 1
+            except OSError as exc:
+                # A spool write failing is worth saying out loud, and is not a
+                # reason to stop observing.
+                print(f"warning: could not spool an event: {exc}", file=sys.stderr)
 
         if args.findings:
             # Imported here, not at module scope: this is the only code path
@@ -616,6 +731,8 @@ def run(args: argparse.Namespace) -> int:
                 lambda: counters["seen"],
                 per_probe,
                 lambda: counters["decode_errors"],
+                lambda: counters["spooled"],
+                spool,
             )
 
         print("Waiting for a TLS handshake; Ctrl-C to stop.", file=sys.stderr)
@@ -631,7 +748,12 @@ def run(args: argparse.Namespace) -> int:
         except KeyboardInterrupt:
             print("", file=sys.stderr)
 
-        _report(counters["seen"], per_probe, counters["decode_errors"])
+        _report(
+            counters["seen"],
+            per_probe,
+            counters["decode_errors"],
+            counters["spooled"],
+        )
         return 0 if counters["seen"] else 1
     finally:
         # Deterministic teardown while the interpreter is still healthy, so the
@@ -672,6 +794,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "attach, then cause a TLS handshake in a child process and report "
             "PASS/FAIL. One command, no terminal ordering to get wrong"
+        ),
+    )
+    parser.add_argument(
+        "--spool",
+        default=None,
+        metavar="DIR",
+        help=(
+            "also write each observed event as one JSON line into DIR, "
+            "atomically. This is how observed findings reach the store: the "
+            "agent only ever writes files, and `ecdat scan DIR --kind spool` "
+            "ingests them (ADR-0010)"
         ),
     )
     parser.add_argument(

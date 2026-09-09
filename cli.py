@@ -34,6 +34,7 @@ TARGET_KINDS: tuple[TargetKind, ...] = (
     "image",
     "host",
     "endpoint",
+    "spool",
 )
 
 SECTORS: tuple[Sector, ...] = ("defence", "power", "telecom", "bfsi", "other")

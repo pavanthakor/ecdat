@@ -236,13 +236,18 @@
   `pending_enrichment: true` so an unread field is visibly unread rather than
   reported as `unknown`. Slice 2.
   *Raised: eBPF agent slice 1.*
-- **The agent's observed findings do not reach the store.** `--findings` prints
-  a mapped Finding to stdout and nothing consumes it: the agent is a separate
-  root process, deliberately not an in-process `Scanner`, so there is no path
-  from `observed` into the CBOM or the drift correlator yet. Needs a transport
-  decision (unix socket, spool file, or a `POST /findings` route) and an
-  authentication story, since the producer runs as root and the API has none.
-  *Raised: eBPF agent slice 1.*
+- ~~**The agent's observed findings do not reach the store.**~~ **Resolved** by
+  the spool seam. The agent writes atomic JSON lines into a directory
+  (`--spool`); `scanners/runtime_spool` reads them back as observed Findings
+  through the ordinary registry and Finding contract (`--kind spool`). No
+  network, no credential in a root process: the filesystem is the trust
+  boundary. Ingested files move to `consumed/` so re-scanning cannot
+  double-count, and files that yield nothing valid move to `rejected/` so a bad
+  producer stays visible. **This unblocks the correlator** — all three views can
+  now land in one store, and the cross-view non-merge is proved with real
+  declared, shipped and observed findings.
+  *Raised: eBPF agent slice 1. Resolved: spool seam slice, see
+  [ADR-0010](docs/adr/0010-spool-seam.md).*
 - **Runtime coverage is narrower than "TLS on this host".** A `libssl` uprobe
   cannot see statically linked TLS, Go's `crypto/tls`, GnuTLS, NSS or mbedTLS,
   and needs one attach per distinct libssl build in use. The agent reports that
@@ -277,3 +282,25 @@
   A later slice that watches a long-running service will want a supervised
   attach-then-signal handshake rather than the operator's timing.
   *Raised: eBPF agent slice 1.*
+- **Production transport for observed findings is still a file spool.** ADR-0010
+  chose a directory over authenticated HTTP deliberately: the API has no authn,
+  and a root sensor holding an API credential would undo the privilege split
+  the scan path exists to keep. That reasoning holds for a single host and does
+  not for a fleet -- a distributed deployment needs a real transport, which
+  needs the API's authn story first. Until then the agent and the scanner must
+  share a filesystem.
+  *Raised: spool seam slice. See ADR-0010.*
+- **The spool grows without bound.** `consumed/` and `rejected/` are never
+  pruned, deliberately -- the raw record is the evidence behind an observed
+  finding, and deleting it on ingest would throw that away. But a
+  continuously-running agent will fill a disk. Needs a retention policy (age or
+  size based) and probably compression of `consumed/`.
+  *Raised: spool seam slice.*
+- **Per-process attribution lives in evidence, not in components.**
+  `_drop_position` strips `:pid<N>` for the observed view, so handshakes in two
+  processes merge into one "TLS on host X" component with both occurrences
+  retained. Right for an inventory -- a PID is ephemeral and not a distinct
+  cryptographic artefact -- but a question like "which service negotiated
+  TLS 1.0?" has to be answered from the occurrence list rather than the
+  component list. Revisit when the correlator needs per-service rollup.
+  *Raised: spool seam slice. See ADR-0002 and ADR-0010.*

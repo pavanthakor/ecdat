@@ -28,7 +28,11 @@ __all__ = ["Exposure", "ScanContext", "Scanner", "Sector", "Target", "TargetKind
 
 #: What sort of thing is being scanned. Determines which plugins apply and
 #: which view their findings land in.
-TargetKind = Literal["repo", "directory", "image", "host", "endpoint"]
+#: ``spool`` is a directory of JSON lines the runtime agent left behind, not a
+#: thing to probe. It is a target kind rather than a special case so the
+#: observed view enters the system through the same contract as every other
+#: view -- see ADR-0010.
+TargetKind = Literal["repo", "directory", "image", "host", "endpoint", "spool"]
 
 #: Which part of the estate this target belongs to. Drives the India DST
 #: roadmap's critical-information-infrastructure deadlines, which are earlier
