@@ -1,0 +1,1 @@
+{"comm": "nginx", "libssl_path": "/usr/lib/x86_64-linux-gnu/libssl.so.3", "observed_cipher": "TLS_AES_256_GCM_SHA384", "observed_group": "x25519", "observed_version": "TLSv1.3", "phase": "return", "pid": 2231, "probe": "SSL_do_handshake", "retval": 1, "tid": 2231, "timestamp": 68421339115523}

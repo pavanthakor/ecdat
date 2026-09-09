@@ -375,3 +375,28 @@
   two, so "this endpoint's certificate is RSA-2048 and expires in 2027" is not
   answerable from a config scan alone.
   *Raised: config scanner slice.*
+- **KNOWN GAP: Go and JavaScript source are not scanned.** QuantumBank's
+  gateway signs partner callbacks with ECDSA P-256 and embeds a PEM
+  certificate, in Go. Scanner A is Python-only (ADR-0004), so ECDAT sees
+  neither. Both are planted in the fixture, marked `known_gap: true`, excluded
+  from the recall denominator and PRINTED on every `make kpi` run -- the point
+  being that the gap is visible rather than hidden by omitting the artefact.
+  Go and JS rule packs are the next language slice; the rule-metadata contract
+  in `knowledge/rules/README.md` was written to be language-agnostic for
+  exactly this.
+  *Raised: KPI slice. See [ADR-0014](docs/adr/0014-quantumbank-kpi.md).*
+- **KPI recall is a statement about a fixture we wrote.** 100% on QuantumBank
+  means the pipeline detects what it claims to detect on a realistic-but-small
+  estate. It does NOT mean ECDAT finds all cryptography, and it should never be
+  quoted without the known-gap and unattributable lines that print beside it.
+  A second, independently-authored fixture -- ideally from a real codebase
+  nobody on the project planted artefacts in -- would be a much stronger claim.
+  *Raised: KPI slice.*
+- **Unattributable drift is printed but not solved.** Three of six drifts on
+  QuantumBank are a consequence of the observed view carrying no endpoint: the
+  handshake wildcard-joins every declared endpoint and drifts against ones it
+  did not occur on. They are excluded from precision and printed as
+  UNATTRIBUTABLE rather than scored either way, because neither "correct" nor
+  "invented" is true. The fix is socket-level attribution (local address/port
+  at handshake time) in the probe.
+  *Raised: KPI slice. See ADR-0012 and ADR-0014.*

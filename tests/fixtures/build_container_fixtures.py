@@ -373,3 +373,37 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ---------------------------------------------------------------------------
+# The QuantumBank demo image (ADR-0014)
+# ---------------------------------------------------------------------------
+
+QUANTUMBANK_IMAGE = Path("testdata/quantumbank/images/payments.tar")
+
+#: libssl3 3.0.2 -- the same version ubuntu:22.04 ships, and the CAUSE of the
+#: R1 drift: the payments endpoint declares X25519MLKEM768, and ML-KEM did not
+#: arrive until OpenSSL 3.5.0.
+QUANTUMBANK_DPKG = DPKG_STATUS
+
+
+def build_quantumbank_image(destination: Path = QUANTUMBANK_IMAGE) -> None:
+    """The payments service image: an old libssl, a certificate, and a key."""
+    certificate_pem, key_pem = _self_signed()
+    _docker_save_tar(
+        destination,
+        layers=[
+            {
+                "var/lib/dpkg/status": QUANTUMBANK_DPKG.encode("utf-8"),
+                "usr/lib/x86_64-linux-gnu/libssl.so.3": b"\x7fELF not a real library",
+            },
+            {
+                "etc/ssl/certs/payments.pem": certificate_pem,
+                "etc/ssl/private/payments.key": key_pem,
+            },
+        ],
+        instructions=[
+            "/bin/sh -c #(nop) ADD file:ubuntu-22.04-rootfs in / ",
+            "/bin/sh -c #(nop) COPY dir:tls-material in /etc/ssl ",
+        ],
+    )

@@ -1,0 +1,7 @@
+# QuantumBank bastion. Global policy; no per-endpoint blocks.
+Port 22
+PermitRootLogin no
+KexAlgorithms curve25519-sha256,diffie-hellman-group1-sha1
+Ciphers chacha20-poly1305@openssh.com,aes128-cbc
+MACs hmac-sha2-256
+HostKeyAlgorithms ssh-ed25519,ssh-rsa

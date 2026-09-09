@@ -17,6 +17,7 @@ help:
 	@echo "check      lint + typecheck + test + validate  (what CI runs)"
 	@echo "sign-packs re-sign policy packs with the committed DEV key"
 	@echo "prove-pillar2  end-to-end: eBPF handshake -> spool -> observed CBOM (sudo)"
+	@echo "kpi        score ECDAT against the QuantumBank seeded repo"
 	@echo "serve      run the API on http://127.0.0.1:8000"
 
 install:
@@ -60,3 +61,8 @@ sign-packs:
 # only; the scan half drops back to the invoking user. See ADR-0010.
 prove-pillar2:
 	sudo scripts/prove_pillar2.sh
+
+# The KPI harness: scan QuantumBank, score against its answer key, and print
+# the misses and known gaps alongside the numbers. See ADR-0014.
+kpi:
+	ECDAT_DB=$${ECDAT_DB:-.ecdat-kpi.db} $(PY) -m kpi.harness

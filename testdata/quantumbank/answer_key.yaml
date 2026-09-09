@@ -1,0 +1,299 @@
+# QuantumBank ground truth -- the CONTRACT for the KPI harness (ADR-0014).
+#
+# ---------------------------------------------------------------------------
+# THE RULE THIS FILE EXISTS TO ENFORCE
+# ---------------------------------------------------------------------------
+# Every artefact planted in testdata/quantumbank/ is listed here, INCLUDING the
+# ones ECDAT cannot currently detect. Those carry `known_gap: true`: they are
+# excluded from the recall denominator, and the harness PRINTS them as
+# "known gap" lines every run.
+#
+# The alternative -- quietly leaving undetectable artefacts out of the fixture
+# -- produces a better-looking number by making the test easier, which is the
+# oldest way to lie with a benchmark. A recall figure is only meaningful
+# alongside the list of what it declined to measure.
+#
+# ---------------------------------------------------------------------------
+# SCHEMA
+# ---------------------------------------------------------------------------
+# findings[]:
+#   id                 stable name, used in the miss report
+#   scanner            which scanner should find it (source/config/container/
+#                      runtime-spool)
+#   view               declared | shipped | observed
+#   algorithm          canonical algorithm name as it must appear in the CBOM
+#   locator_contains   substring the evidence locator must contain -- this is
+#                      what ties a finding to the file it was planted in
+#   endpoint           expected ecdat:param:endpoint, or null
+#   count              how many findings this artefact should produce
+#   known_gap          true = we cannot detect this yet; excluded from recall,
+#                      printed every run
+#   note               why, for a known_gap
+#
+# decoys[]: locator substrings. ANY finding from these is a precision failure,
+#           counted rather than ignored.
+#
+# drifts[]:     drift that MUST be found (kind + endpoint + declared/observed)
+# non_drifts[]: agreement cases that must produce NO drift, so invented drift
+#               is measurable rather than merely hoped against.
+
+findings:
+  # ---- SOURCE (Scanner A, Python) --------------------------------------
+  - id: auth-rsa-keygen
+    scanner: source
+    view: declared
+    algorithm: RSA
+    locator_contains: services/auth/tokens.py
+    endpoint: null
+    count: 1
+    known_gap: false
+  - id: auth-jwt-rs256
+    scanner: source
+    view: declared
+    algorithm: RSA
+    locator_contains: services/auth/tokens.py
+    endpoint: null
+    count: 1
+    known_gap: false
+  - id: auth-md5-passwords
+    scanner: source
+    view: declared
+    algorithm: MD5
+    locator_contains: services/auth/passwords.py
+    endpoint: null
+    count: 1
+    known_gap: false
+  - id: auth-os-urandom
+    scanner: source
+    view: declared
+    algorithm: CSPRNG
+    locator_contains: services/auth/passwords.py
+    endpoint: null
+    count: 1
+    known_gap: false
+  - id: auth-aes-cbc
+    scanner: source
+    view: declared
+    algorithm: AES
+    locator_contains: services/auth/vault.py
+    endpoint: null
+    count: 1
+    known_gap: false
+  - id: auth-hardcoded-key
+    scanner: source
+    view: declared
+    algorithm: AES
+    asset_type: key
+    locator_contains: services/auth/vault.py
+    endpoint: null
+    count: 1
+    known_gap: false
+    redacted: true
+
+  # ---- SOURCE, but not in a language we scan ---------------------------
+  - id: gateway-ecdsa-p256
+    scanner: source
+    view: declared
+    algorithm: ECDSA
+    locator_contains: services/gateway/sign.go
+    endpoint: null
+    count: 1
+    known_gap: true
+    note: >-
+      Scanner A is Python-only (ADR-0004). The Go gateway's ECDSA P-256 signing
+      is real crypto in a real service and ECDAT cannot see it. Go/JS rule
+      packs are the next language slice.
+  - id: gateway-embedded-cert
+    scanner: source
+    view: declared
+    algorithm: unknown
+    asset_type: certificate
+    locator_contains: services/gateway/sign.go
+    endpoint: null
+    count: 1
+    known_gap: true
+    note: >-
+      The PEM regex rule is scoped to `languages: [python]`, so an embedded
+      certificate in a .go file is invisible. Same gap as above.
+
+  # ---- CONFIG (endpoint-oriented declared view) ------------------------
+  - id: payments-hybrid-group
+    scanner: config
+    view: declared
+    algorithm: X25519MLKEM768
+    locator_contains: deploy/nginx.conf
+    endpoint: payments.quantumbank.invalid:443
+    count: 1
+    known_gap: false
+  - id: payments-tls13
+    scanner: config
+    view: declared
+    algorithm: TLS
+    asset_type: protocol
+    locator_contains: deploy/nginx.conf
+    endpoint: payments.quantumbank.invalid:443
+    count: 1
+    known_gap: false
+  - id: payments-certificate-ref
+    scanner: config
+    view: declared
+    algorithm: unknown
+    asset_type: certificate
+    locator_contains: deploy/nginx.conf
+    endpoint: payments.quantumbank.invalid:443
+    count: 1
+    known_gap: false
+  - id: legacy-weak-protocols
+    scanner: config
+    view: declared
+    algorithm: TLS
+    asset_type: protocol
+    locator_contains: deploy/nginx.conf
+    endpoint: legacy.quantumbank.invalid:8443
+    count: 1
+    known_gap: false
+  - id: legacy-classical-group
+    scanner: config
+    view: declared
+    algorithm: prime256v1
+    locator_contains: deploy/nginx.conf
+    endpoint: legacy.quantumbank.invalid:8443
+    count: 1
+    known_gap: false
+  - id: bastion-weak-kex
+    scanner: config
+    view: declared
+    algorithm: SSH-KEX
+    locator_contains: deploy/sshd_config
+    endpoint: sshd@quantumbank
+    count: 1
+    known_gap: false
+  - id: openssl-policy-groups
+    scanner: config
+    view: declared
+    algorithm: X25519MLKEM768
+    locator_contains: deploy/openssl.cnf
+    endpoint: openssl@quantumbank
+    count: 1
+    known_gap: false
+  - id: openssl-policy-minproto
+    scanner: config
+    view: declared
+    algorithm: TLS
+    asset_type: protocol
+    locator_contains: deploy/openssl.cnf
+    endpoint: openssl@quantumbank
+    count: 1
+    known_gap: false
+
+  # ---- CONTAINER (shipped) ---------------------------------------------
+  - id: payments-libssl-302
+    scanner: container
+    view: shipped
+    algorithm: OpenSSL
+    locator_contains: var/lib/dpkg/status
+    endpoint: null
+    count: 1
+    known_gap: false
+  - id: payments-shipped-cert
+    scanner: container
+    view: shipped
+    algorithm: RSA
+    asset_type: certificate
+    locator_contains: etc/ssl/certs/payments.pem
+    endpoint: null
+    count: 1
+    known_gap: false
+  - id: payments-shipped-key
+    scanner: container
+    view: shipped
+    algorithm: RSA
+    asset_type: key
+    locator_contains: etc/ssl/private/payments.key
+    endpoint: null
+    count: 1
+    known_gap: false
+    redacted: true
+
+  # ---- OBSERVED (runtime spool) ----------------------------------------
+  - id: observed-tls13
+    scanner: runtime-spool
+    view: observed
+    algorithm: TLS
+    asset_type: protocol
+    locator_contains: "host:"
+    endpoint: null
+    count: 1
+    known_gap: false
+  - id: observed-aes256-suite
+    scanner: runtime-spool
+    view: observed
+    algorithm: TLS_AES_256_GCM_SHA384
+    locator_contains: "host:"
+    endpoint: null
+    count: 1
+    known_gap: false
+  - id: observed-classical-group
+    scanner: runtime-spool
+    view: observed
+    algorithm: x25519
+    locator_contains: "host:"
+    endpoint: null
+    count: 1
+    known_gap: false
+
+decoys:
+  - services/auth/decoys.py
+  - deploy/decoy.conf
+
+drifts:
+  - id: r1-payments-shipped-cannot
+    kind: shipped-cannot-do-declared
+    endpoint: payments.quantumbank.invalid:443
+    declared: X25519MLKEM768
+    observed_contains: "3.0.2"
+  - id: r2-payments-classical
+    kind: declared-pqc-observed-classical
+    endpoint: payments.quantumbank.invalid:443
+    declared: X25519MLKEM768
+    observed_contains: x25519
+  # The system-wide OpenSSL policy asks for the same hybrid group, and the
+  # shipped libssl cannot provide it either. This one was NOT in the first
+  # draft of this file -- it was written down as an agreement case, the harness
+  # reported it as invented drift, and the tool turned out to be right. Left
+  # here as a reminder that the answer key is a claim like any other.
+  - id: r1-openssl-policy-shipped-cannot
+    kind: shipped-cannot-do-declared
+    endpoint: openssl@quantumbank
+    declared: X25519MLKEM768
+    observed_contains: "3.0.2"
+
+# Agreement cases: any drift attributed to these is INVENTED and is a
+# precision failure.
+non_drifts:
+  - endpoint: sshd@quantumbank
+    why: >-
+      SSH key-exchange policy has no TLS declaration for a handshake to
+      contradict, and its scope marker is deliberately not endpoint-shaped so
+      it cannot be joined against one (ADR-0013).
+
+# Drift that is neither expected nor invented: a KNOWN CONSEQUENCE of the
+# observed view carrying no endpoint (ADR-0012). A uprobe sees a process, not a
+# listening socket, so an observed handshake wildcard-joins every declared
+# endpoint in the system -- and produces plausible but unattributable drift
+# against the ones it did not actually occur on.
+#
+# Printed every run and excluded from precision, for the same reason known_gap
+# findings are: scoring them as correct would overstate the tool, and scoring
+# them as invented would understate it. Neither is true. The fix is
+# socket-level attribution in the probe.
+attribution_limited:
+  - endpoint: legacy.quantumbank.invalid:8443
+    why: >-
+      the observed handshake cannot be attributed to a listener, so its
+      AES-256 suite is compared against the legacy endpoint's cipher list too
+  - endpoint: openssl@quantumbank
+    kind: declared-pqc-observed-classical
+    why: >-
+      the same handshake is compared against the system-wide policy, which is
+      a scope rather than an endpoint
