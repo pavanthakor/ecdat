@@ -123,6 +123,58 @@ JSON line looks like.
 **The probe is unproven until a captured event is pasted back.** This ADR's
 status says so, and nothing in the repo claims the probe works.
 
+## What the first attach proof found
+
+The manual proof got as far as bcc compiling the program, which already
+established that the loader, the privilege path and the attach machinery work.
+It then failed, and the failures are worth recording because two of the three
+were invisible to every root-free test.
+
+**1. `TASK_COMM_LEN` is not predefined.**
+
+```
+/virtual/main.c:17:15: error: use of undeclared identifier 'TASK_COMM_LEN'
+    char comm[TASK_COMM_LEN];
+```
+
+The macro is supplied by some bcc/kernel-header combinations and not others.
+The probe now writes `char comm[16]` as a literal — 16 is the documented
+contract of `bpf_get_current_comm`, not an assumption about the kernel — and a
+test asserts the macro is never named again. **Only a real compile could have
+caught this**, which is precisely why the manual proof exists.
+
+**2. `python3 agent/agent.py` cannot import its own package.**
+
+Running a file inside a package puts the package *directory* on `sys.path`
+rather than its parent, so `from agent.probe_ssl import ...` fails before the
+kernel is ever reached. Fixed by documenting `python3 -m agent.agent`, not by
+adding a `sys.path` shim: a shim would hide the same mistake everywhere else in
+the repo, and the `-m` form is the one that is correct anyway.
+
+**3. bcc and pydantic live in different interpreters.**
+
+bcc is a distro package in the system Python; this repo's dependencies are in a
+venv. The agent must run where bcc is, so it must not need anything else.
+`agent.to_finding` — and through it pydantic — is now imported lazily and only
+under `--findings`, so the attach proof itself needs bcc and nothing more. The
+production CO-RE agent has no Python and removes the clash entirely.
+
+**4. A bug the proof would have hit next, found by reading bcc instead.**
+
+The event decoder used `ctypes.cast(data, POINTER(table.event_data_type))`.
+`event_data_type` does not exist in bcc 0.35; the documented API is
+`table.event(data)`. That would have raised `AttributeError` on the first
+captured event — *after* the operator had fixed the compile error and re-run.
+Found by reading the installed bcc's source rather than by another round trip
+through the human, and pinned by two tests: one static, one that checks the
+claim against the installed bcc when it is visible.
+
+The pattern across all four: root-free tests cover the mapping and the
+invocation surface well, and cannot say anything about whether kernel C
+compiles or whether a third-party Python API exists. Reading the dependency is
+the cheapest substitute for running it; the manual proof is the only thing that
+settles the rest.
+
 ## Consequences
 
 * Pillar 2's central technical risk is isolated to one command a human runs

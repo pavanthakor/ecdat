@@ -20,9 +20,23 @@ and run in CI with no bcc and no privileges.
 
 ---
 
-## Before you start
+## Before you start — two invocation rules that bit the first run
 
-`bcc` lives in the **system** Python, not in this repo's `.venv`:
+**1. Run it as a module, from the repository root.**
+
+```bash
+cd /home/pavan/projects/ecdat
+sudo python3 -m agent.agent ...          # correct
+sudo python3 agent/agent.py ...          # FAILS
+```
+
+Running a file that lives inside a package puts the package *directory* on
+`sys.path`, not its parent, so this module's own
+`from agent.probe_ssl import ...` cannot resolve. The `-m` form is the fix; no
+`sys.path` shim was added, because a shim would paper over the same mistake
+everywhere else in the repo.
+
+**2. Use the system `python3`, which is where `bcc` lives.**
 
 ```bash
 python3 -c "import bcc; print(bcc.__version__)"   # expect 0.35.0
@@ -31,8 +45,30 @@ python3 -c "import bcc; print(bcc.__version__)"   # expect 0.35.0
 If that fails: `sudo apt install python3-bpfcc` (Debian/Ubuntu) or
 `sudo dnf install bcc-tools python3-bcc` (Fedora).
 
-**Run the agent with `sudo python3`, never with `.venv/bin/python`** — the venv
-has no bcc.
+**Never `.venv/bin/python`** — the venv has no bcc.
+
+### The interpreter clash, and how to avoid it
+
+`bcc` is installed by the distro into the **system** interpreter. This repo's
+dependencies (`pydantic` and the rest) live in the **venv**. Those are two
+different Pythons, and the agent has to run in the one that has bcc.
+
+The attach proof therefore needs **bcc only**. `agent/to_finding.py` — the
+Finding mapping, and the only thing that touches pydantic — is imported lazily
+and *only* when you pass `--findings`. So:
+
+| Invocation | Needs |
+|---|---|
+| `--json` (the attach proof) | bcc |
+| `--findings` | bcc **and** pydantic, in the same interpreter |
+
+If you want `--findings` on the system interpreter:
+`sudo python3 -m pip install pydantic` (or run it in a venv created with
+`--system-site-packages` so it can see bcc).
+
+This clash is an artefact of bcc being a distro package. The production agent
+is a self-contained libbpf CO-RE binary with no Python at all, which removes it
+entirely — punchlisted.
 
 ---
 
@@ -113,7 +149,7 @@ nm -D --defined-only /usr/lib/x86_64-linux-gnu/libssl.so.3 | grep SSL_do_handsha
 
 ```bash
 cd /home/pavan/projects/ecdat
-sudo python3 agent/agent.py \
+sudo python3 -m agent.agent \
   --libssl-path /usr/lib/x86_64-linux-gnu/libssl.so.3 \
   --once --json
 ```
@@ -201,6 +237,10 @@ in this repo claims otherwise.
   which plaintext or key material could reach an event. `tests/test_agent.py`
   asserts the absence of `bpf_probe_write_user`, `bpf_override_return` and
   `bpf_send_signal` in the BPF source.
+* **Two Pythons.** bcc is a distro package in the system interpreter; this
+  repo's deps are in a venv. The attach proof needs only bcc, but anything that
+  builds a `Finding` needs pydantic in that same interpreter. The production
+  CO-RE agent has no Python and no such clash.
 * **Not wired into the store yet.** The agent is a separate root process, not an
   in-process `Scanner`, so it is deliberately **not** in `core/registry.py`.
   Feeding `observed` findings into the store and the drift correlator is a
@@ -210,7 +250,10 @@ in this repo claims otherwise.
 
 | Symptom | Cause |
 |---|---|
-| `bcc is not importable` | Running under the venv. Use `sudo python3`. |
+| `No module named 'agent'` | Ran `python3 agent/agent.py`. Use `python3 -m agent.agent` from the repo root. |
+| `bcc is not importable` | Running under the venv. Use the system `sudo python3`. |
+| `No module named 'pydantic'` with `--findings` | pydantic is venv-only. Drop `--findings`, or install it into the system interpreter. |
+| `use of undeclared identifier 'TASK_COMM_LEN'` | Fixed — the probe now uses a literal `char comm[16]`. Pull the latest commit. |
 | `requires root` | Missing `sudo`. |
 | `is not an exported dynamic symbol` | Wrong file, or statically linked TLS. |
 | `BPF program failed to compile` | Kernel headers missing — install `linux-headers-$(uname -r)`. |

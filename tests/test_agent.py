@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -341,3 +342,125 @@ def test_a_library_without_the_symbol_is_rejected() -> None:
 
     with pytest.raises(AgentError, match="SSL_do_handshake"):
         check_symbol(libc)
+
+
+# --------------------------------------------------------------------------
+# Regressions from the first manual attach proof on the real VM.
+# kernel 7.0 / bcc 0.35 -- see ADR-0009.
+# --------------------------------------------------------------------------
+
+
+def test_the_probe_does_not_name_task_comm_len() -> None:
+    """bcc 0.35 on kernel 7.0 does not predefine TASK_COMM_LEN.
+
+    The first attach proof died here:
+        /virtual/main.c:17:15: error: use of undeclared identifier
+        'TASK_COMM_LEN'
+    The macro is supplied by some bcc/kernel-header combinations and not by
+    others, so relying on it makes the probe compile on the author's assumption
+    rather than on the operator's kernel.
+    """
+    from agent.probe_ssl import PROBE_SOURCE
+
+    assert "TASK_COMM_LEN" not in PROBE_SOURCE
+
+
+def test_the_comm_field_uses_the_canonical_literal_size() -> None:
+    """16 is the documented contract of bpf_get_current_comm."""
+    from agent.probe_ssl import COMM_LEN, PROBE_SOURCE
+
+    assert COMM_LEN == 16
+    assert "char comm[16]" in PROBE_SOURCE
+    assert "bpf_get_current_comm(&event.comm, sizeof(event.comm))" in PROBE_SOURCE
+
+
+def test_pydantic_is_not_imported_at_module_scope() -> None:
+    """The agent must run on the SYSTEM python, where bcc lives.
+
+    pydantic is a venv dependency of this repo, not of the system interpreter,
+    and the attach proof needs neither it nor the Finding mapping -- only
+    --findings does. Importing it at module scope makes the minimal proof
+    depend on a second, unrelated environment being right.
+    """
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import agent.agent, sys; print('pydantic' in sys.modules)",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parent.parent,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "False", (
+        "importing agent.agent pulled in pydantic; keep the Finding mapping "
+        "behind a lazy import so --json works on the system interpreter"
+    )
+
+
+def test_the_root_hint_tells_the_operator_to_use_the_module_form() -> None:
+    """`python3 agent/agent.py` cannot resolve `from agent.probe_ssl import ...`.
+
+    Running a file inside a package puts the package DIRECTORY on sys.path, not
+    its parent, so the package's own absolute imports fail. The hint must not
+    send an operator to the invocation that does not work.
+    """
+    from agent.agent import AgentError, check_privileges
+
+    if os.geteuid() == 0:
+        pytest.skip("running as root; the privilege hint is not reached")
+
+    with pytest.raises(AgentError) as caught:
+        check_privileges()
+
+    message = str(caught.value)
+    assert "-m agent.agent" in message
+    assert "python3 agent/agent.py" not in message
+
+
+def test_the_agent_uses_bccs_documented_event_decoder() -> None:
+    """bcc's PerfEventArray exposes `.event(data)`, not `.event_data_type`.
+
+    The first draft used `ctypes.cast(data, POINTER(table.event_data_type))`,
+    which does not exist in bcc 0.35 and would have raised AttributeError on
+    the very first captured event -- after the operator had already fixed the
+    compile error and re-run. Found by reading the installed bcc rather than by
+    another round trip through the human.
+    """
+    source = (Path(__file__).resolve().parent.parent / "agent" / "agent.py").read_text()
+
+    assert "event_data_type" not in source
+    assert ".event(data)" in source
+
+
+def test_bcc_actually_exposes_that_decoder() -> None:
+    """Check the claim above against the bcc that is installed, if any.
+
+    bcc lives in the system interpreter, so this is skipped when the test run
+    cannot see it -- which is the venv, and CI.
+    """
+    import subprocess
+
+    probe = (
+        "import bcc.table as t; "
+        "print(hasattr(t.PerfEventArray, 'event'), "
+        "hasattr(t.PerfEventArray, 'event_data_type'))"
+    )
+    result = subprocess.run(  # noqa: S603
+        ["/usr/bin/python3", "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip("bcc is not importable from /usr/bin/python3")
+
+    assert result.stdout.strip() == "True False"

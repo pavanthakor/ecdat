@@ -39,6 +39,18 @@ __all__ = ["EVENT_STRUCT_FIELDS", "PROBE_SOURCE", "SYMBOL", "VERSION_LEN"]
 #: builds apply, and attach by name works without debug symbols.
 SYMBOL = "SSL_do_handshake"
 
+#: The size ``bpf_get_current_comm`` writes. This is the helper's documented
+#: contract, not an assumption about the kernel: the comm buffer has been 16
+#: bytes since the helper existed, and bcc's own examples hard-code it.
+#:
+#: Written as a literal rather than as ``TASK_COMM_LEN`` deliberately. The first
+#: manual attach proof failed with
+#:     /virtual/main.c:17:15: error: use of undeclared identifier 'TASK_COMM_LEN'
+#: on kernel 7.0 with bcc 0.35. That macro is predefined by some bcc/header
+#: combinations and not others, so naming it makes the probe compile against
+#: the author's environment rather than the operator's.
+COMM_LEN = 16
+
 #: Sized to hold "TLSv1.3" and a JOSE-style suite name with room to spare.
 #: Zero-filled this slice; see the module docstring.
 VERSION_LEN = 24
@@ -75,6 +87,9 @@ PHASE_RETURN = 1
 PROBE_SOURCE = f"""
 #include <uapi/linux/ptrace.h>
 
+/* Sizes are literals substituted from Python, and comm[] is written as a bare
+ * 16 below. Nothing here depends on a macro bcc may or may not predefine --
+ * see COMM_LEN in this module for why. */
 #define VERSION_LEN {VERSION_LEN}
 #define CIPHER_LEN  {CIPHER_LEN}
 
@@ -88,7 +103,7 @@ struct handshake_event_t {{
     u32 phase;            /* PHASE_ENTRY | PHASE_RETURN         */
     s32 retval;           /* SSL_do_handshake result; entry = 0 */
     u64 ssl_ptr;          /* opaque correlation handle, never dereferenced */
-    char comm[TASK_COMM_LEN];
+    char comm[16];               /* bpf_get_current_comm's documented size */
     char version[VERSION_LEN];   /* pending enrichment: zero-filled */
     char cipher[CIPHER_LEN];     /* pending enrichment: zero-filled */
 }};
@@ -104,8 +119,9 @@ static inline int emit(struct pt_regs *ctx, u32 phase, s32 retval, u64 ssl_ptr)
     u64 id = bpf_get_current_pid_tgid();
     u32 tgid = id >> 32;
 
-    /* TARGET_PID_FILTER is substituted by the loader: either nothing, or a
-     * guard that drops every event from other processes. */
+    /* The loader substitutes the placeholder below with either nothing or a
+     * guard dropping every event from other processes. Written on its own line
+     * so the substitution cannot touch this comment. */
     TARGET_PID_FILTER
 
     struct handshake_event_t event = {{}};

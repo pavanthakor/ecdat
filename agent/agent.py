@@ -1,15 +1,28 @@
 """The runtime agent: attach one uprobe, drain events, print JSON lines.
 
-    sudo python3 agent/agent.py --libssl-path /usr/lib/.../libssl.so.3 --once
+    sudo python3 -m agent.agent --libssl-path /usr/lib/.../libssl.so.3 --once
+
+Run it with ``-m`` from the repository root. ``python3 agent/agent.py`` puts the
+``agent/`` DIRECTORY on ``sys.path`` rather than its parent, so this module's
+own ``from agent.probe_ssl import ...`` cannot resolve -- which is how the first
+manual attach proof failed before it reached the kernel.
 
 Read the walkthrough in ``agent/README.md``; this module is the loader it
 drives. Slice 1 proves attach and delivery on a real handshake (ADR-0009).
 
-**bcc is imported lazily, inside the attach path.** It lives in the system
-Python, not in this project's venv, and it needs root to do anything. Importing
-it at module scope would make ``agent/to_finding.py`` -- the part with logic
-worth testing -- unimportable in CI and unimportable in the venv. A test asserts
-the import has not escaped.
+**Two imports are deliberately lazy, for opposite reasons.**
+
+``bcc`` lives in the system Python, not in this project's venv, and needs root.
+Importing it at module scope would make ``agent/to_finding.py`` -- the part with
+logic worth testing -- unimportable in CI and in the venv.
+
+``agent.to_finding`` (and through it pydantic) is imported only when
+``--findings`` is passed. pydantic is a venv dependency of this repo and not of
+the system interpreter where bcc lives, so importing it at module scope would
+make the minimal attach proof depend on a second, unrelated environment being
+right. It is not: the attach proof needs bcc and nothing else.
+
+Tests assert both boundaries hold.
 
 **Every failure is a sentence, not a traceback.** An operator running this under
 sudo for the first time will hit a missing symbol, a missing library or a
@@ -24,7 +37,6 @@ payload, and never opens a socket.
 from __future__ import annotations
 
 import argparse
-import ctypes
 import json
 import os
 import shutil
@@ -35,7 +47,6 @@ from pathlib import Path
 from typing import Any
 
 from agent.probe_ssl import SYMBOL, build_source
-from agent.to_finding import event_to_finding
 
 __all__ = ["AgentError", "build_parser", "main", "resolve_libssl"]
 
@@ -130,8 +141,8 @@ def check_privileges() -> None:
     if os.geteuid() != 0:
         raise AgentError(
             "attaching an eBPF probe requires root.\n"
-            f"  Re-run with:  sudo python3 {sys.argv[0]} "
-            "--libssl-path <path> --once"
+            "  Re-run from the repository root with:\n"
+            "    sudo python3 -m agent.agent --libssl-path <path> --once"
         )
 
 
@@ -256,24 +267,29 @@ def run(args: argparse.Namespace) -> int:
 
     seen = 0
 
+    events_table = bpf["handshake_events"]
+
     def handle(_cpu: int, data: Any, _size: int) -> None:
         nonlocal seen
-        raw_event = ctypes.cast(
-            data, ctypes.POINTER(bpf["handshake_events"].event_data_type)
-        ).contents
-        event = _decode(raw_event, str(libssl))
+        # bcc's documented decoder: it derives the ctypes struct from the BPF C
+        # so the layout is never restated in Python and cannot drift from it.
+        event = _decode(events_table.event(data), str(libssl))
         seen += 1
 
         if args.json:
             print(_event_line(event), flush=True)
 
-        finding = event_to_finding(event)
-        if finding is None:
-            return
         if args.findings:
-            print(finding.model_dump_json(), flush=True)
+            # Imported here, not at module scope: this is the only code path
+            # that needs pydantic, and the system interpreter that has bcc
+            # usually does not have it.
+            from agent.to_finding import event_to_finding
 
-    bpf["handshake_events"].open_perf_buffer(handle)
+            finding = event_to_finding(event)
+            if finding is not None:
+                print(finding.model_dump_json(), flush=True)
+
+    events_table.open_perf_buffer(handle)
 
     try:
         while True:
@@ -325,7 +341,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--findings",
         action="store_true",
-        help="also print each event mapped to an ECDAT Finding",
+        help=(
+            "also print each event mapped to an ECDAT Finding. Needs pydantic "
+            "in the SAME interpreter as bcc; plain --json does not"
+        ),
     )
     return parser
 

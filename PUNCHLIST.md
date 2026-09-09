@@ -249,3 +249,13 @@
   failure -- but an `observed` view with silent gaps will be read as complete
   unless the CBOM records what was and was not probed.
   *Raised: eBPF agent slice 1.*
+- **The agent needs bcc and pydantic in the same interpreter for `--findings`.**
+  bcc is a distro package in the system Python; this repo's dependencies are in
+  a venv. The attach proof itself needs only bcc -- `agent.to_finding` is
+  imported lazily and only under `--findings` -- but anything that builds a
+  `Finding` needs both, which today means `sudo python3 -m pip install pydantic`
+  into the system interpreter or a `--system-site-packages` venv. This is an
+  artefact of the bcc-first decision in ADR-0009; the production libbpf CO-RE
+  agent is a self-contained binary with no Python and removes the clash
+  entirely, along with the runtime kernel-header dependency.
+  *Raised: eBPF agent slice 1, after the first manual attach proof.*
