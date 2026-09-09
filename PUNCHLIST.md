@@ -220,3 +220,32 @@
   Belongs with the same store migration as `scanners_ran` and the verdict
   summary.
   *Raised: mosca/DST/NIST slice.*
+- **The eBPF probe is UNPROVEN until a human runs it.** `agent/probe_ssl.py`
+  and `agent/agent.py` are written, lint-clean, type-clean and covered by
+  root-free tests, but no uprobe has been attached and no event captured --
+  CLAUDE.md reserves sudo for the human, so the attach proof is a manual step
+  documented in `agent/README.md`. Nothing in the repo claims the probe works.
+  Until a captured JSON event is pasted back, treat Pillar 2 as de-risked in
+  design only.
+  *Raised: eBPF agent slice 1. See [ADR-0009](docs/adr/0009-ebpf-agent-slice1.md).*
+- **Negotiated version and cipher are not read (pending enrichment).** The
+  probe captures the handshake fact; `SSL_do_handshake(SSL *s)` hands over an
+  opaque, version-dependent struct, and reading a version out of it needs
+  hard-coded offsets or a second probe on `SSL_get_version`. Findings carry
+  `pending_enrichment: true` so an unread field is visibly unread rather than
+  reported as `unknown`. Slice 2.
+  *Raised: eBPF agent slice 1.*
+- **The agent's observed findings do not reach the store.** `--findings` prints
+  a mapped Finding to stdout and nothing consumes it: the agent is a separate
+  root process, deliberately not an in-process `Scanner`, so there is no path
+  from `observed` into the CBOM or the drift correlator yet. Needs a transport
+  decision (unix socket, spool file, or a `POST /findings` route) and an
+  authentication story, since the producer runs as root and the API has none.
+  *Raised: eBPF agent slice 1.*
+- **Runtime coverage is narrower than "TLS on this host".** A `libssl` uprobe
+  cannot see statically linked TLS, Go's `crypto/tls`, GnuTLS, NSS or mbedTLS,
+  and needs one attach per distinct libssl build in use. The agent reports that
+  it cannot attach rather than reporting nothing found, which is the honest
+  failure -- but an `observed` view with silent gaps will be read as complete
+  unless the CBOM records what was and was not probed.
+  *Raised: eBPF agent slice 1.*

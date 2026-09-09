@@ -28,6 +28,13 @@ enable_error_code = [
 module = "tests.*"
 disallow_untyped_decorators = false
 
+# bcc ships no type stubs, and it lives in the SYSTEM python rather than this
+# venv -- the agent imports it lazily so everything else stays testable without
+# it (ADR-0009). mypy cannot see it here and should not pretend to.
+[[tool.mypy.overrides]]
+module = "bcc.*"
+ignore_missing_imports = true
+
 [tool.ruff]
 target-version = "py311"
 line-length = 88

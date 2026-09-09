@@ -29,7 +29,7 @@ format:
 	$(PY) -m ruff format .
 
 typecheck:
-	$(PY) -m mypy core api scanners policy cli.py
+	$(PY) -m mypy core api scanners policy agent cli.py
 	$(PY) -m mypy tests
 
 test:
