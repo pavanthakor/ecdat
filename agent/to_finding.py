@@ -28,15 +28,77 @@ from typing import Any
 from core.logs import get_logger
 from core.schema import AssetType, Evidence, Finding, Occurrence, Usage, View
 
-__all__ = ["PENDING_ENRICHMENT", "PROBE_NAME", "event_to_finding"]
+__all__ = [
+    "ENRICHMENT_FULL",
+    "ENRICHMENT_NONE",
+    "ENRICHMENT_PARTIAL",
+    "PENDING_ENRICHMENT",
+    "PROBE_NAME",
+    "event_to_finding",
+    "event_to_findings",
+]
 
 _log = get_logger("agent.mapping")
 
 PROBE_NAME = "SSL_do_handshake"
 
 #: Marks a finding whose enrichment fields were never read, as opposed to read
-#: and found empty. Slice 2 removes it by actually reading them.
+#: and found empty.
 PENDING_ENRICHMENT = "pending_enrichment"
+
+#: How much of the negotiated detail was actually read. Written onto every
+#: observed finding, because "we did not read it" and "there was nothing to
+#: read" are different claims and a reader must be able to tell them apart.
+ENRICHMENT_FULL = "full"
+ENRICHMENT_PARTIAL = "partial"
+ENRICHMENT_NONE = "none"
+
+#: A negotiated value longer than this is a bad read, not a long name. The
+#: longest real TLS suite name is around 45 characters.
+_MAX_ENRICHMENT_LEN = 96
+
+#: Substrings that identify the symmetric primitive inside a TLS suite name.
+#: Deliberately a short, explicit table: guessing a primitive from a name we do
+#: not recognise would be exactly the invention this module refuses to make.
+_SUITE_PRIMITIVES: tuple[tuple[str, str], ...] = (
+    ("CHACHA20", "stream-cipher"),
+    ("AES", "block-cipher"),
+    ("CAMELLIA", "block-cipher"),
+    ("ARIA", "block-cipher"),
+    ("3DES", "block-cipher"),
+    ("DES", "block-cipher"),
+    ("RC4", "stream-cipher"),
+    ("NULL", "unknown"),
+)
+
+#: Post-quantum names that appear inside a HYBRID group label. A group carrying
+#: one of these is doing classical AND post-quantum key agreement together,
+#: which is the state a migration is aiming for -- and the thing the correlator
+#: compares a declared intent against.
+_PQ_GROUP_MARKERS = ("MLKEM", "ML-KEM", "KYBER", "FRODO", "BIKE", "HQC")
+
+
+def _clean_enrichment(value: Any, field: str) -> tuple[str | None, str | None]:
+    """``(value, reason-it-was-refused)``. Never guesses, never raises.
+
+    A value read from the wrong address is bytes, and bytes are not a cipher
+    name. Anything non-printable, over-long, or of the wrong type is refused
+    with a reason rather than passed on to be believed.
+    """
+    if value is None:
+        return None, None
+    if not isinstance(value, str):
+        return None, f"{field} was {type(value).__name__}, expected a string"
+
+    text = value.split("\x00", 1)[0].strip()
+    if not text:
+        return None, f"{field} was empty"
+    if len(text) > _MAX_ENRICHMENT_LEN:
+        return None, f"{field} was {len(text)} characters; a bad read, not a name"
+    if not all(character in _PRINTABLE for character in text):
+        return None, f"{field} contained non-printable bytes; a bad read"
+    return text, None
+
 
 _VIEW: View = "observed"
 
@@ -103,100 +165,25 @@ def _pid(value: Any) -> int | None:
     return value
 
 
-def event_to_finding(event: Any, *, hostname: str | None = None) -> Finding | None:
-    """Map one probe event to an observed Finding, or None if unusable.
-
-    ``event`` is a decoded probe record -- nominally ``dict[str, Any]``, typed
-    ``Any`` because it arrives from a kernel perf buffer and establishing that
-    it really is a well-formed dict is this function's job, not its caller's
-    precondition. Typing it as a dict would let mypy delete the very check the
-    garbage-event tests exercise.
-
-    Returns ``None`` -- never raises -- for an event that cannot be trusted, and
-    logs why. The caller drains a kernel buffer in a loop; one bad record must
-    cost one record, not the agent.
-
-    ``hostname`` is injectable so the mapping stays deterministic under test;
-    it defaults to this host.
-    """
-    if not isinstance(event, dict):
-        _skip(f"event is {type(event).__name__}, expected a dict")
-        return None
-
-    pid = _pid(event.get("pid"))
-    if pid is None:
-        _skip(
-            f"pid {event.get('pid')!r} is not a plausible process id",
-            field="pid",
-        )
-        return None
-
-    if "comm" not in event:
-        _skip("comm is absent; the event struct was not fully read", field="comm")
-        return None
-
-    comm = _text(event.get("comm"), "comm")
-    if comm is None:
-        return None
-    if not any(character in _PRINTABLE for character in comm):
-        # Not a strange process name -- a misread struct. Dropping the whole
-        # event is right: if comm is garbage, the other fields were read from
-        # the same bytes and have no better claim to being correct.
-        _skip(
-            "comm contains no printable characters; the event struct looks misread",
-            field="comm",
-        )
-        return None
-
-    # Enrichment fields, for when slice 2 fills them in.
-    #
-    # Two different kinds of "nothing" have to stay apart here. A field of the
-    # WRONG TYPE means the event cannot be trusted and the whole thing is
-    # dropped. A field that is absent or EMPTY is the probe's zero-filled C
-    # array -- not read, which is exactly what slice 1 expects, and not a
-    # reason to discard a perfectly good handshake observation.
-    enriched: dict[str, str | None] = {}
-    for field in ("observed_version", "observed_cipher"):
-        raw = event.get(field)
-        if raw is not None and not isinstance(raw, str | bytes):
-            _skip(f"{field} is {type(raw).__name__}, expected a string", field=field)
-            return None
-        enriched[field] = _text(raw, field) or None
-
-    version = enriched["observed_version"]
-    cipher = enriched["observed_cipher"]
-
-    host = hostname if hostname is not None else socket.gethostname()
-    libssl_path = _text(event.get("libssl_path"), "libssl_path") or "unknown"
-
-    params: dict[str, Any] = {}
-    asset_type: AssetType = "protocol"
-    algorithm = "TLS"
-    usage: Usage = "unknown"
-
-    if version is not None:
-        params["version"] = version
-    if cipher is not None:
-        # A negotiated suite names concrete primitives, so it is an algorithm
-        # asset rather than a bare protocol observation.
-        asset_type = "algorithm"
-        algorithm = cipher
-        params["cipher_suite"] = cipher
-        usage = "key-exchange"
-    if version is None and cipher is None:
-        params[PENDING_ENRICHMENT] = True
-
-    detail = (
-        f"probe={PROBE_NAME} "
-        f"observed_version={version or 'pending'} "
-        f"observed_cipher={cipher or 'pending'}"
-    )
-
+def _finding(
+    *,
+    asset_type: AssetType,
+    primitive: str,
+    algorithm: str,
+    params: dict[str, Any],
+    usage: Usage,
+    host: str,
+    pid: int,
+    detail: str,
+    snippet: str,
+    raw: dict[str, Any],
+) -> Finding:
+    """One observed artefact. All artefacts from one handshake share a locator."""
     return Finding(
         scanner_id="runtime",
         view=_VIEW,
         asset_type=asset_type,
-        primitive="unknown",
+        primitive=primitive,  # type: ignore[arg-type]
         algorithm=algorithm,
         params=params,
         usage=usage,
@@ -209,21 +196,229 @@ def event_to_finding(event: Any, *, hostname: str | None = None) -> Finding | No
                     view=_VIEW,
                     locator=f"host:{host}:pid{pid}",
                     detail=detail,
-                    # Never a payload: the probe reads none, and there is no
-                    # code path here by which one could arrive.
-                    snippet=f"{comm} via {libssl_path}",
+                    # Never a payload: the probe reads no plaintext, and there
+                    # is no code path here by which one could arrive.
+                    snippet=snippet,
                 )
             ]
         ),
-        # The handshake itself was directly observed, so the claim "a TLS
-        # handshake happened here" is certain. The uncertainty in this slice is
-        # about what was NOT read, and that is carried by pending_enrichment
-        # rather than by discounting a fact we actually saw.
+        # What was seen was directly observed. The uncertainty is about what was
+        # NOT read, and that is carried by `enrichment` rather than by
+        # discounting a fact we actually saw.
         confidence=1.0,
-        raw={
-            "probe": PROBE_NAME,
-            "phase": _text(event.get("phase"), "phase") or "unknown",
-            "comm": comm,
-            "libssl_path": libssl_path,
-        },
+        raw=raw,
     )
+
+
+def _suite_primitive(suite: str) -> str:
+    upper = suite.upper()
+    for marker, primitive in _SUITE_PRIMITIVES:
+        if marker in upper:
+            return primitive
+    # Recognised as a suite, but not as one whose primitive we know. Saying
+    # "unknown" is the honest answer; picking the most likely one is not.
+    return "unknown"
+
+
+def event_to_findings(event: Any, *, hostname: str | None = None) -> list[Finding]:
+    """Every artefact one observed handshake reveals.
+
+    A TLS handshake negotiates three separate cryptographic facts, and each is
+    its own artefact in the CBOM:
+
+    * the **protocol version** -- always emitted, because the handshake itself
+      is the observation;
+    * the **cipher suite** -- a symmetric artefact, emitted only when read;
+    * the **key-exchange group** -- a key-agreement artefact, emitted only when
+      read. This is the one the correlator's drift beat turns on: a repo that
+      declares a hybrid post-quantum group against a process observed
+      negotiating a classical one.
+
+    Anything not cleanly readable is ABSENT and the reason is recorded. There
+    is no code path here that produces a value we did not read.
+
+    Returns ``[]`` -- never raises -- for an event that cannot be trusted at
+    all, and logs why. The caller drains a kernel buffer in a loop; one bad
+    record must cost one record, not the agent.
+    """
+    if not isinstance(event, dict):
+        _skip(f"event is {type(event).__name__}, expected a dict")
+        return []
+
+    pid = _pid(event.get("pid"))
+    if pid is None:
+        _skip(f"pid {event.get('pid')!r} is not a plausible process id", field="pid")
+        return []
+
+    if "comm" not in event:
+        _skip("comm is absent; the event struct was not fully read", field="comm")
+        return []
+    comm = _text(event.get("comm"), "comm")
+    if comm is None:
+        return []
+    if not any(character in _PRINTABLE for character in comm):
+        _skip(
+            "comm contains no printable characters; the event struct looks misread",
+            field="comm",
+        )
+        return []
+
+    host = hostname if hostname is not None else socket.gethostname()
+    libssl_path = _text(event.get("libssl_path"), "libssl_path") or "unknown"
+    phase = _text(event.get("phase"), "phase") or "unknown"
+    retval = event.get("retval")
+
+    # Nothing is negotiated at entry, and nothing is agreed when the handshake
+    # failed. Reporting a suite for either would be a claim the wire does not
+    # support.
+    negotiated = phase == "return" and retval == 1
+    reasons: list[str] = []
+    if not negotiated:
+        reasons.append(
+            "handshake had not completed successfully; nothing was negotiated"
+            if phase != "return"
+            else f"handshake returned {retval!r}; nothing was negotiated"
+        )
+
+    values: dict[str, str | None] = {}
+    for field in ("observed_version", "observed_cipher", "observed_group"):
+        raw_value = event.get(field) if negotiated else None
+        cleaned, reason = _clean_enrichment(raw_value, field)
+        if reason is not None and raw_value is not None:
+            # A wrong-TYPE field means the record itself is untrustworthy; a
+            # merely unreadable one is an honest gap.
+            if not isinstance(raw_value, str):
+                _skip(reason, field=field)
+                return []
+            reasons.append(reason)
+        values[field] = cleaned
+
+    version = values["observed_version"]
+    suite = values["observed_cipher"]
+    group = values["observed_group"]
+
+    supplied_reason = _text(event.get("enrichment_reason"), "enrichment_reason")
+    if supplied_reason:
+        reasons.insert(0, supplied_reason)
+
+    read = [v for v in (version, suite, group) if v]
+    missing = [
+        name
+        for name, value in (("version", version), ("cipher", suite), ("group", group))
+        if not value
+    ]
+    if len(read) == 3:
+        enrichment = ENRICHMENT_FULL
+    elif read:
+        enrichment = ENRICHMENT_PARTIAL
+        if not reasons:
+            # A gap with no stated cause is still a gap, and a reader must not
+            # have to guess whether it was unreadable or simply never asked for.
+            reasons.append(
+                f"{', '.join(missing)} not read: the process did not ask "
+                "libssl for them"
+            )
+    else:
+        enrichment = ENRICHMENT_NONE
+        if negotiated and not reasons:
+            reasons.append(
+                "no accessor was called by the process, so libssl was never "
+                "asked for the negotiated values"
+            )
+
+    shared: dict[str, Any] = {"enrichment": enrichment}
+    if enrichment != ENRICHMENT_FULL and reasons:
+        shared["enrichment_reason"] = "; ".join(dict.fromkeys(reasons))
+    if enrichment == ENRICHMENT_NONE:
+        shared[PENDING_ENRICHMENT] = True
+
+    detail = (
+        f"probe={PROBE_NAME} "
+        f"observed_version={version or 'pending'} "
+        f"observed_cipher={suite or 'pending'} "
+        f"observed_group={group or 'pending'}"
+    )
+    snippet = f"{comm} via {libssl_path}"
+    raw = {
+        "probe": PROBE_NAME,
+        "phase": phase,
+        "comm": comm,
+        "libssl_path": libssl_path,
+        "enrichment": enrichment,
+    }
+
+    findings: list[Finding] = []
+
+    protocol_params: dict[str, Any] = dict(shared)
+    if version:
+        protocol_params["version"] = version
+    findings.append(
+        _finding(
+            asset_type="protocol",
+            primitive="unknown",
+            algorithm="TLS",
+            params=protocol_params,
+            usage="unknown",
+            host=host,
+            pid=pid,
+            detail=detail,
+            snippet=snippet,
+            raw=raw,
+        )
+    )
+
+    if suite:
+        suite_params: dict[str, Any] = dict(shared)
+        suite_params["cipher_suite"] = suite
+        if version:
+            suite_params["version"] = version
+        findings.append(
+            _finding(
+                asset_type="algorithm",
+                primitive=_suite_primitive(suite),
+                algorithm=suite,
+                params=suite_params,
+                usage="encrypt",
+                host=host,
+                pid=pid,
+                detail=detail,
+                snippet=snippet,
+                raw=raw,
+            )
+        )
+
+    if group:
+        group_params: dict[str, Any] = dict(shared)
+        group_params["group"] = group
+        if version:
+            group_params["version"] = version
+        if any(marker in group.upper() for marker in _PQ_GROUP_MARKERS):
+            # A hybrid group is the migration's destination, and the fact the
+            # correlator compares a declared intent against.
+            group_params["hybrid"] = True
+        findings.append(
+            _finding(
+                asset_type="algorithm",
+                primitive="key-agreement",
+                algorithm=group,
+                params=group_params,
+                usage="key-exchange",
+                host=host,
+                pid=pid,
+                detail=detail,
+                snippet=snippet,
+                raw=raw,
+            )
+        )
+
+    return findings
+
+
+def event_to_finding(event: Any, *, hostname: str | None = None) -> Finding | None:
+    """The PRINCIPAL artefact of one event -- the protocol -- or None.
+
+    Kept for callers that want a single Finding. Use
+    :func:`event_to_findings` to get the cipher and group artefacts too.
+    """
+    findings = event_to_findings(event, hostname=hostname)
+    return findings[0] if findings else None

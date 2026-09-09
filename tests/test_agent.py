@@ -66,15 +66,22 @@ def test_a_full_event_maps_to_an_observed_finding() -> None:
     assert finding.view == "observed"
 
 
-def test_a_cipher_makes_it_an_algorithm_asset() -> None:
-    finding = event_to_finding(full_event())
+def test_a_cipher_becomes_its_own_symmetric_artefact() -> None:
+    """One handshake reveals several artefacts; the suite is one of them.
 
-    assert finding is not None
-    assert finding.asset_type == "algorithm"
-    assert finding.algorithm == "TLS_AES_256_GCM_SHA384"
-    assert finding.params["version"] == "TLSv1.3"
-    assert finding.params["cipher_suite"] == "TLS_AES_256_GCM_SHA384"
-    assert finding.params.get("pending_enrichment") is not True
+    ``event_to_finding`` returns the PRINCIPAL artefact (the protocol);
+    ``event_to_findings`` returns the full set. See ADR-0011.
+    """
+    from agent.to_finding import event_to_findings
+
+    findings = event_to_findings(full_event())
+    ciphers = [f for f in findings if f.params.get("cipher_suite")]
+
+    assert len(ciphers) == 1
+    assert ciphers[0].asset_type == "algorithm"
+    assert ciphers[0].algorithm == "TLS_AES_256_GCM_SHA384"
+    assert ciphers[0].params["version"] == "TLSv1.3"
+    assert ciphers[0].params.get("pending_enrichment") is not True
 
 
 def test_the_locator_carries_the_host_and_pid() -> None:
@@ -819,7 +826,7 @@ def test_the_spool_directory_is_created_if_absent(tmp_path: Path) -> None:
 def test_the_spool_line_matches_what_json_prints() -> None:
     """One serialisation, so producer and consumer cannot drift apart."""
     source = (Path(__file__).resolve().parent.parent / "agent" / "agent.py").read_text()
-    body = source[source.index("def handle(") : source.index("events_table.open_perf")]
+    body = source[source.index("def emit(") : source.index("events_table.open_perf")]
 
     assert "_event_line(event)" in body
-    assert "spool.write(" in body or "_spool_payload" in body
+    assert "spool.write(json.loads(line))" in body

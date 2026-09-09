@@ -153,20 +153,25 @@ def test_a_spooled_event_round_trips_into_an_observed_finding(
 def test_an_enriched_event_round_trips_with_its_cipher(
     tmp_path: Path, context: ScanContext
 ) -> None:
-    """Slice 2 will start filling these in; the seam must already carry them."""
+    """One enriched line yields several artefacts -- see ADR-0011."""
     write_spool_file(
         tmp_path,
         "host-1-2-0.jsonl",
         observed_event(
-            observed_version="TLSv1.3", observed_cipher="TLS_AES_256_GCM_SHA384"
+            observed_version="TLSv1.3",
+            observed_cipher="TLS_AES_256_GCM_SHA384",
+            observed_group="X25519MLKEM768",
         ),
     )
 
-    (finding,) = scan_spool(tmp_path, context)
+    findings = scan_spool(tmp_path, context)
+    by_algorithm = {f.algorithm: f for f in findings}
 
-    assert finding.asset_type == "algorithm"
-    assert finding.algorithm == "TLS_AES_256_GCM_SHA384"
-    assert finding.params["version"] == "TLSv1.3"
+    assert by_algorithm["TLS"].params["version"] == "TLSv1.3"
+    assert by_algorithm["TLS_AES_256_GCM_SHA384"].primitive == "block-cipher"
+    assert by_algorithm["X25519MLKEM768"].primitive == "key-agreement"
+    assert by_algorithm["X25519MLKEM768"].params["hybrid"] is True
+    assert all(f.scanner_id == "runtime-spool" for f in findings)
 
 
 def test_several_lines_in_one_file_all_ingest(
@@ -450,7 +455,7 @@ def test_three_views_of_one_algorithm_stay_three_components(
         "host-1-2-0.jsonl",
         observed_event(observed_cipher="RSA", observed_version="TLSv1.2"),
     )
-    (observed,) = scan_spool(tmp_path, context)
+    (observed,) = [f for f in scan_spool(tmp_path, context) if f.algorithm == "RSA"]
 
     target = Target(kind="spool", ref=str(tmp_path), system="quantumbank")
     bom, cbom_json = normalise([declared, shipped, observed], target)

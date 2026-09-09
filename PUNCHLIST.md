@@ -229,13 +229,20 @@
   is retired.
   *Raised: eBPF agent slice 1. Resolved: 2026-09-09, see
   [ADR-0009](docs/adr/0009-ebpf-agent-slice1.md).*
-- **Negotiated version and cipher are not read (pending enrichment).** The
-  probe captures the handshake fact; `SSL_do_handshake(SSL *s)` hands over an
-  opaque, version-dependent struct, and reading a version out of it needs
-  hard-coded offsets or a second probe on `SSL_get_version`. Findings carry
-  `pending_enrichment: true` so an unread field is visibly unread rather than
-  reported as `unknown`. Slice 2.
-  *Raised: eBPF agent slice 1.*
+- ~~**Negotiated version and cipher are not read.**~~ **Resolved by
+  accessor uretprobes**, with a stated coverage limit. Reading the SSL struct
+  was measured and rejected: the cipher needs `ssl+0x900 -> session+0x2f8 ->
+  cipher+0x8` through three internal structs with no DWARF to verify against,
+  and `SSL_get_negotiated_group` is not exported at all. Instead uretprobes on
+  `SSL_get_version`, `SSL_CIPHER_get_name` and `SSL_group_to_name` read the
+  returned `const char*` -- no struct offsets anywhere, so nothing can drift
+  with an OpenSSL point release.
+  **Remaining limit:** these fire only when the observed process asks libssl
+  for its own parameters. A silent application yields `enrichment=partial`
+  with a reason rather than a guess. Closing that gap means the type-tag-gated
+  `0x48` version read, and must carry refuse-on-mismatch.
+  *Raised: eBPF agent slice 1. Resolved: enrichment slice, see
+  [ADR-0011](docs/adr/0011-enrichment.md).*
 - ~~**The agent's observed findings do not reach the store.**~~ **Resolved** by
   the spool seam. The agent writes atomic JSON lines into a directory
   (`--spool`); `scanners/runtime_spool` reads them back as observed Findings
@@ -304,3 +311,16 @@
   TLS 1.0?" has to be answered from the occurrence list rather than the
   component list. Revisit when the correlator needs per-service rollup.
   *Raised: spool seam slice. See ADR-0002 and ADR-0010.*
+- **Enrichment coverage depends on the observed application.** The accessor
+  uretprobes (ADR-0011) only fire when a process calls `SSL_get_version`,
+  `SSL_CIPHER_get_name` or `SSL_group_to_name`. `openssl s_client/s_server` and
+  Python's `ssl` module do; a service that never logs its TLS parameters does
+  not, and shows `enrichment=partial` with a reason. That is honest, but an
+  estate of silent services would have a thin observed view. A gated struct
+  read is the fallback if it becomes a real gap.
+  *Raised: enrichment slice.*
+- **`SSL_CIPHER_get_name` is called per connection by anything that logs.**
+  Three extra uretprobes on moderately hot functions is a real cost on a busy
+  host; `--no-enrich` turns them off, but there is no measurement of the
+  overhead yet. Wants a benchmark before the agent runs anywhere continuously.
+  *Raised: enrichment slice.*

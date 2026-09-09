@@ -50,8 +50,33 @@ SYMBOL = "SSL_do_handshake"
 #: SSL_do_handshake.
 CONTROL_SYMBOLS = ("SSL_new", "SSL_read", "SSL_write")
 
+#: Accessors whose RETURN VALUE is the negotiated fact, read as a
+#: ``const char *`` from RAX (ADR-0011).
+#:
+#: This is the entire enrichment design, and the reason it is not fragile: each
+#: of these is a public libssl function documented to return a string, so a
+#: uretprobe reads a pointer whose meaning is an API contract rather than an
+#: internal struct layout. Reading the cipher out of the SSL struct instead
+#: would mean chasing ssl+0x900 -> session+0x2f8 -> cipher+0x8 through three
+#: internal structs with no DWARF to check them against, and the negotiated
+#: group is not reachable that way at all -- SSL_get_negotiated_group is not
+#: exported. See ADR-0011 for the measurements.
+#:
+#: The cost is coverage, not correctness: these fire only when the observed
+#: process asks libssl for its own version or cipher. When it does not, the
+#: value is reported UNREADABLE with a reason -- never guessed.
+ENRICH_SYMBOLS = ("SSL_get_version", "SSL_CIPHER_get_name", "SSL_group_to_name")
+
 #: Probe id -> symbol, so a captured event says which probe produced it.
-PROBE_IDS = {0: SYMBOL, 1: "SSL_new", 2: "SSL_read", 3: "SSL_write"}
+PROBE_IDS = {
+    0: SYMBOL,
+    1: "SSL_new",
+    2: "SSL_read",
+    3: "SSL_write",
+    4: "SSL_get_version",
+    5: "SSL_CIPHER_get_name",
+    6: "SSL_group_to_name",
+}
 _SYMBOL_IDS = {symbol: probe_id for probe_id, symbol in PROBE_IDS.items()}
 
 
@@ -76,6 +101,9 @@ COMM_LEN = 16
 VERSION_LEN = 24
 CIPHER_LEN = 64
 
+#: "X25519MLKEM768" and friends, with room for a longer hybrid label.
+GROUP_LEN = 48
+
 #: The fields user space reads off each event, documented once so the loader
 #: and the tests agree on the contract.
 EVENT_STRUCT_FIELDS = (
@@ -88,11 +116,14 @@ EVENT_STRUCT_FIELDS = (
     "comm",
     "version",
     "cipher",
+    "group",
 )
 
 #: ``phase`` values. Entry always fires; return additionally carries retval.
+#: ``PHASE_ENRICH`` is an accessor return carrying one negotiated string.
 PHASE_ENTRY = 0
 PHASE_RETURN = 1
+PHASE_ENRICH = 2
 
 # ---------------------------------------------------------------------------
 # The BPF C. Kept deliberately small: every line here runs in the kernel on
@@ -112,9 +143,11 @@ PROBE_SOURCE = f"""
  * see COMM_LEN in this module for why. */
 #define VERSION_LEN {VERSION_LEN}
 #define CIPHER_LEN  {CIPHER_LEN}
+#define GROUP_LEN   {GROUP_LEN}
 
 #define PHASE_ENTRY  {PHASE_ENTRY}
 #define PHASE_RETURN {PHASE_RETURN}
+#define PHASE_ENRICH {PHASE_ENRICH}
 
 struct handshake_event_t {{
     u64 timestamp_ns;
@@ -125,8 +158,9 @@ struct handshake_event_t {{
     s32 retval;           /* SSL_do_handshake result; entry = 0 */
     u64 ssl_ptr;          /* opaque correlation handle, never dereferenced */
     char comm[16];               /* bpf_get_current_comm's documented size */
-    char version[VERSION_LEN];   /* pending enrichment: zero-filled */
-    char cipher[CIPHER_LEN];     /* pending enrichment: zero-filled */
+    char version[VERSION_LEN];   /* SSL_get_version return, or zero */
+    char cipher[CIPHER_LEN];     /* SSL_CIPHER_get_name return, or zero */
+    char group[GROUP_LEN];       /* SSL_group_to_name return, or zero */
 }};
 
 BPF_PERF_OUTPUT(handshake_events);
@@ -155,7 +189,8 @@ static inline int emit(struct pt_regs *ctx, u32 probe_id, u32 phase,
     event.retval = retval;
     event.ssl_ptr = ssl_ptr;
     bpf_get_current_comm(&event.comm, sizeof(event.comm));
-    /* version[] and cipher[] stay zero: slice 1 does not read them. */
+    /* version/cipher/group stay zero here: the handshake probe reports the
+     * event, and the accessor probes report the negotiated values. */
 
     handshake_events.perf_submit(ctx, &event, sizeof(event));
     return 0;
@@ -198,6 +233,87 @@ int on_control_read(struct pt_regs *ctx)
 int on_control_write(struct pt_regs *ctx)
 {{
     return emit(ctx, 3, PHASE_ENTRY, 0, 0);
+}}
+
+/* ------------------------------------------------------------------------
+ * Enrichment. Each of these is a uretprobe on a public libssl accessor whose
+ * return value IS the negotiated fact, as a NUL-terminated const char*.
+ *
+ * bpf_probe_read_user_str is the only memory read in this program, and what it
+ * reads is a pointer the function just returned -- not a field at an offset we
+ * guessed. If the read fails the field stays zero-filled and user space reports
+ * it unreadable; nothing is ever invented.
+ * ------------------------------------------------------------------------ */
+int on_get_version(struct pt_regs *ctx)
+{{
+    u64 id = bpf_get_current_pid_tgid();
+    u32 tgid = id >> 32;
+
+    TARGET_PID_FILTER
+
+    void *str = (void *)PT_REGS_RC(ctx);
+    if (str == 0)
+        return 0;
+
+    struct handshake_event_t event = {{}};
+    event.timestamp_ns = bpf_ktime_get_ns();
+    event.pid = tgid;
+    event.tid = (u32)id;
+    event.phase = PHASE_ENRICH;
+    event.probe_id = 4;
+    bpf_get_current_comm(&event.comm, sizeof(event.comm));
+    bpf_probe_read_user_str(&event.version, sizeof(event.version), str);
+
+    handshake_events.perf_submit(ctx, &event, sizeof(event));
+    return 0;
+}}
+
+int on_cipher_name(struct pt_regs *ctx)
+{{
+    u64 id = bpf_get_current_pid_tgid();
+    u32 tgid = id >> 32;
+
+    TARGET_PID_FILTER
+
+    void *str = (void *)PT_REGS_RC(ctx);
+    if (str == 0)
+        return 0;
+
+    struct handshake_event_t event = {{}};
+    event.timestamp_ns = bpf_ktime_get_ns();
+    event.pid = tgid;
+    event.tid = (u32)id;
+    event.phase = PHASE_ENRICH;
+    event.probe_id = 5;
+    bpf_get_current_comm(&event.comm, sizeof(event.comm));
+    bpf_probe_read_user_str(&event.cipher, sizeof(event.cipher), str);
+
+    handshake_events.perf_submit(ctx, &event, sizeof(event));
+    return 0;
+}}
+
+int on_group_name(struct pt_regs *ctx)
+{{
+    u64 id = bpf_get_current_pid_tgid();
+    u32 tgid = id >> 32;
+
+    TARGET_PID_FILTER
+
+    void *str = (void *)PT_REGS_RC(ctx);
+    if (str == 0)
+        return 0;
+
+    struct handshake_event_t event = {{}};
+    event.timestamp_ns = bpf_ktime_get_ns();
+    event.pid = tgid;
+    event.tid = (u32)id;
+    event.phase = PHASE_ENRICH;
+    event.probe_id = 6;
+    bpf_get_current_comm(&event.comm, sizeof(event.comm));
+    bpf_probe_read_user_str(&event.group, sizeof(event.group), str);
+
+    handshake_events.perf_submit(ctx, &event, sizeof(event));
+    return 0;
 }}
 """
 

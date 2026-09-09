@@ -38,7 +38,7 @@ from agent.spool_format import (
     TEMP_PREFIX,
     TEMP_SUFFIX,
 )
-from agent.to_finding import event_to_finding
+from agent.to_finding import event_to_findings
 from core.logs import get_logger
 from core.scanner import ScanContext, Target
 from core.schema import Finding, View
@@ -140,8 +140,8 @@ class RuntimeSpoolScanner:
 
         for path in _spool_files(root):
             valid = 0
-            for finding, bad in self._read_file(path):
-                if finding is not None:
+            for found, bad in self._read_file(path):
+                for finding in found:
                     valid += 1
                     ingested += 1
                     yield finding
@@ -178,8 +178,13 @@ class RuntimeSpoolScanner:
             },
         )
 
-    def _read_file(self, path: Path) -> Iterator[tuple[Finding | None, int]]:
-        """Yield ``(finding, bad_line_count)`` for each line in one file."""
+    def _read_file(self, path: Path) -> Iterator[tuple[list[Finding], int]]:
+        """Yield ``(findings, bad_line_count)`` for each line in one file.
+
+        One line can yield several artefacts: a TLS handshake negotiates a
+        version, a cipher suite and a key-exchange group, and each is its own
+        component in the CBOM (ADR-0011).
+        """
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
@@ -199,8 +204,8 @@ class RuntimeSpoolScanner:
 
     def _read_line(
         self, line: str, path: Path, number: int
-    ) -> tuple[Finding | None, int]:
-        def skip(reason: str) -> tuple[None, int]:
+    ) -> tuple[list[Finding], int]:
+        def skip(reason: str) -> tuple[list[Finding], int]:
             _log.warning(
                 "spool_line_skipped: %s:%d %s",
                 path.name,
@@ -213,7 +218,7 @@ class RuntimeSpoolScanner:
                     "reason": reason,
                 },
             )
-            return None, 1
+            return [], 1
 
         if len(line.encode("utf-8")) > MAX_LINE_BYTES:
             return skip(f"line is longer than {MAX_LINE_BYTES} bytes")
@@ -227,13 +232,13 @@ class RuntimeSpoolScanner:
             return skip(f"line is a {type(event).__name__}, expected an object")
 
         # The same mapping the agent uses for --findings, so producer and
-        # consumer cannot disagree about what an event means. It returns None
-        # and logs for anything it cannot trust.
-        finding = event_to_finding(event)
-        if finding is None:
-            return skip("the event could not be mapped to a Finding")
+        # consumer cannot disagree about what an event means. It returns an
+        # empty list and logs for anything it cannot trust.
+        findings = event_to_findings(event)
+        if not findings:
+            return skip("the event could not be mapped to any Finding")
 
         # Re-attributed to this scanner: the agent observed it, but this plugin
         # is what put it in the CBOM, and scanner_id is how a claim is traced
         # back to the thing that emitted it.
-        return finding.model_copy(update={"scanner_id": self.id}), 0
+        return [f.model_copy(update={"scanner_id": self.id}) for f in findings], 0

@@ -52,7 +52,13 @@ from pathlib import Path
 from typing import Any
 
 from agent.elfsym import ElfError, resolve_dynamic_symbol
-from agent.probe_ssl import CONTROL_SYMBOLS, PROBE_IDS, SYMBOL, build_source
+from agent.probe_ssl import (
+    CONTROL_SYMBOLS,
+    ENRICH_SYMBOLS,
+    PROBE_IDS,
+    SYMBOL,
+    build_source,
+)
 
 # The wire format, shared with the consumer. A plain module with no pydantic in
 # it, so importing it here does not break the agent's ability to run on the
@@ -69,7 +75,19 @@ __all__ = [
 ]
 
 #: Human-readable phase names, matching probe_ssl's PHASE_* constants.
-_PHASES = {0: "entry", 1: "return"}
+_PHASES = {0: "entry", 1: "return", 2: "enrich"}
+
+#: How long a completed handshake waits for its accessor events before being
+#: emitted with whatever was read.
+#:
+#: The ordering is unavoidable: an application calls SSL_do_handshake and only
+#: THEN asks libssl what it negotiated, so the enrichment always arrives after
+#: the handshake it belongs to. Holding the handshake briefly is what lets one
+#: event carry all three facts instead of three unrelated events the consumer
+#: would have to stitch together. Expiry is what stops a process that never
+#: calls an accessor from holding a record forever -- it is emitted honestly
+#: unenriched instead.
+ENRICH_WINDOW_S = 0.4
 
 #: Perf-buffer poll timeout. Short enough that --once feels immediate, long
 #: enough not to spin.
@@ -83,6 +101,11 @@ DEFAULT_LIBSSL = "/usr/lib/x86_64-linux-gnu/libssl.so.3"
 
 #: BPF C function name per control symbol.
 _CONTROL_FNS = ("on_control_new", "on_control_read", "on_control_write")
+
+#: BPF C function name per enrichment accessor, and which event field each
+#: fills in.
+_ENRICH_FNS = ("on_get_version", "on_cipher_name", "on_group_name")
+_ENRICH_FIELDS = ("observed_version", "observed_cipher", "observed_group")
 
 _INSTALL_HINT = (
     "bcc is not importable. It ships with the distro rather than with pip: on "
@@ -287,6 +310,16 @@ def _load_bpf(source: str) -> Any:
         ) from exc
 
 
+def _cstr(value: Any) -> str | None:
+    """A NUL-terminated C char array as a string, or None when it is empty.
+
+    Empty means the probe never filled it in -- an accessor that was not
+    called, or a read that failed. It is absence, not an observation of
+    emptiness, and the mapping treats it that way (ADR-0011).
+    """
+    return bytes(value).split(b"\x00", 1)[0].decode("utf-8", "replace") or None
+
+
 def _decode(raw_event: Any, libssl_path: str) -> dict[str, Any]:
     """One perf-buffer record as a plain dict, ready for the pure mapping."""
     return {
@@ -299,16 +332,11 @@ def _decode(raw_event: Any, libssl_path: str) -> dict[str, Any]:
         "retval": int(raw_event.retval),
         "ssl_ptr": hex(int(raw_event.ssl_ptr)),
         "libssl_path": libssl_path,
-        # Zero-filled by the probe this slice; carried through so slice 2 only
-        # has to start populating them.
-        "observed_version": bytes(raw_event.version)
-        .split(b"\x00", 1)[0]
-        .decode("utf-8", "replace")
-        or None,
-        "observed_cipher": bytes(raw_event.cipher)
-        .split(b"\x00", 1)[0]
-        .decode("utf-8", "replace")
-        or None,
+        # Filled in by the accessor uretprobes; empty on the handshake probe
+        # itself, because nothing is negotiated until libssl is asked.
+        "observed_version": _cstr(raw_event.version),
+        "observed_cipher": _cstr(raw_event.cipher),
+        "observed_group": _cstr(raw_event.group),
     }
 
 
@@ -328,6 +356,7 @@ def _event_line(event: dict[str, Any]) -> str:
             "retval": event["retval"],
             "observed_version": event["observed_version"],
             "observed_cipher": event["observed_cipher"],
+            "observed_group": event.get("observed_group"),
             "libssl_path": event["libssl_path"],
         },
         sort_keys=True,
@@ -489,6 +518,7 @@ def _make_test_cert(directory: Path) -> tuple[Path, Path] | None:
 
 def _run_self_test(
     bpf: Any,
+    flush: Callable[..., None],
     seen: Callable[[], int],
     per_probe: dict[str, int],
     decode_errors: Callable[[], int],
@@ -554,13 +584,18 @@ def _run_self_test(
         deadline = time.monotonic() + SELF_TEST_TIMEOUT_S
         while time.monotonic() < deadline:
             bpf.perf_buffer_poll(timeout=POLL_TIMEOUT_MS)
+            flush(time.monotonic())
             if seen():
                 # Keep draining briefly, so the summary counts the whole
-                # handshake rather than only its first event.
-                grace = time.monotonic() + 1.0
+                # handshake rather than only its first event, and so the
+                # accessor events that enrich it have time to arrive.
+                grace = time.monotonic() + 1.5
                 while time.monotonic() < grace:
                     bpf.perf_buffer_poll(timeout=POLL_TIMEOUT_MS)
+                    flush(time.monotonic())
                 break
+
+        flush(time.monotonic(), force=True)
 
     _report(seen(), per_probe, decode_errors(), spooled())
 
@@ -658,6 +693,12 @@ def run(args: argparse.Namespace) -> int:
         )
     attach(SYMBOL, "on_handshake_return", entry=False)
 
+    if not args.no_enrich:
+        # Uretprobes on public accessors: the return value IS the negotiated
+        # fact, as a const char*. No struct offsets anywhere (ADR-0011).
+        for symbol, fn_name in zip(ENRICH_SYMBOLS, _ENRICH_FNS, strict=True):
+            attach(symbol, fn_name, entry=False)
+
     if args.controls:
         # Controls separate "this symbol never fires" from "nothing fires".
         for symbol, fn_name in zip(CONTROL_SYMBOLS, _CONTROL_FNS, strict=True):
@@ -670,13 +711,57 @@ def run(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
 
-    counters = {"seen": 0, "decode_errors": 0, "spooled": 0}
+    counters = {
+        "seen": 0,
+        "decode_errors": 0,
+        "spooled": 0,
+        "enriched": 0,
+        "enrich_orphan": 0,
+    }
     per_probe: dict[str, int] = {}
     events_table = bpf["handshake_events"]
 
     spool = SpoolWriter(args.spool) if args.spool else None
     if spool is not None:
         print(f"spooling observed events to {spool.directory}", file=sys.stderr)
+
+    # (pid, tid) -> a completed handshake waiting for its accessor events.
+    pending: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
+
+    def emit(event: dict[str, Any]) -> None:
+        """Publish one finished event to stdout, the spool, and findings."""
+        probe = str(event["probe"])
+        per_probe[probe] = per_probe.get(probe, 0) + 1
+
+        line = _event_line(event)
+        if args.json:
+            print(line, flush=True)
+
+        if spool is not None:
+            # The SAME serialisation stdout gets, so producer and consumer
+            # cannot drift apart: what a human reads in the terminal is byte
+            # for byte what the scanner will ingest.
+            try:
+                spool.write(json.loads(line))
+                counters["spooled"] += 1
+            except OSError as exc:
+                print(f"warning: could not spool an event: {exc}", file=sys.stderr)
+
+        if args.findings:
+            # Imported here, not at module scope: this is the only code path
+            # that needs pydantic, and the system interpreter that has bcc
+            # usually does not have it.
+            from agent.to_finding import event_to_findings
+
+            for finding in event_to_findings(event):
+                print(finding.model_dump_json(), flush=True)
+
+    def flush(now: float, *, force: bool = False) -> None:
+        """Emit handshakes whose enrichment window has closed."""
+        for key, (arrived, event) in list(pending.items()):
+            if force or now - arrived >= ENRICH_WINDOW_S:
+                del pending[key]
+                emit(event)
 
     def handle(_cpu: int, data: Any, _size: int) -> None:
         # Counted BEFORE decoding. A decode failure must not be reported as
@@ -693,34 +778,34 @@ def run(args: argparse.Namespace) -> int:
             print(f"warning: could not decode an event: {exc!r}", file=sys.stderr)
             return
 
-        probe = str(event["probe"])
-        per_probe[probe] = per_probe.get(probe, 0) + 1
+        key = (int(event["pid"]), int(event["tid"]))
 
-        line = _event_line(event)
-        if args.json:
-            print(line, flush=True)
+        if event["phase"] == "enrich":
+            # An accessor return. It belongs to the handshake this thread just
+            # completed; if there is none waiting, the process asked about a
+            # connection we did not see and there is nothing to attach it to.
+            held = pending.get(key)
+            if held is None:
+                counters["enrich_orphan"] += 1
+                return
+            for field in _ENRICH_FIELDS:
+                value = event.get(field)
+                if value:
+                    held[1][field] = value
+            counters["enriched"] += 1
+            if all(held[1].get(f) for f in _ENRICH_FIELDS):
+                # Everything read; no reason to keep holding it.
+                del pending[key]
+                emit(held[1])
+            return
 
-        if spool is not None:
-            # The SAME serialisation stdout gets, so producer and consumer
-            # cannot drift apart: what a human reads in the terminal is byte
-            # for byte what the scanner will ingest.
-            try:
-                spool.write(json.loads(line))
-                counters["spooled"] += 1
-            except OSError as exc:
-                # A spool write failing is worth saying out loud, and is not a
-                # reason to stop observing.
-                print(f"warning: could not spool an event: {exc}", file=sys.stderr)
+        if event["phase"] == "return" and event["retval"] == 1 and not args.no_enrich:
+            # Hold it briefly for the accessor events that follow.
+            flush(time.monotonic())
+            pending[key] = (time.monotonic(), event)
+            return
 
-        if args.findings:
-            # Imported here, not at module scope: this is the only code path
-            # that needs pydantic, and the system interpreter that has bcc
-            # usually does not have it.
-            from agent.to_finding import event_to_finding
-
-            finding = event_to_finding(event)
-            if finding is not None:
-                print(finding.model_dump_json(), flush=True)
+        emit(event)
 
     events_table.open_perf_buffer(handle)
 
@@ -728,6 +813,7 @@ def run(args: argparse.Namespace) -> int:
         if args.self_test:
             return _run_self_test(
                 bpf,
+                flush,
                 lambda: counters["seen"],
                 per_probe,
                 lambda: counters["decode_errors"],
@@ -743,10 +829,13 @@ def run(args: argparse.Namespace) -> int:
             # a probe that fires half a second later.
             while True:
                 bpf.perf_buffer_poll(timeout=POLL_TIMEOUT_MS)
+                flush(time.monotonic())
                 if args.once and counters["seen"]:
                     break
         except KeyboardInterrupt:
             print("", file=sys.stderr)
+
+        flush(time.monotonic(), force=True)
 
         _report(
             counters["seen"],
@@ -805,6 +894,14 @@ def build_parser() -> argparse.ArgumentParser:
             "atomically. This is how observed findings reach the store: the "
             "agent only ever writes files, and `ecdat scan DIR --kind spool` "
             "ingests them (ADR-0010)"
+        ),
+    )
+    parser.add_argument(
+        "--no-enrich",
+        action="store_true",
+        help=(
+            "do not attach the accessor uretprobes that read the negotiated "
+            f"version/cipher/group ({', '.join(ENRICH_SYMBOLS)})"
         ),
     )
     parser.add_argument(

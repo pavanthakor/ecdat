@@ -83,15 +83,30 @@ for component in components:
         continue
     observed += 1
     occurrence = component["evidence"]["occurrences"][0]
+    def param(name, default="-"):
+        return properties.get(f"ecdat:param:{name}", [default])[0]
+
     print(f"  name      : {component['name']}")
     print(f"  view      : {view}")
+    print(f"  version   : {param('version')}")
+    print(f"  cipher    : {param('cipher_suite')}")
+    print(f"  group     : {param('group')}"
+          + ("   [HYBRID PQ]" if param("hybrid") == "True" else ""))
+    print(f"  enrichment: {param('enrichment')}"
+          + (f"  ({param('enrichment_reason')})"
+             if param("enrichment") != "full" else ""))
     print(f"  locator   : {occurrence['location']}")
-    print(f"  detail    : {occurrence['additionalContext']}")
     print(f"  band      : {properties.get('ecdat:band', ['-'])[0]}"
           f"  score {properties.get('ecdat:score', ['-'])[0]}")
     print()
 
 print(f"  {observed} observed component(s) in the stored CBOM")
+enriched = [
+    c for c in components
+    for p in c["properties"]
+    if p["name"] == "ecdat:param:enrichment" and p["value"] == "full"
+]
+print(f"  {len(enriched)} fully enriched (real negotiated version+cipher+group)")
 print()
 print("  PASS: a real TLS handshake reached the store as an observed component."
       if observed else "  FAIL: no observed component reached the store.")
