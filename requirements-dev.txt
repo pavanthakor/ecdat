@@ -5,3 +5,9 @@ httpx2>=2.12
 mypy>=1.11
 pytest>=8.0
 ruff>=0.6
+
+# tests/test_scanner_source.py reads testdata/python_fixtures/answer_key.yaml.
+# Not a runtime dependency: the scanner never parses YAML itself -- semgrep
+# owns the rule files.
+pyyaml>=6.0
+types-PyYAML>=6.0

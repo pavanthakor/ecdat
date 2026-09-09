@@ -1,0 +1,108 @@
+# Block and stream ciphers.
+#
+# Sources:
+#   FIPS 197 -- AES.
+#   NIST SP 800-38A/D -- ECB is approved but leaks plaintext structure; GCM is
+#     the AEAD mode of choice.
+#   NIST SP 800-131A Rev.2 Table 5 -- single DES disallowed since 2005; two-key
+#     and three-key TDEA disallowed for encryption since 2023.
+#   RFC 7465 -- RC4 MUST NOT be used in TLS.
+#   NIST SP 800-67 Rev.2 -- TDEA deprecation.
+#   Blowfish: 64-bit block, Sweet32 (CVE-2016-2183) birthday attack; the author
+#     (Schneier, 2007) recommends against it.
+rules:
+  - id: py-aes-cipher
+    languages: [python]
+    severity: INFO
+    message: "ecdat|mode=$MODE"
+    metadata:
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        mode: $MODE
+      quantum_note: >-
+        Grover halves the effective key strength: AES-128 drops to ~64 bits of
+        quantum security, AES-256 to ~128, which NIST considers adequate
+        (NIST IR 8547 keeps AES-256 approved past 2035). Migration is a key-size
+        question, not an algorithm change. ECB is a separate, classical defect.
+      flags: [symmetric]
+      mode_flags:
+        ECB: >-
+          ECB is deterministic and leaks plaintext structure block by block
+          (NIST SP 800-38A Appendix). It should not be used for confidentiality.
+    pattern-either:
+      - pattern: Cipher(algorithms.AES(...), modes.$MODE(...), ...)
+      - pattern: Cipher(algorithms.AES(...), mode=modes.$MODE(...), ...)
+      - pattern: AES.new(..., AES.$MODE, ...)
+
+  - id: py-des
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      quantum_note: >-
+        56-bit key: brute-forced classically since 1998 (EFF Deep Crack) and
+        disallowed by NIST SP 800-131A Rev.2 since 2005. Quantum is irrelevant.
+        Replace with AES-256-GCM.
+      flags: [weak]
+    pattern-either:
+      - pattern: DES.new(...)
+      - pattern: Cipher(algorithms.DES(...), ...)
+
+  - id: py-des3
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: 3DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      quantum_note: >-
+        64-bit block: vulnerable to Sweet32 (CVE-2016-2183) after ~32 GB under
+        one key. Disallowed for encryption since 2023 (NIST SP 800-131A Rev.2,
+        SP 800-67 Rev.2). Replace with AES-256-GCM.
+      flags: [weak]
+    pattern-either:
+      - pattern: DES3.new(...)
+      - pattern: Cipher(algorithms.TripleDES(...), ...)
+
+  - id: py-rc4
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: RC4
+      primitive: stream-cipher
+      usage: encrypt
+      asset_type: algorithm
+      quantum_note: >-
+        Biased keystream; prohibited in TLS by RFC 7465. Classically broken --
+        quantum does not enter into it. Replace with AES-GCM or ChaCha20-Poly1305.
+      flags: [weak]
+    pattern-either:
+      - pattern: ARC4.new(...)
+      - pattern: Cipher(algorithms.ARC4(...), ...)
+
+  - id: py-blowfish
+    languages: [python]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: Blowfish
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      quantum_note: >-
+        64-bit block, so Sweet32 (CVE-2016-2183) applies as it does to 3DES.
+        Never FIPS-approved; its author recommends AES instead (Schneier, 2007).
+      flags: [weak]
+    pattern-either:
+      - pattern: Blowfish.new(...)
+      - pattern: Cipher(algorithms.Blowfish(...), ...)

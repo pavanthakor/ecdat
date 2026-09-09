@@ -1,0 +1,55 @@
+# Transport security pinned in application code.
+#
+# Sources:
+#   RFC 8996 (Mar 2021) -- TLS 1.0 and 1.1 MUST NOT be used.
+#   RFC 6176 -- SSL 2.0 MUST NOT be used. RFC 7568 -- SSL 3.0 MUST NOT be used.
+#   NIST SP 800-52 Rev.2 -- TLS 1.2 minimum for US government systems, 1.3
+#     preferred.
+#
+# asset_type=protocol, not algorithm: the CBOM models these as protocol
+# components, and primitive is left unknown because a protocol version is not a
+# primitive. The negotiated suites are the interesting crypto and they are
+# captured separately by py-ssl-set-ciphers.
+rules:
+  - id: py-ssl-weak-protocol
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|version=$PROTO"
+    metadata:
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      capture:
+        version: $PROTO
+      quantum_note: >-
+        A classical defect, not a quantum one: TLS 1.0/1.1 are prohibited by
+        RFC 8996 and SSLv2/v3 by RFC 6176 and RFC 7568. Move to TLS 1.3, which
+        is also the only version with a defined hybrid post-quantum key
+        exchange.
+      flags: [weak]
+    patterns:
+      - pattern: ssl.$PROTO
+      - metavariable-regex:
+          metavariable: $PROTO
+          regex: ^PROTOCOL_(TLSv1|TLSv1_1|SSLv2|SSLv3|SSLv23)$
+
+  - id: py-ssl-set-ciphers
+    languages: [python]
+    severity: WARNING
+    message: "ecdat|cipher_suites=$SUITES"
+    metadata:
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      capture:
+        cipher_suites: $SUITES
+      quantum_note: >-
+        An explicit suite string overrides the library default and freezes the
+        negotiated crypto at the moment it was written. Each suite has to be
+        scored on its own terms -- the correlator expands this string against
+        the suite knowledge pack; the scanner only records that the override
+        exists and what it says.
+      flags: [override]
+    pattern: $CTX.set_ciphers($SUITES)

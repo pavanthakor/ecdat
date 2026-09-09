@@ -1,0 +1,61 @@
+# Random number generation.
+#
+# Sources:
+#   CPython docs, `random` module: "not suitable for security purposes" -- it
+#     is a Mersenne Twister (MT19937), fully predictable after 624 outputs.
+#   NIST SP 800-90A Rev.1 -- approved DRBG constructions.
+#   CPython docs, `secrets` / `os.urandom`: the CSPRNG-backed interfaces.
+#
+# The weak-RNG rule is scoped to variables whose NAME says the output is a
+# secret. An unscoped random.random() rule would fire on every simulation,
+# sampler and test in an estate and destroy precision; naming is the only
+# signal available without dataflow. Broader taint-style detection is a
+# tree-sitter/dataflow item, not a pattern item -- see ADR-0004.
+rules:
+  - id: py-weak-random-secret
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: MT19937
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      quantum_note: >-
+        Not a cryptographic DRBG at all. MT19937 state is recoverable from 624
+        consecutive outputs, so anything derived from it is predictable today.
+        This is a classical break, not a quantum one. Replace with `secrets` or
+        `os.urandom` (NIST SP 800-90A Rev.1 backed).
+      flags: [weak, critical]
+    patterns:
+      - pattern-either:
+          - pattern: $VAR = random.random()
+          - pattern: $VAR = random.randint(...)
+          - pattern: $VAR = random.randrange(...)
+          - pattern: $VAR = random.getrandbits(...)
+          - pattern: $VAR = random.choice(...)
+          - pattern: $VAR = random.sample(...)
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i)^[a-z0-9_]*(key|token|secret|nonce|salt|passw|seed|otp|session|iv|auth|cred)[a-z0-9_]*$
+
+  - id: py-os-urandom
+    languages: [python]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      algorithm: CSPRNG
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      quantum_note: >-
+        OS-backed CSPRNG (getrandom(2) on Linux). Quantum-safe: Grover offers
+        no useful advantage against a well-seeded generator with a large state.
+        Detected as a control so the inventory shows correct usage next to the
+        incorrect kind.
+      flags: [control]
+    pattern-either:
+      - pattern: os.urandom(...)
+      - pattern: secrets.token_bytes(...)
+      - pattern: secrets.token_hex(...)
+      - pattern: secrets.token_urlsafe(...)

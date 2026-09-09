@@ -1,0 +1,192 @@
+# ECDAT rule packs — the metadata contract
+
+A rule pack is a directory of Semgrep YAML. Semgrep does the matching; the rule
+carries the cryptographic knowledge; `scanners/source` is thin glue that turns
+one Semgrep match into one `Finding`. Adding a detection should mean adding
+YAML, not Python — and that only works if every rule fills in the same fields.
+
+This document is that contract. It is enforced at runtime: a rule that breaks
+it raises `RulePackContractError` and fails the scan rather than emitting a
+half-populated Finding.
+
+    knowledge/rules/
+      README.md          <- this file
+      python/            <- one pack per language
+        hashes.yaml      <- one file per algorithm family
+        asymmetric.yaml
+        ...
+
+## Why the message is a machine channel
+
+Semgrep OSS 1.176 does **not** emit a `metavars` block in `--json` output, and
+it redacts `extra.lines` to `"requires login"`. It *does* interpolate
+metavariables into `extra.message`, and it passes `extra.metadata` through
+verbatim without interpolation.
+
+That asymmetry decides the whole design:
+
+| Where | Carries | Interpolated? |
+|---|---|---|
+| `metadata` | the static facts — algorithm, primitive, usage, citation | no |
+| `message`  | the values captured at the match site | **yes** |
+
+So `metadata` declares *which* metavariable holds a parameter, and `message`
+delivers *what it bound to*. The two must agree, and the scanner checks that
+they do.
+
+The snippet is read from disk by the scanner, not taken from Semgrep, both
+because `extra.lines` is unavailable and because reading it ourselves is what
+puts redaction under ECDAT's control.
+
+## Required metadata keys
+
+Every rule must set all four. A missing or non-string value is a hard error.
+
+| Key | Meaning |
+|---|---|
+| `algorithm` | Canonical algorithm name, already in the spelling the CBOM should use: `RSA`, `SHA-1`, `3DES`, `Ed25519`. Not the library's spelling. Use `unknown` when the pattern genuinely cannot tell (an unparsed PEM banner), never a guess. |
+| `primitive` | One of the `Primitive` vocabulary in `core/schema.py`: `pke`, `signature`, `kem`, `key-agreement`, `block-cipher`, `stream-cipher`, `hash`, `mac`, `kdf`, `drbg`, `unknown`. Drives quantum scoring — Shor breaks the first four outright, Grover only halves the rest. |
+| `usage` | One of the `Usage` vocabulary: `sign`, `verify`, `key-exchange`, `key-transport`, `encrypt`, `decrypt`, `hash`, `kdf`, `unknown`. |
+| `quantum_note` | Prose, **with a citation**: FIPS number, NIST SP/IR section, RFC, or CVE. Per CLAUDE.md there are no uncited crypto facts in a knowledge pack. Say what breaks it, classically or quantumly, and what replaces it. |
+
+## Optional metadata keys
+
+| Key | Default | Meaning |
+|---|---|---|
+| `asset_type` | `algorithm` | One of the `AssetType` vocabulary. Use `protocol` for TLS/SSH versions, `key` for key material, `certificate` for certificates. |
+| `keysize_metavar` | — | Sugar for `capture: {key_size: $X}`. Spelled out separately because key size is the parameter nearly every asymmetric rule needs. |
+| `capture` | `{}` | Ordered map of `param_name -> $METAVAR`. See below. |
+| `flags` | `[]` | Free-form tags. `critical` sets `params.flagged = true`. Conventions in use: `weak`, `control`, `quantum-vulnerable`, `symmetric`, `key-material`, `override`, `critical`. |
+| `mode_flags` | `{}` | Map of a captured `mode` value to why it is dangerous (e.g. `ECB`). A match whose mode is a key here also gets `params.flagged = true`. |
+| `redact` | `false` | The rule matches key material. Its snippet becomes `<redacted key material>`. |
+
+## How `capture` works
+
+Declare the parameter, then interpolate the same metavariable into the message
+in the same order:
+
+```yaml
+- id: py-rsa-keygen
+  message: "ecdat|key_size=$KEYSIZE"
+  metadata:
+    algorithm: RSA
+    primitive: pke
+    usage: unknown
+    keysize_metavar: $KEYSIZE
+    quantum_note: "Broken by Shor; disallowed after 2035 (NIST IR 8547)."
+  pattern-either:
+    - pattern: rsa.generate_private_key(..., key_size=$KEYSIZE, ...)
+    - pattern: RSA.generate($KEYSIZE, ...)
+```
+
+Rules:
+
+* The message **must** start with `ecdat|`. A rule with no captures uses
+  `message: "ecdat|"` exactly.
+* Multiple captures are `|`-separated in the declared order:
+  `"ecdat|mode=$MODE|padding=$PAD"`.
+* The parameter name, not the metavariable name, becomes the `params` key.
+  `$KEYSIZE` under `keysize_metavar` lands in `params.key_size`.
+
+### Normalisation is by parameter name
+
+The scanner normalises a captured string according to what it is called. This
+is why names matter and why you should reuse the existing ones.
+
+| Parameter | Treated as | `ec.SECP256R1()` → | `MODE_CBC` → | `2048` → |
+|---|---|---|---|---|
+| `mode`, `curve`, `version` | symbol | `SECP256R1` | `CBC` | `2048` |
+| everything else | Python literal if it parses, else the raw text | — | — | `2048` (int) |
+
+Symbol normalisation strips a trailing call, takes the last dotted segment, and
+drops a `MODE_` or `PROTOCOL_` prefix. Literal normalisation runs
+`ast.literal_eval`, so `"RS256"` becomes the string `RS256` and `2048` becomes
+the integer `2048` — which matters, because `params` is identifying and
+`key_size: 2048` and `key_size: "2048"` hash to different artefacts
+(PUNCHLIST: untyped params).
+
+### Resolved vs configurable
+
+The scanner decides `configurable` and `confidence` from the *shape* of every
+captured value, not from the rule:
+
+| Captured value | Verdict | `configurable` | `confidence` |
+|---|---|---|---|
+| `2048`, `"RS256"` (a literal) | resolved | `false` | `1.0` |
+| `ec.SECP256R1()`, `modes.GCM` (call or dotted) | resolved | `false` | `1.0` |
+| `MAX_KEY_SIZE` (ALL_CAPS name) | resolved | `false` | `1.0` |
+| `configured_size` (lower/mixed-case name) | unresolved | `true` | `0.6` |
+| rule captures nothing | resolved | `false` | `1.0` |
+
+If a rule captures several values and any one is unresolved, the whole finding
+is `configurable`. The ALL_CAPS convention is a heuristic: a constant assigned
+from `os.environ` is genuinely configurable and will be misread. Fixing that
+needs constant propagation — see ADR-0004.
+
+## Choosing `primitive` and `usage`
+
+`primitive` is what the algorithm *is*. `usage` is what this call site *does
+with it*. Keep them independent — a recommendation is only correct if it
+matches usage, and collapsing them produces confident wrong advice.
+
+* **Key generation gets `usage: unknown`, always.** A freshly generated RSA key
+  may go on to sign or to transport, and the correct replacement differs
+  (ML-DSA vs ML-KEM). The correlator refines usage from the use site. Guessing
+  at the keygen site manufactures a wrong migration plan.
+* **MACs use `primitive: mac`, `usage: sign`.** The `Usage` vocabulary has no
+  `mac` member; authentication is the closest true statement.
+* **Protocols use `asset_type: protocol`, `primitive: unknown`.** A TLS version
+  is not a primitive. The suites it negotiates are the crypto, and they are
+  captured separately.
+* **Detect the safe things too.** SHA-256 and `os.urandom` have rules with
+  `flags: [control]`. An inventory that only lists problems cannot show
+  coverage, and drift detection needs to know what is correct as well as what
+  is not.
+
+## Rules for the rule id
+
+* Unique across the whole pack, and **no dots** — the scanner recovers the bare
+  id from Semgrep's `check_id` by taking the last dotted segment.
+* Prefix with the language: `py-`, then `go-`, `java-`, as packs are added.
+* The id ends up in every Finding's `Occurrence.detail` as `rule=<id>`, so it
+  is what an auditor sees. Name it after what it detects, not after the CVE.
+
+## Never put key material in a message
+
+`message` is copied into the Finding. A rule that matches key material must not
+interpolate the metavariable that binds to it:
+
+```yaml
+# WRONG -- exfiltrates the key into the Finding
+message: "ecdat|key=$K"
+
+# RIGHT -- record the fact and the location, nothing else
+message: "ecdat|"
+metadata:
+  redact: true
+```
+
+`redact: true` drops the snippet. It does **not** sanitise the message — that
+is the rule author's responsibility, and there is a negative test for it
+(`test_no_planted_secret_reaches_any_finding`).
+
+Independently of any rule, the scanner scrubs every snippet: a line carrying a
+PEM banner is dropped entirely, and any byte-string literal of 8 bytes or more
+is replaced. That second layer exists because a rule about a *cipher* routinely
+matches the same line a key literal sits on, and that rule has no idea the key
+is there. Write the `redact` flag anyway; do not rely on the net.
+
+## Testing a new rule
+
+Every rule needs three things before it lands, all under `testdata/`:
+
+1. `must_fire/<rule_id>.py` — minimal code that must produce the Finding.
+2. An entry in `answer_key.yaml` giving the expected algorithm, primitive,
+   usage, asset type, occurrence count, and any `params_any` values the rule
+   must capture.
+3. Nothing new firing on `must_not_fire/decoys.py`.
+
+The answer key is scored, and **precision is asserted at exactly 1.0**. A rule
+that fires on something not declared as ground truth fails the build even if
+the detection looks reasonable — which forces every new detection to be
+declared before it is allowed to count.

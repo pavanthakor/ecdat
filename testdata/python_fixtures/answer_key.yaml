@@ -1,0 +1,288 @@
+# Ground truth for the Python source scanner (Scanner A).
+#
+# This file is the measuring stick, not documentation of the implementation:
+# tests/test_scanner_source.py scores RECALL against `expected` and PRECISION
+# against the union of every entry here. Because precision is asserted at 1.0,
+# this key must be EXHAUSTIVE -- a real detection that is missing from here
+# counts as a false positive and fails the suite. That is deliberate: it forces
+# every new rule to be declared as ground truth before it is allowed to fire.
+#
+# Keys are (file, rule_id); `count` is how many distinct findings that pair must
+# produce. Line numbers are intentionally absent so fixtures stay editable, but
+# every occurrence locator is still asserted to be well-formed "path:line".
+
+expected:
+  must_fire/py_hashlib_md5.py:
+    - rule_id: py-hashlib-md5
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 2          # hashlib.md5(...) and hashlib.new("md5", ...)
+
+  must_fire/py_hashlib_sha1.py:
+    - rule_id: py-hashlib-sha1
+      algorithm: SHA-1
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 2
+
+  must_fire/py_hashlib_sha256.py:
+    - rule_id: py-hashlib-sha256
+      algorithm: SHA-256
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_hashlib_sha384.py:
+    - rule_id: py-hashlib-sha384
+      algorithm: SHA-384
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_hashlib_sha512.py:
+    - rule_id: py-hashlib-sha512
+      algorithm: SHA-512
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_hmac_md5.py:
+    - rule_id: py-hmac-md5
+      algorithm: HMAC-MD5
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_hmac_sha1.py:
+    - rule_id: py-hmac-sha1
+      algorithm: HMAC-SHA1
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_rsa_keygen.py:
+    - rule_id: py-rsa-keygen
+      algorithm: RSA
+      primitive: pke
+      usage: unknown        # deliberate: keygen does not reveal sign vs transport
+      asset_type: algorithm
+      count: 3              # literal 2048, variable 3072, pycryptodome 1024
+      params_any:
+        - {key_size: 2048}
+        - {key_size: 1024}
+
+  must_fire/py_ec_keygen.py:
+    - rule_id: py-ec-keygen
+      algorithm: ECDH
+      primitive: key-agreement
+      usage: unknown
+      asset_type: algorithm
+      count: 3
+      params_any:
+        - {curve: SECP256R1}
+        - {curve: P-256}
+
+  must_fire/py_ed25519_sign.py:
+    - rule_id: py-ed25519-sign
+      algorithm: Ed25519
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_ecdsa_sign.py:
+    - rule_id: py-ecdsa-sign
+      algorithm: ECDSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_aes_cipher.py:
+    - rule_id: py-aes-cipher
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 4
+      params_any:
+        - {mode: GCM}
+        - {mode: ECB}
+        - {mode: CTR}
+        - {mode: CBC}
+
+  must_fire/py_des.py:
+    - rule_id: py-des
+      algorithm: DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_des3.py:
+    - rule_id: py-des3
+      algorithm: 3DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_rc4.py:
+    - rule_id: py-rc4
+      algorithm: RC4
+      primitive: stream-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_blowfish.py:
+    - rule_id: py-blowfish
+      algorithm: Blowfish
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_jwt_rsa.py:
+    - rule_id: py-jwt-rsa
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - {alg: RS256}
+
+  must_fire/py_jwt_ecdsa.py:
+    - rule_id: py-jwt-ecdsa
+      algorithm: ECDSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - {alg: ES256}
+
+  must_fire/py_jwt_hmac.py:
+    - rule_id: py-jwt-hmac
+      algorithm: HMAC
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - {alg: HS256}
+
+  must_fire/py_jwt_none.py:
+    - rule_id: py-jwt-none
+      algorithm: none
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - {alg: none}
+
+  must_fire/py_ssl_weak_protocol.py:
+    - rule_id: py-ssl-weak-protocol
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      count: 2
+      params_any:
+        - {version: TLSv1}
+        - {version: TLSv1_1}
+
+  must_fire/py_ssl_set_ciphers.py:
+    - rule_id: py-ssl-set-ciphers
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      count: 1
+
+  must_fire/py_weak_random_secret.py:
+    - rule_id: py-weak-random-secret
+      algorithm: MT19937
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 2
+
+  must_fire/py_os_urandom.py:
+    - rule_id: py-os-urandom
+      algorithm: CSPRNG
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_pem_private_key.py:
+    - rule_id: py-pem-private-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1
+      redacted: true
+
+  must_fire/py_pem_certificate.py:
+    - rule_id: py-pem-certificate
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: certificate
+      count: 1
+      redacted: true
+
+  # The two key-material fixtures are AES call sites as well, so the cipher rule
+  # fires on the same line. Both findings are correct and both are ground truth.
+  must_fire/py_hardcoded_cipher_key.py:
+    - rule_id: py-hardcoded-cipher-key
+      algorithm: AES
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1
+      redacted: true
+    - rule_id: py-aes-cipher
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/py_hardcoded_iv.py:
+    - rule_id: py-hardcoded-iv
+      algorithm: AES
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1
+      redacted: true
+    - rule_id: py-aes-cipher
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+# Any finding anywhere under this path is a false positive.
+must_not_fire:
+  - must_not_fire/decoys.py
+
+# Strings that must never appear in any emitted snippet. The fixtures plant
+# them inside key material; the redaction guard must keep them out.
+secret_sentinels:
+  - SECRETSENTINEL
+  - NOTAREALKEY
+  - NOTAREALCERT

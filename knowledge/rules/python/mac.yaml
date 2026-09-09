@@ -1,0 +1,53 @@
+# Message authentication codes.
+#
+# Sources:
+#   NIST SP 800-107 Rev.1 Sec. 5.3 -- HMAC security depends on key length, not
+#   on the collision resistance of the hash, so HMAC-MD5 is not as catastrophic
+#   as MD5 signatures. It is still disallowed for new designs.
+#   NIST SP 800-131A Rev.2 Table 9 -- HMAC-SHA1 acceptable only for legacy use.
+rules:
+  - id: py-hmac-md5
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: HMAC-MD5
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      quantum_note: >-
+        Symmetric: Grover halves the effective key strength, so a 256-bit MAC
+        key is still fine. The problem here is classical -- MD5 is retired
+        (NIST SP 800-131A Rev.2). Replace with HMAC-SHA-256.
+      flags: [weak]
+    pattern-either:
+      - pattern: hmac.new(..., hashlib.md5, ...)
+      - pattern: hmac.new(..., digestmod=hashlib.md5, ...)
+      - patterns:
+          - pattern: hmac.new(..., digestmod=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](?i:md5)["']$
+
+  - id: py-hmac-sha1
+    languages: [python]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: HMAC-SHA1
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      quantum_note: >-
+        Legacy-use only per NIST SP 800-131A Rev.2 Table 9. Grover halves the
+        key margin; the classical retirement of SHA-1 is the binding reason to
+        move. Replace with HMAC-SHA-256.
+      flags: [weak]
+    pattern-either:
+      - pattern: hmac.new(..., hashlib.sha1, ...)
+      - pattern: hmac.new(..., digestmod=hashlib.sha1, ...)
+      - patterns:
+          - pattern: hmac.new(..., digestmod=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](?i:sha1|sha-1)["']$

@@ -1,0 +1,108 @@
+# Key material embedded in source.
+#
+# Sources:
+#   RFC 7468 -- textual (PEM) encodings of keys and certificates.
+#   NIST SP 800-57 Part 1 Rev.5 Sec. 5.3, 8.1.5 -- key material must be
+#     protected for its whole lifetime; a key committed to a repository is
+#     compromised the moment it is committed and must be treated as revoked.
+#   OWASP ASVS v4.0.3 V6.4 -- secrets must not be embedded in source.
+#
+# REDACTION CONTRACT. Every rule in this file sets `redact: true`, which makes
+# the scanner replace the snippet with "<redacted key material>" instead of the
+# matched line. Two consequences bind rule authors here:
+#
+#   1. No metavariable that could bind to key bytes may appear in `message`.
+#      The message is the scanner's capture channel and is copied into the
+#      Finding, so interpolating $K there would exfiltrate the very bytes the
+#      rule exists to flag. All messages in this file are therefore empty.
+#   2. `algorithm` records the surrounding cipher where the pattern makes it
+#      unambiguous and `unknown` otherwise. It never records the key.
+#
+# ECDAT stores the FACT and the LOCATION of key material. It never stores the
+# material. See ADR-0001 and PUNCHLIST #3.
+rules:
+  - id: py-pem-private-key
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      redact: true
+      quantum_note: >-
+        A private key committed to source is compromised regardless of its
+        algorithm (NIST SP 800-57 Pt.1 Rev.5 Sec. 5.3). Rotate first; only then
+        is its quantum exposure worth scoring. The algorithm is deliberately
+        left unknown -- the PEM banner is not parsed, because parsing it would
+        mean reading the key.
+      flags: [key-material, critical]
+    pattern-regex: '-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----'
+
+  - id: py-pem-certificate
+    languages: [python]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: certificate
+      redact: true
+      quantum_note: >-
+        A certificate pinned in source freezes a trust decision at authoring
+        time and will outlive the migration window it was written in. Its
+        signature algorithm and validity are scored by the certificate scanner,
+        which parses it out of band; this rule only records that source carries
+        one.
+      flags: [key-material]
+    pattern-regex: '-----BEGIN CERTIFICATE-----'
+
+  - id: py-hardcoded-cipher-key
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: AES
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      redact: true
+      quantum_note: >-
+        A symmetric key literal in source (OWASP ASVS V6.4). Every holder of the
+        repository holds the key, so the cipher's strength is irrelevant --
+        AES-256 with a committed key protects nothing. Rotate and move to a KMS
+        or an injected secret.
+      flags: [key-material, critical]
+    pattern-either:
+      - pattern: AES.new("...", ...)
+      - pattern: AES.new(b"...", ...)
+      - pattern: Cipher(algorithms.AES(b"..."), ...)
+      - pattern: Cipher(algorithms.AES("..."), ...)
+
+  - id: py-hardcoded-iv
+    languages: [python]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: AES
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      redact: true
+      quantum_note: >-
+        A fixed IV/nonce defeats the mode it feeds. Under CBC it makes
+        encryption deterministic; under CTR or GCM it is catastrophic --
+        reusing a GCM nonce with the same key leaks the authentication subkey
+        (NIST SP 800-38D Sec. 8.2). Classical, immediate, and unrelated to
+        quantum risk.
+      flags: [key-material]
+    pattern-either:
+      - pattern: AES.new(..., iv=b"...", ...)
+      - pattern: AES.new(..., IV=b"...", ...)
+      - pattern: AES.new(..., nonce=b"...", ...)
+      - pattern: AES.new($K, AES.$MODE, b"...")
+      - pattern: modes.CBC(b"...")
+      - pattern: modes.GCM(b"...")
+      - pattern: modes.CTR(b"...")
