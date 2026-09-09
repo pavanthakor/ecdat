@@ -1,0 +1,77 @@
+# Ground truth for the config scanner (ADR-0013).
+#
+# Keyed by (file, algorithm, endpoint) -- the endpoint is part of the key on
+# purpose, because attributing a directive to the WRONG server block is the
+# characteristic failure of a config parser and the one that would silently
+# ruin the correlator's join.
+#
+# Precision is asserted at exactly 1.0, so this must be exhaustive: a real
+# finding missing from here counts as a false positive.
+
+expected:
+  nginx/nginx.conf:
+    - algorithm: X25519MLKEM768
+      asset_type: algorithm
+      primitive: key-agreement
+      endpoint: "api.quantumbank.invalid:443"
+      hybrid: true
+      count: 1
+    - algorithm: TLS
+      asset_type: protocol
+      endpoint: "api.quantumbank.invalid:443"
+      min_version: TLSv1.3
+      count: 1
+    - algorithm: unknown
+      asset_type: certificate
+      endpoint: "api.quantumbank.invalid:443"
+      count: 1
+    - algorithm: prime256v1
+      asset_type: algorithm
+      primitive: key-agreement
+      endpoint: "legacy.quantumbank.invalid:8443"
+      hybrid: false
+      count: 1
+    - algorithm: TLS
+      asset_type: protocol
+      endpoint: "legacy.quantumbank.invalid:8443"
+      min_version: TLSv1
+      count: 1
+
+  sshd_config:
+    - algorithm: SSH-KEX
+      asset_type: algorithm
+      primitive: key-agreement
+      endpoint: "sshd@quantumbank"
+      count: 1
+    - algorithm: SSH-CIPHERS
+      asset_type: algorithm
+      primitive: block-cipher
+      endpoint: "sshd@quantumbank"
+      count: 1
+    - algorithm: SSH-MACS
+      asset_type: algorithm
+      primitive: mac
+      endpoint: "sshd@quantumbank"
+      count: 1
+    - algorithm: SSH-HOSTKEY
+      asset_type: algorithm
+      primitive: signature
+      endpoint: "sshd@quantumbank"
+      count: 1
+
+  openssl.cnf:
+    - algorithm: X25519MLKEM768
+      asset_type: algorithm
+      primitive: key-agreement
+      endpoint: "openssl@quantumbank"
+      hybrid: true
+      count: 1
+    - algorithm: TLS
+      asset_type: protocol
+      endpoint: "openssl@quantumbank"
+      min_version: TLSv1.2
+      count: 1
+
+# Any finding from these files is a false positive.
+must_not_fire:
+  - nginx/conf.d/decoys.conf

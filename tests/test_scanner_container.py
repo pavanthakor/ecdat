@@ -113,7 +113,12 @@ def test_supports_only_image_targets() -> None:
 
 
 def test_registered_in_the_registry() -> None:
-    assert registry.available_ids() == ["container", "runtime-spool", "source"]
+    assert registry.available_ids() == [
+        "config",
+        "container",
+        "runtime-spool",
+        "source",
+    ]
     (scanner,) = registry.get_scanners(["container"])
     assert isinstance(scanner, ContainerScanner)
 

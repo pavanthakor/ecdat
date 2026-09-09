@@ -324,16 +324,15 @@
   host; `--no-enrich` turns them off, but there is no measurement of the
   overhead yet. Wants a benchmark before the agent runs anywhere continuously.
   *Raised: enrichment slice.*
-- **There is no config scanner, so the primary drift axis has no producer.**
-  ADR-0012 makes config-declared vs observed the primary axis, and nothing
-  emits config-declared components: no nginx.conf, sshd_config or TLS-terminator
-  reader exists. The source scanner emits source-code declared, which ADR-0012
-  classes as a SECONDARY signal answering declared-vs-shipped instead. The
-  correlator works on whatever components exist and its tests supply
-  config-declared components in the shape such a scanner will emit -- but until
-  it is written, R2/R3/R4 have no declared side in a real scan. **This is the
-  largest remaining gap in Pillar 2's story.**
-  *Raised: correlator slice. See [ADR-0012](docs/adr/0012-correlator-drift.md).*
+- ~~**There is no config scanner, so the primary drift axis has no producer.**~~
+  **Resolved.** `scanners/config` parses nginx (`server{}` blocks, so findings
+  carry a real `host:port` endpoint), `sshd_config` and `openssl.cnf`.
+  100% recall and 100% precision on 11 planted findings across three formats,
+  zero false positives on the decoys. R2/R3/R4 now run against a parsed
+  declared side -- the drift evidence cites `nginx.conf` at its real line --
+  rather than hand-built components.
+  *Raised: correlator slice. Resolved: config scanner slice, see
+  [ADR-0013](docs/adr/0013-config-scanner.md).*
 - **Group drift depends on the observed group being read.** R2's hard finding
   needs `observed_group`, which ADR-0011's accessor uretprobes only capture when
   the process calls `SSL_group_to_name`. Python's `ssl` module does not call it
@@ -356,3 +355,23 @@
   detected. Deferred deliberately: the four rules that landed are the ones the
   demo turns on.
   *Raised: correlator slice.*
+- **Apache is not parsed, and was deliberately not half-done.** `SSLProtocol`,
+  `SSLCipherSuite` and `SSLOpenSSLConfCmd Groups` are individually trivial, but
+  Apache's endpoint lives in `<VirtualHost *:443>` plus `ServerName` -- a second
+  block grammar, which is the same work as nginx again rather than the cheap
+  addition the slice allowed for. A half-parsed Apache config would attribute
+  directives to the wrong vhost, which is the one failure mode ADR-0013 is
+  arranged to prevent.
+  *Raised: config scanner slice. See [ADR-0013](docs/adr/0013-config-scanner.md).*
+- **HAProxy, Postfix, strongSwan, Envoy and Ingress annotations are not
+  parsed.** Each is another grammar. The three formats that landed are the ones
+  the demo turns on; the parser-per-format shape means each addition is
+  self-contained.
+  *Raised: config scanner slice.*
+- **A declared certificate is a reference, not a parse.** `ssl_certificate`
+  records the path with `resolved: false`; the file is usually not in the
+  scanned tree (it lives in the image), so its key size, signature algorithm
+  and validity come from the container scanner instead. Nothing yet joins the
+  two, so "this endpoint's certificate is RSA-2048 and expires in 2027" is not
+  answerable from a config scan alone.
+  *Raised: config scanner slice.*
