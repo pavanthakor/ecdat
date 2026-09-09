@@ -91,6 +91,13 @@ class ScanSummary(BaseModel):
     band_counts: dict[str, int]
     #: The highest component score in the scan; 0 for an empty CBOM.
     max_score: int
+    #: How many components carry drift, by kind. Empty when the views agree --
+    #: or when only one view was scanned, which `coverage_gaps` reports
+    #: separately, because "they agree" and "we did not look" are different
+    #: answers (ADR-0012).
+    drift_counts: dict[str, int]
+    #: Components whose correlation group was missing a view.
+    coverage_gaps: int
 
 
 @asynccontextmanager
@@ -152,7 +159,7 @@ def create_scan(body: TargetIn) -> ScanCreated:
     return ScanCreated(scan_id=scan.id, component_count=scan.component_count)
 
 
-def _verdict_summary(cbom_json: str) -> tuple[dict[str, int], int]:
+def _verdict_summary(cbom_json: str) -> tuple[dict[str, int], int, dict[str, int], int]:
     """Band counts and the top score, read back out of a stored CBOM.
 
     Parsed from the document rather than recomputed from the packs: the summary
@@ -161,20 +168,26 @@ def _verdict_summary(cbom_json: str) -> tuple[dict[str, int], int]:
     """
     counts = dict.fromkeys(BAND_NAMES, 0)
     top = 0
+    drift: dict[str, int] = {}
+    gaps = 0
     for component in json.loads(cbom_json).get("components", []):
         for prop in component.get("properties", []):
             if prop["name"] == "ecdat:band" and prop["value"] in counts:
                 counts[prop["value"]] += 1
             elif prop["name"] == "ecdat:score":
                 top = max(top, int(prop["value"]))
-    return counts, top
+            elif prop["name"] == "ecdat:drift:kind":
+                drift[prop["value"]] = drift.get(prop["value"], 0) + 1
+            elif prop["name"] == "ecdat:coverage:missing":
+                gaps += 1
+    return counts, top, drift, gaps
 
 
 @app.get("/scans")
 def list_scans() -> list[ScanSummary]:
     summaries = []
     for scan in store.list_scans():
-        band_counts, max_score = _verdict_summary(scan.cbom_json)
+        band_counts, max_score, drift_counts, gaps = _verdict_summary(scan.cbom_json)
         summaries.append(
             ScanSummary(
                 id=scan.id,
@@ -188,6 +201,8 @@ def list_scans() -> list[ScanSummary]:
                 component_count=scan.component_count,
                 band_counts=band_counts,
                 max_score=max_score,
+                drift_counts=drift_counts,
+                coverage_gaps=gaps,
             )
         )
     return summaries

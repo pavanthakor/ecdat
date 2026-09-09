@@ -31,6 +31,7 @@ from core.logs import get_logger
 from core.normalise import normalise, validate_cbom_json
 from core.scanner import ScanContext, Scanner, Target
 from core.schema import Finding
+from correlate.apply import apply_drift
 from policy.apply import DEFAULT_Z_YEARS, ScoreInputs, apply_policy
 from policy.engine import Pack, default_packs
 
@@ -181,6 +182,13 @@ def run_scan(
             knowledge_dir=ctx.knowledge_dir,
         ),
     )
+    validate_cbom_json(cbom_json)
+
+    # Correlation runs last, over the scored document: drift is a statement
+    # about components, and it raises their score, so it must see the policy
+    # verdict it is amending. A stored CBOM therefore carries findings,
+    # verdicts and drift together (ADR-0012).
+    cbom_json = apply_drift(cbom_json)
     validate_cbom_json(cbom_json)
 
     scan_id = store.save_scan(target, cbom_json)

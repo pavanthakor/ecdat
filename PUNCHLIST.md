@@ -324,3 +324,35 @@
   host; `--no-enrich` turns them off, but there is no measurement of the
   overhead yet. Wants a benchmark before the agent runs anywhere continuously.
   *Raised: enrichment slice.*
+- **There is no config scanner, so the primary drift axis has no producer.**
+  ADR-0012 makes config-declared vs observed the primary axis, and nothing
+  emits config-declared components: no nginx.conf, sshd_config or TLS-terminator
+  reader exists. The source scanner emits source-code declared, which ADR-0012
+  classes as a SECONDARY signal answering declared-vs-shipped instead. The
+  correlator works on whatever components exist and its tests supply
+  config-declared components in the shape such a scanner will emit -- but until
+  it is written, R2/R3/R4 have no declared side in a real scan. **This is the
+  largest remaining gap in Pillar 2's story.**
+  *Raised: correlator slice. See [ADR-0012](docs/adr/0012-correlator-drift.md).*
+- **Group drift depends on the observed group being read.** R2's hard finding
+  needs `observed_group`, which ADR-0011's accessor uretprobes only capture when
+  the process calls `SSL_group_to_name`. Python's `ssl` module does not call it
+  as part of `.cipher()`, so the common case may be the weaker
+  `declared-pqc-observed-unconfirmed` signal rather than a confirmed downgrade.
+  That is honest, and it means the headline drift is likelier to appear as
+  "unverified at runtime" than "downgraded" until enrichment coverage improves.
+  *Raised: correlator slice. See ADR-0011 and ADR-0012.*
+- **An unattributed observation joins every endpoint in its system.** The
+  observed view names no endpoint -- a uprobe sees a process, not an nginx
+  server block -- so it correlates against every configured endpoint for its
+  role. With one endpoint that is right; with several DIFFERENT configurations
+  in one system an observation cannot be assigned to one of them and the
+  correlator may compare it against the wrong config. Needs socket-level
+  attribution in the probe (local address/port at handshake time).
+  *Raised: correlator slice.*
+- **Only four drift rules, and no shipped-vs-observed rule.** A library the
+  image ships but the runtime never loads, or vice versa, is a real drift
+  (dead crypto, or crypto arriving from somewhere unaudited) and is not
+  detected. Deferred deliberately: the four rules that landed are the ones the
+  demo turns on.
+  *Raised: correlator slice.*
