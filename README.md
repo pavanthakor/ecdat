@@ -35,23 +35,55 @@ shipped library cannot deliver.
 |---|---|---|
 | **P1** | India DST roadmap compliance — CII deadlines, assurance levels, cited packs | ✅ **built** |
 | **P2** | Three-view drift — declared vs shipped vs observed, via eBPF | ✅ **built, proven on hardware** |
-| **P3** | Usage-aware recommendation + verified fix-it | 🟡 **partial — see below** |
+| **P3** | Usage-aware recommendation + verified fix-it | ✅ **built** |
 | **P4** | Mosca + blast-radius prioritisation | ✅ **built** |
 
-**On P3, honestly:** the *recommendation* half exists and is real — every policy
-rule carries a cited, usage-aware action, and the schema deliberately preserves
-`usage` (a generated RSA key is recorded as `usage: unknown`, not guessed,
-precisely because ML-KEM and ML-DSA are different answers). What the tool
-actually prints today:
+**On P3, honestly:** the *recommendation* half carries a cited, usage-aware
+action on every policy rule, and the schema deliberately preserves `usage` (a
+generated RSA key is recorded as `usage: unknown`, not guessed, precisely
+because ML-KEM and ML-DSA are different answers):
 
 > *Replace with a post-quantum algorithm chosen by **USAGE**: ML-KEM (FIPS 203)
 > for key establishment and key transport, ML-DSA (FIPS 204) for signatures, or
 > SLH-DSA (FIPS 205) where a conservative hash-based signature is preferred.
 > Increasing the key size does not help.*
 
-The **fix-it half does not exist**. There is no sandbox copy, no generated
-patch, no verified diff — `correlate/fixit/` is an empty directory. Calling P3
-"in progress" would overstate it.
+The **fix half now exists too** ([ADR-0015](docs/adr/0015-fixit.md)). `ecdat
+fix <scan-id>` generates a unified diff, applies it to a throwaway sandbox
+copy, re-runs the scanner that found the problem, and releases the diff **only
+if the original finding is gone and no new Critical appeared**. It never writes
+to the target and never auto-applies — ECDAT produces a verified patch, a human
+applies it.
+
+```
+$ ecdat fix 32f584a0 --scanner config --sector bfsi --exposure internet
+=== fix 2/2 -- component 5083a6a37971 ===
+  template : nginx-add-hybrid-group
+  status   : verified: re-scanned clean -- 'config' no longer reports this
+             finding on the patched sandbox copy, and no new Critical finding
+             appeared. Apply it yourself; ECDAT has not touched
+             testdata/quantumbank.
+  source   : NIST FIPS 203 (ML-KEM); OpenSSL 3.5.0 CHANGES.md (2025-04-08)...
+
+--- a/deploy/nginx.conf
++++ b/deploy/nginx.conf
+@@ -19,6 +19,6 @@
+         ssl_ciphers         AES128-SHA:DES-CBC3-SHA;
+-        ssl_ecdh_curve      prime256v1;
++        ssl_ecdh_curve      X25519MLKEM768;
+```
+
+Four templates ship — `nginx-weak-protocol`, `nginx-add-hybrid-group`,
+`openssl-cnf-groups`, `md5-to-sha256` — chosen by one rule: a template ships
+only where a **registered scanner can re-read the file it edits**. That rule is
+why `dep-bump` and `dockerfile-base-bump` are *not* here; see the limitations
+below.
+
+The refusals are as much of the feature as the patches. `md5-to-sha256` fires
+only where MD5 is a checksum; over a password it declines and says why —
+SHA-256 there is a faster wrong answer, and the real fix is a memory-hard KDF.
+Where usage cannot be read from the call site at all, it declines rather than
+guessing.
 
 ---
 
@@ -176,7 +208,18 @@ cannot be pip-installed into a venv. `make verify` checks both.
 
 # a spool directory the agent wrote
 .venv/bin/python cli.py scan /tmp/ecdat-spool --kind spool --system payments
+
+# propose verified fixes for a stored scan — NEVER writes to the target
+.venv/bin/python cli.py fix <scan-id> --sector bfsi --exposure internet
+.venv/bin/python cli.py fix <scan-id> --out patches/   # save verified .patch files
 ```
+
+`fix` re-reads the target (a diff must be generated against the bytes that are
+there *now*, not the ones a stored CBOM remembers), proposes a patch per
+fixable finding, and proves each one on a sandbox copy before printing it.
+`--sector` and `--exposure` are re-supplied because the scan row does not keep
+them, and they matter: they decide whether a finding a fix *introduces* counts
+as Critical, and therefore whether that fix is rejected.
 
 `--sector`, `--data-class` and `--exposure` are the context that decides
 severity: the same RSA-2048 scores **98/Critical** in a BFSI system holding
@@ -258,7 +301,15 @@ before believing anything above:
   rather than hidden.
 - **Dependency, binary and network scanners are designed, not built.** Four of a
   planned seven scanner families exist.
-- **P3 fix-it does not exist** — recommendations are emitted, patches are not.
+- **Fix templates are a starter set** — four templates over nginx,
+  `openssl.cnf` and Python MD5. `dep-bump` and `dockerfile-base-bump` are
+  deliberately absent: nothing reads a Dockerfile or a dependency manifest yet,
+  so their diffs could be generated but never verified by re-scan, and ECDAT
+  does not ship a fix it cannot confirm.
+- **A fix is verified alone.** Two diffs touching one file are each proved on
+  their own; nothing proves they apply together. The loop also costs a sandbox
+  copy and two scans per finding, which is why it is opt-in rather than part of
+  every scan.
 - **Runtime enrichment depends on the application.** The negotiated cipher and
   group are read via uretprobes on libssl's public accessors, so they are
   captured only when the process asks libssl for them. A silent service yields

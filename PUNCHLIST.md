@@ -385,6 +385,72 @@
   in `knowledge/rules/README.md` was written to be language-agnostic for
   exactly this.
   *Raised: KPI slice. See [ADR-0014](docs/adr/0014-quantumbank-kpi.md).*
+- ~~**P3 fix-it is not built.**~~ **Resolved** by the fix-it slice.
+  `correlate/fixit/` proposes a unified diff, applies it to a `tempfile`
+  sandbox copy, re-runs the producing scanner over the copy, and releases the
+  diff only if the original finding is gone AND no new Critical appeared.
+  Never auto-applies; read-only on the real target, proved three ways (a tree
+  hash, a `Path.open` write-mode guard, and a mutation test that disables the
+  copy and asserts the tree *does* change). Four templates ship:
+  `nginx-weak-protocol`, `nginx-add-hybrid-group`, `openssl-cnf-groups`,
+  `md5-to-sha256`. **Pillar 3 is complete.**
+  *Raised: README, P3 status. Resolved: fix-it slice, see
+  [ADR-0015](docs/adr/0015-fixit.md).*
+- **The shipped fix templates are a starter set: four templates, two formats,
+  one language.** They cover the QuantumBank demo path (nginx, `openssl.cnf`,
+  Python MD5) and nothing else. sshd `KexAlgorithms`/`Ciphers` is the obvious
+  next one — the config scanner already parses it, so it re-verifies for free.
+  Apache, HAProxy, Envoy and Ingress annotations each need their parser first
+  (same blocker as the config-scanner punch-list entries above), and Go/JS
+  source fixes need their rule packs. The template contract in
+  `correlate/fixit/template.py` was written to make each addition
+  self-contained: one class, one entry in `DEFAULT_TEMPLATES`.
+  *Raised: fix-it slice.*
+- **`dep-bump` and `dockerfile-base-bump` are BLOCKED on their producer
+  scanner.** Both were in the fix-it slice as framed and were deliberately not
+  shipped: nothing in ECDAT reads a Dockerfile or a dependency manifest
+  (`scanners/deps` is an empty directory), and the container scanner reads
+  `dpkg`/`apk` databases from inside layer blobs of an image tar, which a
+  unified text diff cannot patch. Both diffs could be generated and neither
+  could be verified by re-scan, which is the one thing ADR-0015 refuses to
+  ship. **Add the fix template when the scanner lands** — a Dockerfile parser
+  (`FROM`, pinned `apt-get install pkg=version`) resolved against
+  `knowledge/libraries.yaml`, or a real `scanners/deps`. The capability floor
+  the templates would use is already in the pack
+  (`OpenSSL pqc_capable_from: 3.5.0`).
+  `test_every_shipped_template_names_a_registered_scanner` is what stops an
+  unverifiable template creeping back in.
+  *Raised: fix-it slice. See [ADR-0015](docs/adr/0015-fixit.md).*
+- **Fixes are verified one at a time, and the loop is expensive.** One sandbox
+  copy plus two scans per finding — negligible for config, ~3s per finding for
+  source, because semgrep runs twice. Two verified diffs touching the same file
+  are each proved ALONE; nothing proves they apply together or that the
+  combination is still clean. For the four shipped templates they touch
+  distinct lines, but that is a property of these templates rather than a
+  guarantee. Wants batching (one sandbox, several independent fixes, one
+  re-scan) and a combined-application check before it runs over an estate.
+  *Raised: fix-it slice.*
+- **"No new Critical" is the only blast-radius gate on a fix.** A fix that
+  introduces a new HIGH is accepted and merely reported in `new_findings`.
+  Critical is the defensible line for an automatic refusal, but the threshold
+  is a policy decision hard-coded in `correlate/fixit/engine.py`
+  (`BLOCKING_BAND`) rather than something a pack can set.
+  *Raised: fix-it slice.*
+- **`ecdat fix` does not update the stored scan, so the dashboard cannot show
+  fixes.** It prints diffs, saves `.patch` files and can write a fix-annotated
+  CBOM to a file, but it does not write back to the store — silently rewriting
+  stored history is worse than not showing fixes. Needs an API route and a
+  decision about whether a fix pass produces a new scan row or amends one.
+  Belongs with the same store migration that owes `scanners_ran`, the verdict
+  summary, and `sector`/`exposure`.
+  *Raised: fix-it slice.*
+- **`ecdat fix` re-takes `--sector` and `--exposure` because the scan row does
+  not keep them.** They are not cosmetic here: they decide whether a finding a
+  fix INTRODUCES counts as Critical, and therefore whether that fix is
+  rejected. The defaults (`other`/`unknown`) are the permissive direction, so
+  a fix run without them is judged more leniently than the scan that found the
+  problem. Closed by the same store migration as the entry above.
+  *Raised: fix-it slice.*
 - **KPI recall is a statement about a fixture we wrote.** 100% on QuantumBank
   means the pipeline detects what it claims to detect on a realistic-but-small
   estate. It does NOT mean ECDAT finds all cryptography, and it should never be
