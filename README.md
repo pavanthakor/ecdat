@@ -503,6 +503,7 @@ consequences:
 | [0030](docs/adr/0030-usage-classification.md) | Usage classification drives the PQC target; JS weak-RNG taint |
 | [0031](docs/adr/0031-qorbit-dashboard.md) | The Q-orbit console: every screen real or "not computed"; compare endpoint |
 | [0032](docs/adr/0032-qorbit-design-match.md) | Console matched to the design screenshots; dead frontend code removed |
+| [0033](docs/adr/0033-source-scanner-resilience.md) | Source scanner tolerates unparseable files; each recorded as a coverage gap |
 
 ---
 

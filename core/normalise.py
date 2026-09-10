@@ -20,7 +20,7 @@ from cyclonedx.schema import OutputFormat, SchemaVersion
 from cyclonedx.validation.json import JsonStrictValidator
 
 from core.cbom import build_cbom
-from core.scanner import Target
+from core.scanner import CoverageLog, Target
 from core.schema import Finding
 
 __all__ = [
@@ -69,11 +69,22 @@ def normalise(
     findings: Iterable[Finding],
     target: Target,
     *,
+    coverage: CoverageLog | None = None,
     serial_number: uuid.UUID | None = None,
     timestamp: datetime | None = None,
 ) -> tuple[Bom, str]:
-    """Dedup, build, serialise and validate. Returns the Bom and its JSON."""
-    bom = build_cbom(findings, target, serial_number=serial_number, timestamp=timestamp)
+    """Dedup, build, serialise and validate. Returns the Bom and its JSON.
+
+    ``coverage`` is what the scanners could not read (ADR-0033); a gap is
+    written as document metadata, and no gap writes nothing at all.
+    """
+    bom = build_cbom(
+        findings,
+        target,
+        coverage=coverage,
+        serial_number=serial_number,
+        timestamp=timestamp,
+    )
     cbom_json = serialise_cbom(bom)
     validate_cbom_json(cbom_json)
     return bom, cbom_json

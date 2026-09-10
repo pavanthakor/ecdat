@@ -37,14 +37,14 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from core import ECDAT_VERSION, store
 from core.logs import get_logger
 from core.normalise import normalise, validate_cbom_json
-from core.scanner import ScanContext, Scanner, Target, TargetKind
+from core.scanner import CoverageLog, ScanContext, Scanner, Target, TargetKind
 from core.schema import Finding
 from correlate.apply import DRIFT_PROPERTIES, apply_drift
 from correlate.fixit.apply import apply_fixes, propose_fixes
@@ -309,6 +309,13 @@ def run_scan(
         },
     )
 
+    # A FRESH coverage log per scan (ADR-0033), whatever the caller passed:
+    # contexts are reused -- the KPI harness runs three scans on one, and the
+    # API's scanner instances are process-wide -- and a gap from one scan must
+    # never land in another's document.
+    coverage = CoverageLog()
+    scan_ctx = replace(ctx, coverage=coverage)
+
     findings: list[Finding] = []
     ran: list[str] = []
     ran_scanners: list[Scanner] = []
@@ -341,7 +348,7 @@ def run_scan(
             )
             continue
 
-        produced, failure = _collect(scanner, target, ctx)
+        produced, failure = _collect(scanner, target, scan_ctx)
         findings.extend(produced)
 
         if failure is None:
@@ -371,7 +378,7 @@ def run_scan(
 
     # Deliberately outside any try/except: a document that does not validate is
     # a failure of ECDAT, not of a plugin, and must not be written.
-    bom, cbom_json = normalise(findings, target)
+    bom, cbom_json = normalise(findings, target, coverage=coverage)
 
     # Score before storing, so a stored CBOM is always a scored CBOM. Re-scoring
     # an estate under new guidance is then `ecdat rescore` over the stored
@@ -425,6 +432,10 @@ def run_scan(
             "scanners_ran": ran,
             "scanners_failed": failed,
             "scanners_skipped": skipped,
+            "files_unparsed": sum(1 for g in coverage.gaps if g.kind == "unparsed"),
+            "files_partially_parsed": sum(
+                1 for g in coverage.gaps if g.kind == "partially-parsed"
+            ),
             "packs_applied": [f"{p.name}@{p.version}" for p in resolved_packs],
         },
     )

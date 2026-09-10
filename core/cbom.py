@@ -47,7 +47,7 @@ from cyclonedx.model.crypto import (
 
 from core.identity import finding_identity
 from core.params import canonicalise_params
-from core.scanner import Target
+from core.scanner import CoverageLog, Target
 from core.schema import AssetType, Evidence, Finding, Occurrence, Primitive, Usage
 
 __all__ = ["build_cbom", "dedup"]
@@ -486,21 +486,99 @@ def _component(group: _Group) -> Component:
 _SERIAL_NAMESPACE = uuid.UUID("6f0c1f6a-9d4e-4b7a-8c21-ecda700cb0b0")
 
 
-def _content_serial_number(groups: Sequence[_Group], target: Target) -> uuid.UUID:
-    """A serial number derived from the content, so re-scanning is a no-op diff."""
+def _content_serial_number(
+    groups: Sequence[_Group], target: Target, coverage: CoverageLog | None = None
+) -> uuid.UUID:
+    """A serial number derived from the content, so re-scanning is a no-op diff.
+
+    Coverage gaps count as content (ADR-0033): a document that says "two files
+    could not be parsed" is not the same document as one that does not. Folded
+    in ONLY when there is a gap, so every existing serial number is unchanged.
+    """
+    gaps = [
+        f"gap:{g.scanner}:{g.kind}:{g.path}"
+        for g in (coverage.gaps if coverage else [])
+    ]
     digest = blake2b(
         "\x1f".join(
-            [target.system or target.ref, *(g.identity for g in groups)]
+            [target.system or target.ref, *(g.identity for g in groups), *gaps]
         ).encode("utf-8"),
         digest_size=16,
     ).hexdigest()
     return uuid.uuid5(_SERIAL_NAMESPACE, f"urn:ecdat:cbom:{digest}")
 
 
+def _files(count: int) -> str:
+    return f"{count} file" if count == 1 else f"{count} files"
+
+
+def _coverage_note(coverage: CoverageLog, scanner: str) -> str:
+    examined = coverage.examined.get(scanner, 0)
+    unparsed = len(
+        {g.path for g in coverage.gaps if g.scanner == scanner and g.kind == "unparsed"}
+    )
+    partial = len(
+        {
+            g.path
+            for g in coverage.gaps
+            if g.scanner == scanner and g.kind == "partially-parsed"
+        }
+    )
+    if coverage.nothing_parsed(scanner):
+        return (
+            f"{scanner}: nothing could be parsed -- {unparsed} of {_files(examined)} "
+            "examined failed to parse, so this document says nothing about them. It "
+            "is not a clean result."
+        )
+    verb = "was" if partial == 1 else "were"
+    return (
+        f"{scanner}: {unparsed} of {_files(examined)} examined could not be parsed "
+        f"and {partial} {verb} only partially parsed; findings from what could not "
+        "be read are absent, not clean."
+    )
+
+
+def _coverage_properties(coverage: CoverageLog | None) -> list[Property]:
+    """What the scanners could not read, as scan-level metadata (ADR-0033).
+
+    Written ONLY when there is a gap, so a fully-read scan keeps exactly the
+    bytes it had before this existed. Metadata rather than a component: a file
+    that could not be read is not an artefact, and inventing one would inflate
+    every count in the document.
+    """
+    if coverage is None or not coverage.gaps:
+        return []
+    unparsed = sorted({g.path for g in coverage.gaps if g.kind == "unparsed"})
+    partial = sorted({g.path for g in coverage.gaps if g.kind == "partially-parsed"})
+    properties = [
+        Property(name="ecdat:coverage:unparsed", value=str(len(unparsed))),
+        *(Property(name="ecdat:coverage:unparsed:file", value=p) for p in unparsed),
+        Property(name="ecdat:coverage:partially_parsed", value=str(len(partial))),
+        *(
+            Property(name="ecdat:coverage:partially_parsed:file", value=p)
+            for p in partial
+        ),
+    ]
+    for scanner in sorted({g.scanner for g in coverage.gaps}):
+        properties.append(
+            Property(
+                name=f"ecdat:coverage:{scanner}:examined",
+                value=str(coverage.examined.get(scanner, 0)),
+            )
+        )
+        properties.append(
+            Property(
+                name="ecdat:coverage:note", value=_coverage_note(coverage, scanner)
+            )
+        )
+    return properties
+
+
 def build_cbom(
     findings: Iterable[Finding],
     target: Target,
     *,
+    coverage: CoverageLog | None = None,
     serial_number: uuid.UUID | None = None,
     timestamp: datetime | None = None,
 ) -> Bom:
@@ -515,8 +593,12 @@ def build_cbom(
     """
     groups = _group_findings(findings, target)
     bom = Bom(components=[_component(g) for g in groups])
-    bom.serial_number = serial_number or _content_serial_number(groups, target)
+    bom.serial_number = serial_number or _content_serial_number(
+        groups, target, coverage
+    )
     # cyclonedx types this setter as non-optional, but None is accepted and
     # serialises as "no timestamp", which is what determinism needs.
     bom.metadata.timestamp = timestamp  # type: ignore[assignment]
+    # A SortedSet ordered by (name, value): deterministic without further help.
+    bom.metadata.properties.update(_coverage_properties(coverage))
     return bom

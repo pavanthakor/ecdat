@@ -17,14 +17,24 @@ Two rules bind every implementation:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 
 from core.schema import Finding, View
 
-__all__ = ["Exposure", "ScanContext", "Scanner", "Sector", "Target", "TargetKind"]
+__all__ = [
+    "CoverageGap",
+    "CoverageLog",
+    "Exposure",
+    "GapKind",
+    "ScanContext",
+    "Scanner",
+    "Sector",
+    "Target",
+    "TargetKind",
+]
 
 #: What sort of thing is being scanned. Determines which plugins apply and
 #: which view their findings land in.
@@ -84,6 +94,59 @@ class Target:
     exposure: Exposure = "unknown"
 
 
+#: How much of a file a scanner could read (ADR-0033). ``unparsed``: nothing,
+#: so no finding can have come from it. ``partially-parsed``: the parser
+#: recovered, so findings from the part it read are real -- and the rest of the
+#: file went unexamined all the same.
+GapKind = Literal["unparsed", "partially-parsed"]
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageGap:
+    """A file a scanner examined and could not fully read.
+
+    A file the parser rejected contributes no finding, and without this record
+    its silence would read as a clean file. It is not one.
+    """
+
+    scanner: str
+    #: As the scanner reported it -- the same spelling its findings' evidence
+    #: locators use, so the two can be cross-referenced.
+    path: str
+    kind: GapKind
+    #: The parser's own word for it, e.g. ``"Syntax error"``, ``"PartialParsing"``.
+    reason: str
+
+
+@dataclass(slots=True)
+class CoverageLog:
+    """Per-scan record of what the scanners could NOT read (ADR-0033).
+
+    Separate from the findings on purpose, like the binary scanner's coverage
+    report: "six findings" and "six findings, and two files could not be
+    parsed" are different statements, and only the second is safe to act on.
+    """
+
+    gaps: list[CoverageGap] = field(default_factory=list)
+    #: Files each scanner EXAMINED, readable or not -- the denominator that
+    #: turns "two files could not be parsed" into "two of five".
+    examined: dict[str, int] = field(default_factory=dict)
+
+    def record(self, scanner: str, examined: int, gaps: Iterable[CoverageGap]) -> None:
+        self.examined[scanner] = self.examined.get(scanner, 0) + examined
+        self.gaps.extend(gaps)
+        # One order, however many targets or scanners contributed.
+        self.gaps.sort(key=lambda g: (g.scanner, g.path, g.kind, g.reason))
+
+    def nothing_parsed(self, scanner: str) -> bool:
+        """True when ``scanner`` examined files and could read NONE of them."""
+        examined = self.examined.get(scanner, 0)
+        unparsed = {
+            g.path for g in self.gaps if g.scanner == scanner and g.kind == "unparsed"
+        }
+        return examined > 0 and len(unparsed) >= examined
+
+
 @dataclass(frozen=True, slots=True)
 class ScanContext:
     """Everything a scanner is allowed to depend on besides its target."""
@@ -94,6 +157,13 @@ class ScanContext:
     #: Writable working area. The one place a scanner may create files;
     #: never write inside the target.
     scratch_dir: Path
+    #: Where a scanner reports what it could NOT read (ADR-0033). Per-scan: the
+    #: orchestrator hands every scan a fresh log, so two scans -- or two API
+    #: requests sharing a registry's scanner instances -- can never share one.
+    #: ``None`` means nobody is collecting; a scanner still LOGS what it could
+    #: not read, it just has nowhere durable to record it. Not part of the
+    #: context's identity, so it is excluded from equality and hashing.
+    coverage: CoverageLog | None = field(default=None, compare=False)
 
 
 @runtime_checkable

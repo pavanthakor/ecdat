@@ -43,11 +43,13 @@ import re
 import shutil
 import subprocess
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast, get_args
 
-from core.scanner import ScanContext, Target
+from core.logs import get_logger
+from core.scanner import CoverageGap, ScanContext, Target
 from core.schema import (
     AssetType,
     Evidence,
@@ -68,6 +70,11 @@ __all__ = [
     "SourceScanError",
     "SourceScanner",
 ]
+
+_log = get_logger("source")
+
+#: The id every source finding -- and every coverage gap -- carries.
+SCANNER_ID = "source"
 
 #: The semgrep executable. Module-level so tests can point it at nothing.
 SEMGREP_BINARY = "semgrep"
@@ -275,8 +282,76 @@ def _run_semgrep(rules_dir: Path, target_path: Path) -> str:
     return completed.stdout
 
 
-def _parse_semgrep_json(payload: str) -> list[dict[str, Any]]:
-    """Pull the results array out of semgrep's JSON, or fail loudly."""
+#: The per-file PARSE errors semgrep reports at ``level: warn`` (ADR-0033).
+#:
+#: An ALLOWLIST, deliberately. Only these are tolerated, so an error type
+#: nobody listed -- a new semgrep failure mode, an internal matching error, an
+#: out-of-memory -- fails loud rather than being quietly skipped. STEP 0
+#: observed "Syntax error" (the file is rejected whole: Python, Java, most
+#: TypeScript) and "PartialParsing" (the parser recovered: Go, some TS) on
+#: semgrep 1.176.1; the other three names are the same family in semgrep's
+#: output schema. Were one misspelt here, the cost would be a loud failure,
+#: never a silent skip.
+_UNPARSED_TYPES = frozenset(
+    {"Syntax error", "Lexical error", "Other syntax error", "AST builder error"}
+)
+_PARTIAL_TYPE = "PartialParsing"
+
+
+@dataclass(frozen=True, slots=True)
+class SemgrepOutput:
+    """Semgrep's JSON, read: the results, and what it could not parse."""
+
+    results: list[dict[str, Any]]
+    #: One gap per file semgrep examined and could not fully parse.
+    gaps: tuple[CoverageGap, ...]
+    #: Files semgrep examined (``paths.scanned``). That list INCLUDES files
+    #: that failed to parse -- which is exactly why a gap is read from the
+    #: errors and never inferred from it: believing "scanned" would record a
+    #: file nobody read as a file that came back clean.
+    examined: int
+
+
+def _error_type(error: dict[str, Any]) -> str:
+    """Semgrep's ``type`` is a string -- or ``[name, locations]`` for
+    PartialParsing, which carries where parsing gave up."""
+    raw = error.get("type")
+    if isinstance(raw, list) and raw and isinstance(raw[0], str):
+        return raw[0]
+    return raw if isinstance(raw, str) else ""
+
+
+def _per_file_parse_gap(error: dict[str, Any]) -> CoverageGap | None:
+    """The coverage gap a TOLERABLE error describes, or ``None`` if it is fatal.
+
+    Tolerable means all three at once: ``level: warn``, a parse type on the
+    allowlist, and a named file. Missing any one, the error is not a statement
+    about one file's syntax, and treating it as a skip would hide it.
+    """
+    if error.get("level") != "warn":
+        return None
+    path = error.get("path")
+    if not isinstance(path, str) or not path:
+        return None
+    kind = _error_type(error)
+    if kind in _UNPARSED_TYPES:
+        return CoverageGap(scanner=SCANNER_ID, path=path, kind="unparsed", reason=kind)
+    if kind == _PARTIAL_TYPE:
+        return CoverageGap(
+            scanner=SCANNER_ID, path=path, kind="partially-parsed", reason=kind
+        )
+    return None
+
+
+def _parse_semgrep_json(payload: str) -> SemgrepOutput:
+    """Read semgrep's JSON: results, per-file parse gaps -- or fail loudly.
+
+    Before ADR-0033 EVERY entry in ``errors`` except a Timeout was fatal, so a
+    single unparseable file (a Juice Shop challenge snippet) discarded the
+    results semgrep had already produced for every other file. Semgrep itself
+    skips such a file and exits 0; the blindness was ours. A per-file parse
+    error is now a recorded gap; everything else is still an exception.
+    """
     try:
         document = json.loads(payload)
     except json.JSONDecodeError as exc:
@@ -293,18 +368,34 @@ def _parse_semgrep_json(payload: str) -> list[dict[str, Any]]:
     if not isinstance(results, list):
         raise SemgrepOutputError("semgrep 'results' is not a list")
 
-    # Rule-level errors mean a rule did not run. That is a silent hole in the
-    # inventory, so it is fatal rather than a warning.
-    fatal = [
-        error
-        for error in document.get("errors", [])
-        if isinstance(error, dict) and error.get("type") != "Timeout"
-    ]
-    if fatal:
-        messages = "; ".join(str(e.get("message", e))[:200] for e in fatal[:3])
-        raise SemgrepOutputError(f"semgrep reported rule errors: {messages}")
+    gaps: dict[str, CoverageGap] = {}
+    fatal: list[dict[str, Any]] = []
+    for error in document.get("errors", []):
+        if not isinstance(error, dict) or error.get("type") == "Timeout":
+            continue  # unchanged from before ADR-0033 -- see PUNCHLIST
+        gap = _per_file_parse_gap(error)
+        if gap is None:
+            fatal.append(error)
+        elif gap.path not in gaps or gap.kind == "unparsed":
+            # One gap per file; "unparsed" outranks "partially-parsed".
+            gaps[gap.path] = gap
 
-    return cast(list[dict[str, Any]], results)
+    if fatal:
+        # A rule that did not run, a config that did not load, an error with no
+        # file: a silent hole in the inventory, so it is fatal, not a skip.
+        messages = "; ".join(str(e.get("message", e))[:200] for e in fatal[:3])
+        raise SemgrepOutputError(
+            f"semgrep reported errors that are not per-file parse errors: {messages}"
+        )
+
+    scanned = (document.get("paths") or {}).get("scanned") or []
+    examined = len(scanned) if isinstance(scanned, list) else 0
+    return SemgrepOutput(
+        results=cast(list[dict[str, Any]], results),
+        gaps=tuple(sorted(gaps.values(), key=lambda g: g.path)),
+        # Never fewer than the files it failed on, even if `paths` is absent.
+        examined=max(examined, len(gaps)),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -737,7 +828,7 @@ class SourceScanner:
 
     # Annotated, not just assigned: the Scanner protocol declares `view: View`,
     # and a bare assignment infers `str`, which does not conform.
-    id: str = "source"
+    id: str = SCANNER_ID
     view: View = "declared"
 
     #: The engine version this plugin was verified against. Read by the
@@ -764,7 +855,30 @@ class SourceScanner:
                 "Set ECDAT_KNOWLEDGE_DIR or restore knowledge/rules/."
             )
 
-        results = _parse_semgrep_json(_run_semgrep(rules_dir, Path(target.ref)))
+        output = _parse_semgrep_json(_run_semgrep(rules_dir, Path(target.ref)))
+        results = output.results
+
+        # One unparseable file must not blind the scan (ADR-0033): it is
+        # LOGGED, and RECORDED where the orchestrator will write it into the
+        # document -- never dropped, and never counted as a clean file.
+        if output.gaps:
+            unparsed = [g.path for g in output.gaps if g.kind == "unparsed"]
+            partial = [g.path for g in output.gaps if g.kind == "partially-parsed"]
+            _log.warning(
+                "source_files_unparsed",
+                extra={
+                    "event": "source_files_unparsed",
+                    "target_ref": target.ref,
+                    "examined": output.examined,
+                    "unparsed_count": len(unparsed),
+                    "partially_parsed_count": len(partial),
+                    "nothing_parsed": len(unparsed) >= output.examined,
+                    "unparsed": unparsed[:20],
+                    "partially_parsed": partial[:20],
+                },
+            )
+        if ctx.coverage is not None:
+            ctx.coverage.record(self.id, output.examined, output.gaps)
 
         # Semgrep does not promise an order; the CBOM promises determinism.
         ordered = sorted(

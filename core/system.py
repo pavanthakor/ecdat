@@ -38,7 +38,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, get_args
 
@@ -53,7 +53,15 @@ from core.orchestrator import (
     scanner_records,
     score_and_correlate,
 )
-from core.scanner import Exposure, ScanContext, Scanner, Sector, Target, TargetKind
+from core.scanner import (
+    CoverageLog,
+    Exposure,
+    ScanContext,
+    Scanner,
+    Sector,
+    Target,
+    TargetKind,
+)
 from core.schema import Finding
 from policy.apply import DEFAULT_Z_YEARS, ScoreInputs
 from policy.engine import Pack, default_packs
@@ -319,7 +327,10 @@ def scan_system(
     z_years: int = DEFAULT_Z_YEARS,
 ) -> str:
     """Scan every target in ``manifest`` into ONE stored, correlated CBOM."""
-    context = default_context() if ctx is None else ctx
+    # One coverage log for the whole system scan (ADR-0033): every target's
+    # unreadable files land in the one document that describes the system.
+    coverage = CoverageLog()
+    context = replace(default_context() if ctx is None else ctx, coverage=coverage)
     Path(context.scratch_dir).mkdir(parents=True, exist_ok=True)
 
     # Every target is checked BEFORE anything runs, so a manifest with a typo
@@ -382,7 +393,7 @@ def scan_system(
         sector=manifest.sector,
         exposure=manifest.exposure,
     )
-    bom, cbom_json = normalise(findings, locus)
+    bom, cbom_json = normalise(findings, locus, coverage=coverage)
     cbom_json = _name_the_system(cbom_json, manifest.system)
     validate_cbom_json(cbom_json)
 

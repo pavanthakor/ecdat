@@ -518,6 +518,53 @@
   in no answer key and is not on an explicit, reasoned exemption list -- so the
   next untested rule is caught at commit, not in a post-commit audit.
   *Raised: verify-rule coverage follow-up.*
+- ~~**The source scanner aborts on one unparseable file (blind on real
+  repos).**~~ **Resolved** by
+  [ADR-0033](docs/adr/0033-source-scanner-resilience.md). Found scanning OWASP
+  Juice Shop: one malformed challenge snippet
+  (`data/static/codefixes/registerAdminChallenge_*.ts`) made ECDAT raise
+  `SemgrepOutputError` and keep ZERO source findings; the whole codebase yielded
+  one dependency finding. Semgrep itself had skipped the file and exited 0 --
+  ECDAT treated every entry in its `errors` array as fatal. Now a per-file parse
+  error (`warn`, an allowlisted parse type, a named file) is tolerated and the
+  file is recorded as a coverage gap (`ecdat:coverage:unparsed` /
+  `partially_parsed` in the CBOM metadata, plus a log event); anything else
+  still fails loud. *Raised and resolved: source-scanner resilience slice.*
+- **The console and the coverage PDF do not read `ecdat:coverage:*` yet.** A
+  scan whose every file failed to parse is honest in the stored document ("
+  nothing could be parsed ... not a clean result") and still LOOKS empty in the
+  Inventory and Scans screens and in the PDF. Needs: the parser in
+  `web/src/api/parse.ts` to read CBOM metadata, the Coverage screen and the
+  Inventory's "no artefacts" empty state to say N files could not be parsed, and
+  a section in `reports/coverage.py`. *Raised: source-scanner resilience slice.*
+- **Semgrep `Timeout` errors are tolerated SILENTLY.** Pre-existing, and kept
+  as-is in ADR-0033 to stay in frame: a rule that timed out on a file produced
+  nothing, and nothing records it. It is the same honesty gap as an unparsed
+  file and belongs in the same record, as a `timed-out` gap kind per (rule,
+  file). *Raised: source-scanner resilience slice.*
+- **Semgrep's parsers can recover from a syntax error WITHOUT reporting it.**
+  Measured in ADR-0033: `def f(:` over a valid body line produced findings and
+  no error, while a harder break produced a `Syntax error` and nothing. ECDAT
+  can only report the gaps semgrep reports; a silently-recovered file looks
+  fully parsed. Worth checking whether a semgrep option surfaces recovered
+  parses. *Raised: source-scanner resilience slice.*
+- **Other scanners' unreadable inputs do not reach the document.** The binary
+  scanner logs `binary_unparseable` and continues (ADR-0025), but the CBOM says
+  nothing about it; `ScanContext.coverage` is now the place to record it.
+  *Raised: source-scanner resilience slice.*
+- **`test_store`'s "no ./ecdat.db" guard fails whenever an operator's database
+  sits in the repo root.** `test_the_store_writes_where_ecdat_db_points` asserts
+  `not Path("ecdat.db").exists()`, which is red for a legitimate database a
+  console session created, not only for one the test wrote. It should compare
+  the file's presence and mtime before and after the test.
+  *Raised: verify-rule coverage follow-up (observed); recorded: resilience slice.*
+- **A loud semgrep failure says too little.** A broken rule pack raises
+  `SemgrepFailedError("semgrep exited 7 on <target>: ")` -- loud, as it must be,
+  but with nothing after the colon: `_run_semgrep` quotes stderr, and under
+  `--quiet --json` semgrep puts the reason (`InvalidRuleSchemaError`, "invalid
+  configuration file found") in the JSON on stdout. Quote the first error
+  messages from that JSON when it parses. *Raised: source-scanner resilience
+  slice.*
 - **A policy pack rule can be silently detached from its `verified` flag.**
   `quantum.yaml`'s layout let a rule's `verified:`/`source:` block sit after a
   COMMENT introducing the NEXT rule. Inserting a rule between them moved the
