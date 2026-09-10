@@ -74,11 +74,48 @@
   host scan. Needs a job model: accept, return a scan id immediately, and let
   the dashboard poll status.
   *Raised: Phase 0, scan pipe slice. See ADR-0003 Consequences.*
+- **Schema changes are additive-only, by rule, not by accident.** `init_db()`
+  introspects `PRAGMA table_info` and issues `ALTER TABLE ... ADD COLUMN` for
+  anything missing (ADR-0016). Deliberate while ECDAT is one SQLite file per
+  developer, with no deployed installations and no downgrade requirement.
+  **The moment a change needs to DROP, RENAME or RETYPE a column -- or needs to
+  run against a database somebody else owns -- this approach has reached its
+  limit and Alembic is the answer, not a bigger `ADDED_COLUMNS`.** The models
+  are written so Alembic can be adopted without rework: no SQLite-only types,
+  application-generated ids, every added column nullable or defaulted.
+  *Raised: store migration. See [ADR-0016](docs/adr/0016-store-migration.md).*
+- **`parent_scan_id` is not a database foreign key.** SQLite enforces foreign
+  keys only with a per-connection pragma, so declaring one would advertise a
+  guarantee that is not switched on. The link is maintained by `core/store.py`,
+  the only module that writes it, and nothing prevents an orphan if a parent is
+  ever deleted (nothing deletes today). A real FK belongs with the PostgreSQL
+  move.
+  *Raised: store migration.*
+- **Derived-row chains are permitted but unexplored.** Nothing stops a rescore
+  of a rescore or a fix against a fix row: the columns allow it, no code walks a
+  lineage deeper than one level, and no test covers it. Decide whether chains
+  are meaningful (a fix re-verified under a new horizon?) or should be refused,
+  before the dashboard starts rendering trees.
+  *Raised: store migration.*
+- **`POST /scans/{id}/fix` is synchronous and slower than a scan.** Verifying a
+  fix copies the target and re-scans it twice per finding, so the request blocks
+  for the whole pass. The same job model `POST /scans` has owed since ADR-0003,
+  now with a worse worst case.
+  *Raised: store migration.*
+- **The migration backfills every un-summarised CBOM at first open.** One-off
+  and bounded by the number of pre-migration rows, but it makes the first open
+  of a large legacy database slower than every open after it. Fine at current
+  scale; wants batching if a database ever holds thousands of scans.
+  *Raised: store migration.*
 - **The API has no authentication and `GET /scans` is unpaginated.** It serves
   an estate's complete cryptographic inventory over plain localhost CORS. Needs
   authn/authz and pagination before it is exposed anywhere but a developer
-  machine.
-  *Raised: Phase 0, scan pipe slice.*
+  machine. **Widened by the store migration:** `GET /scans` now also returns
+  every derived row, and `GET /scans/{id}/fixes` serves verified patches for
+  the estate's weakest crypto -- a more attractive thing to read without
+  credentials than an inventory alone. STILL OWED, and now the largest open
+  item on this list.
+  *Raised: Phase 0, scan pipe slice. Widened: store migration.*
 - **Source detection has no dataflow, so two classes of finding are missed.**
   Scanner A matches per call site. An ALL_CAPS constant assigned from
   `os.environ` is reported as hard-coded when it is genuinely configurable, and
@@ -103,14 +140,15 @@
   `mode_flags`, but the *why* -- which is written in the rule and is the useful
   part -- is dropped. The policy engine will want the reason, not the bit.
   *Raised: Scanner A slice.*
-- **The scan record does not say which scanners ran.** `core/registry.py` knows
-  what is available and the structured log says what ran, but `store.Scan` keeps
-  only the CBOM and the target. So "was this estate ever scanned for binaries,
-  or does it just have no binary findings?" cannot be answered from the
-  database -- and those two states look identical in the dashboard. Needs the
-  scanner set (and ideally each scanner's version) persisted on the scan row.
-  *Raised: scanner-registry slice. See
-  [ADR-0005](docs/adr/0005-scanner-registry.md) Consequences.*
+- ~~**The scan record does not say which scanners ran.**~~ **Resolved** by the
+  store migration. `store.Scan.scanners_ran` holds `[{"id", "version"?}]`,
+  taken from the scanner SELECTION rather than from which plugins produced
+  findings -- a scanner that ran and found nothing has still looked. NULL means
+  UNKNOWN (a row predating the column) and `[]` means "known, and nothing ran";
+  the two are never collapsed, and a test asserts they stay distinguishable
+  through the store and the API.
+  *Raised: scanner-registry slice. Resolved: store migration, see
+  [ADR-0016](docs/adr/0016-store-migration.md).*
 - **Container scanning ignores layer whiteouts.** A file deleted in a later
   layer still produces a finding from the layer that introduced it. For
   supply-chain purposes that is arguably right -- the bytes shipped -- but it
@@ -159,19 +197,27 @@
   context, that test is what should stop it.
   *Raised: policy engine slice. Resolved: mosca/DST/NIST slice, see
   [ADR-0008](docs/adr/0008-mosca-dst-nist-packs.md).*
-- **`GET /scans` parses every stored CBOM to build its summary.** `band_counts`
-  and `max_score` are read back out of each stored document on every list call.
-  Correct (the summary must report what was stored, not what today's packs
-  would say) but O(scans x document size) per request. Wants the verdict
-  summary denormalised onto the scan row when the store gains a migration
-  story -- which is also where `scanners_ran` should land.
-  *Raised: policy engine slice.*
-- **Re-scoring a stored CBOM under updated packs has no entry point.**
-  `apply_policy` is idempotent and designed for exactly this, but nothing
-  exposes it: there is no `ecdat rescore` command and no API route, so today a
-  guidance change means re-scanning. The whole reason scoring is separate from
-  normalisation is to make that unnecessary.
-  *Raised: policy engine slice.*
+- ~~**`GET /scans` parses every stored CBOM to build its summary.**~~
+  **Resolved** by the store migration. `band_counts`, `max_score`,
+  `drift_counts` and `coverage_gaps` are denormalised onto the row by
+  `core/summary.py` at save time -- computed in the store, beside the bytes
+  they describe, so the columns cannot disagree with them. The migration
+  backfills them for older rows, since a summary IS derivable from the stored
+  document. The test that defends this corrupts a stored CBOM and asserts the
+  summary is unchanged, so a regression to parsing cannot pass.
+  *Raised: policy engine slice. Resolved: store migration, see
+  [ADR-0016](docs/adr/0016-store-migration.md).*
+- ~~**Re-scoring a stored CBOM under updated packs has no entry point.**~~
+  **Resolved** by the store migration. `ecdat rescore <scan-id> [--z-years N]`
+  and `POST /scans/{id}/rescore` re-apply the scoring pipeline to the STORED
+  document and write a new linked row; no scanner runs, and a test patches
+  every registered scanner to prove it. Scoring is now one shared function
+  (`orchestrator.score_and_correlate`) so a re-scored document is produced
+  exactly the way the original was -- including stripping the correlator's
+  carried pre-drift score first, without which a rescore amplified the OLD
+  number.
+  *Raised: policy engine slice. Resolved: store migration, see
+  [ADR-0016](docs/adr/0016-store-migration.md).*
 - **`quantum_status` severity ordering is hard-coded in the engine.**
   `broken > weakened > adequate > pqc` lives in `policy/engine.py` rather than
   in a pack, so a pack cannot introduce a new status without an engine change.
@@ -212,14 +258,14 @@
   it a second-pass rule, which the engine now supports -- a one-line change,
   deferred so the four-pack merge was proved with the simpler form first.
   *Raised: mosca/DST/NIST slice.*
-- **`sector`, `exposure` and `z_years` are not persisted on the scan row.**
-  They reach the CBOM as `ecdat:` properties on every component, so the stored
-  document is self-describing, but `store.Scan` still records only kind, ref,
-  system and data_class. Re-running policy over a stored CBOM under a different
-  CRQC horizon therefore needs the caller to remember the original context.
-  Belongs with the same store migration as `scanners_ran` and the verdict
-  summary.
-  *Raised: mosca/DST/NIST slice.*
+- ~~**`sector`, `exposure` and `z_years` are not persisted on the scan row.**~~
+  **Resolved** by the store migration. All three are columns now, so a derived
+  pass reproduces the original judgement instead of re-inventing it. They are
+  nullable on purpose: a migrated row leaves them NULL rather than being
+  backfilled with a guess, because unlike the verdict summary they are not
+  derivable from anything stored.
+  *Raised: mosca/DST/NIST slice. Resolved: store migration, see
+  [ADR-0016](docs/adr/0016-store-migration.md).*
 - ~~**The eBPF probe is UNPROVEN until a human runs it.**~~ **Resolved.**
   `--self-test` PASSED on kernel 7.0.0-31-generic / bcc 0.35.0 / OpenSSL 3.5:
   `SSL_do_handshake` fired 6 times on one real handshake, 8 events captured
@@ -436,21 +482,26 @@
   is a policy decision hard-coded in `correlate/fixit/engine.py`
   (`BLOCKING_BAND`) rather than something a pack can set.
   *Raised: fix-it slice.*
-- **`ecdat fix` does not update the stored scan, so the dashboard cannot show
-  fixes.** It prints diffs, saves `.patch` files and can write a fix-annotated
-  CBOM to a file, but it does not write back to the store — silently rewriting
-  stored history is worse than not showing fixes. Needs an API route and a
-  decision about whether a fix pass produces a new scan row or amends one.
-  Belongs with the same store migration that owes `scanners_ran`, the verdict
-  summary, and `sector`/`exposure`.
-  *Raised: fix-it slice.*
-- **`ecdat fix` re-takes `--sector` and `--exposure` because the scan row does
-  not keep them.** They are not cosmetic here: they decide whether a finding a
-  fix INTRODUCES counts as Critical, and therefore whether that fix is
-  rejected. The defaults (`other`/`unknown`) are the permissive direction, so
-  a fix run without them is judged more leniently than the scan that found the
-  problem. Closed by the same store migration as the entry above.
-  *Raised: fix-it slice.*
+- ~~**`ecdat fix` does not update the stored scan, so the dashboard cannot show
+  fixes.**~~ **Resolved** by the store migration, and resolved the way the
+  question was posed: a fix pass writes a NEW row (`kind="fix"`,
+  `parent_scan_id` set), never an in-place amend. `store._derived()` issues no
+  UPDATE at all, so the parent's immutability is structural rather than a
+  convention, and a mutation test performs the amend itself to prove the
+  byte-comparison notices. `POST /scans/{id}/fix` and `GET /scans/{id}/fixes`
+  give the dashboard its view.
+  *Raised: fix-it slice. Resolved: store migration, see
+  [ADR-0016](docs/adr/0016-store-migration.md).*
+- ~~**`ecdat fix` re-takes `--sector` and `--exposure` because the scan row
+  does not keep them.**~~ **Resolved** by the store migration. Context
+  resolution is one shared function -- explicit flag > what the parent row
+  recorded > the permissive default -- and the CLI flags now default to `None`
+  rather than to `other`/`unknown`, because "unsupplied" and "supplied as the
+  default" have to be distinguishable for inheritance to work at all.
+  `cli._inherited_context` is a named seam, and a mutation test disables the
+  inheritance and asserts the lenient default comes straight back.
+  *Raised: fix-it slice. Resolved: store migration, see
+  [ADR-0016](docs/adr/0016-store-migration.md).*
 - **KPI recall is a statement about a fixture we wrote.** 100% on QuantumBank
   means the pipeline detects what it claims to detect on a realistic-but-small
   estate. It does NOT mean ECDAT finds all cryptography, and it should never be

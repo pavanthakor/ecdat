@@ -36,6 +36,13 @@ def post_scan(client: TestClient, **body: object) -> dict[str, object]:
     return dict(response.json())
 
 
+def post_scan_id(client: TestClient, **body: object) -> str:
+    """`post_scan` narrowed to the id, which is a str by the API contract."""
+    scan_id = post_scan(client, **body)["scan_id"]
+    assert isinstance(scan_id, str)
+    return scan_id
+
+
 def test_health_is_ok(client: TestClient) -> None:
     response = client.get("/health")
 
@@ -201,3 +208,215 @@ def test_the_stored_cbom_carries_verdicts(client: TestClient) -> None:
     assert values["ecdat:band"] == "Medium"
     assert values["ecdat:quantum_status"] == "broken"
     assert "quantum-shor-broken-asymmetric" in values["ecdat:fired_rules"]
+
+
+# ---------------------------------------------------------------------------
+# The denormalised scan list (ADR-0016)
+#
+# The summary used to be recomputed by parsing every stored CBOM on every list
+# call -- O(scans x document size) per request. It now comes off columns, and
+# these tests are arranged so that a regression to parsing CANNOT pass: the
+# stored document is deliberately corrupted after the scan, so any code path
+# that reads it will either crash or return zeros.
+# ---------------------------------------------------------------------------
+
+
+def corrupt_stored_cbom(scan_id: str) -> None:
+    """Replace a stored CBOM with something unparseable.
+
+    Nothing in production does this. It is the only way to prove a summary was
+    NOT derived from the document, rather than merely that it happens to agree.
+    """
+    from sqlalchemy import text
+
+    from core import store
+
+    with store.get_engine().begin() as connection:
+        connection.execute(
+            text("UPDATE scans SET cbom_json = :doc WHERE id = :id"),
+            {"doc": "}{ not a document", "id": scan_id},
+        )
+
+
+def test_list_scans_summary_matches_a_full_cbom_parse(client: TestClient) -> None:
+    """Denormalisation correctness: the columns say what the document says."""
+    from core import store
+    from core.summary import summarise
+
+    scan_id = post_scan_id(client)
+    stored = store.get_scan(scan_id)
+    assert stored is not None
+    expected = summarise(json.loads(stored.cbom_json))
+
+    (summary,) = client.get("/scans").json()
+
+    assert summary["band_counts"] == expected.band_counts
+    assert summary["max_score"] == expected.max_score
+    assert summary["drift_counts"] == expected.drift_counts
+    assert summary["coverage_gaps"] == expected.coverage_gaps
+
+
+def test_list_scans_does_not_parse_the_stored_cbom(client: TestClient) -> None:
+    """The load-bearing assertion: corrupt the document, summary unchanged."""
+    scan_id = post_scan_id(client)
+    (before,) = client.get("/scans").json()
+
+    corrupt_stored_cbom(scan_id)
+
+    (after,) = client.get("/scans").json()
+    assert after == before
+
+
+def test_mutation_summarising_from_the_cbom_breaks_the_corrupted_row(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reintroduce the parse and the corrupted-row test stops holding."""
+    import api.app as api_app
+    from core import store
+    from core.summary import summarise
+
+    scan_id = post_scan_id(client)
+    (before,) = client.get("/scans").json()
+    corrupt_stored_cbom(scan_id)
+
+    def parse_the_document(scan: store.Scan) -> object:
+        return summarise(json.loads(scan.cbom_json))
+
+    monkeypatch.setattr(api_app, "_summary_for", parse_the_document)
+
+    with pytest.raises(json.JSONDecodeError):
+        client.get("/scans")
+    assert before["max_score"] >= 0
+
+
+def test_list_scans_reports_which_scanners_ran(client: TestClient) -> None:
+    post_scan(client, scanners=["source"])
+
+    (summary,) = client.get("/scans").json()
+
+    assert [entry["id"] for entry in summary["scanners_ran"]] == ["source"]
+
+
+def test_list_scans_distinguishes_an_unknown_scanner_set_from_an_empty_one(
+    client: TestClient,
+) -> None:
+    from core import store
+    from core.scanner import Target
+
+    post_scan(client, scanners=[])  # ran nothing, and we know it
+    unknown_id = store.save_scan(
+        Target(kind="repo", ref="/legacy"), '{"components":[]}'
+    )
+
+    summaries = {s["id"]: s for s in client.get("/scans").json()}
+
+    assert summaries[unknown_id]["scanners_ran"] is None
+    empty = next(s for i, s in summaries.items() if i != unknown_id)
+    assert empty["scanners_ran"] == []
+
+
+# ---------------------------------------------------------------------------
+# Fix and rescore routes
+# ---------------------------------------------------------------------------
+
+
+def test_post_fix_creates_a_linked_fix_row_and_leaves_the_parent_alone(
+    client: TestClient,
+) -> None:
+    from core import store
+
+    scan_id = post_scan_id(client, sector="bfsi", exposure="internet")
+    parent_before = client.get(f"/scans/{scan_id}/cbom").text
+
+    response = client.post(f"/scans/{scan_id}/fix", json={"scanners": ["source"]})
+
+    assert response.status_code == 201, response.text
+    fix_scan_id = response.json()["scan_id"]
+    assert fix_scan_id != scan_id
+    fix_row = store.get_scan(fix_scan_id)
+    assert fix_row is not None
+    assert fix_row.kind == store.KIND_FIX
+    assert fix_row.parent_scan_id == scan_id
+    # The parent is byte-identical.
+    assert client.get(f"/scans/{scan_id}/cbom").text == parent_before
+
+
+def test_post_fix_inherits_the_parents_scoring_context(client: TestClient) -> None:
+    from core import store
+
+    scan_id = post_scan_id(client, sector="bfsi", exposure="internet", z_years=7)
+
+    fix_id = client.post(f"/scans/{scan_id}/fix", json={}).json()["scan_id"]
+
+    fix_row = store.get_scan(fix_id)
+    assert fix_row is not None
+    assert fix_row.sector == "bfsi"
+    assert fix_row.exposure == "internet"
+    assert fix_row.z_years == 7
+
+
+def test_get_fixes_returns_nothing_before_a_fix_pass(client: TestClient) -> None:
+    scan_id = post_scan_id(client)
+
+    body = client.get(f"/scans/{scan_id}/fixes").json()
+
+    assert body["fix_scan_id"] is None
+    assert body["fixes"] == []
+
+
+def test_get_fixes_returns_the_fix_results(client: TestClient) -> None:
+    scan_id = post_scan_id(client)
+    fix_id = client.post(f"/scans/{scan_id}/fix", json={}).json()["scan_id"]
+
+    body = client.get(f"/scans/{scan_id}/fixes").json()
+
+    assert body["fix_scan_id"] == fix_id
+    assert body["parent_scan_id"] == scan_id
+    # minimal_repo has no fixable finding, but the contract must still hold.
+    assert isinstance(body["fixes"], list)
+    for entry in body["fixes"]:
+        assert entry["verified"] is (entry["diff"] is not None)
+
+
+def test_post_rescore_writes_a_linked_row_with_new_scores(client: TestClient) -> None:
+    from core import store
+
+    scan_id = post_scan_id(client, data_class="Sovereign", z_years=3)
+    before = client.get(f"/scans/{scan_id}/cbom").text
+
+    response = client.post(f"/scans/{scan_id}/rescore", params={"z_years": 30})
+
+    assert response.status_code == 201, response.text
+    rescored_id = response.json()["scan_id"]
+    row = store.get_scan(rescored_id)
+    assert row is not None
+    assert row.kind == store.KIND_RESCORE
+    assert row.parent_scan_id == scan_id
+    assert row.z_years == 30
+    assert row.scanners_ran == []
+    assert client.get(f"/scans/{scan_id}/cbom").text == before
+
+
+def test_post_fix_on_an_unknown_scan_is_404(client: TestClient) -> None:
+    assert client.post("/scans/nope/fix", json={}).status_code == 404
+
+
+def test_post_rescore_on_an_unknown_scan_is_404(client: TestClient) -> None:
+    assert client.post("/scans/nope/rescore").status_code == 404
+
+
+def test_get_fixes_on_an_unknown_scan_is_404(client: TestClient) -> None:
+    assert client.get("/scans/nope/fixes").status_code == 404
+
+
+def test_scan_summaries_carry_their_kind_and_parent(client: TestClient) -> None:
+    """Derived rows are listed, not hidden -- nothing silently dropped."""
+    scan_id = post_scan_id(client)
+    client.post(f"/scans/{scan_id}/rescore", params={"z_years": 30})
+
+    summaries = client.get("/scans").json()
+    kinds = {s["kind"] for s in summaries}
+
+    assert kinds == {"scan", "rescore"}
+    scans_only = client.get("/scans", params={"kind": "scan"}).json()
+    assert [s["id"] for s in scans_only] == [scan_id]

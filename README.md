@@ -210,16 +210,31 @@ cannot be pip-installed into a venv. `make verify` checks both.
 .venv/bin/python cli.py scan /tmp/ecdat-spool --kind spool --system payments
 
 # propose verified fixes for a stored scan — NEVER writes to the target
-.venv/bin/python cli.py fix <scan-id> --sector bfsi --exposure internet
+.venv/bin/python cli.py fix <scan-id>
 .venv/bin/python cli.py fix <scan-id> --out patches/   # save verified .patch files
+
+# re-score a stored CBOM against a different CRQC horizon — no re-scan
+.venv/bin/python cli.py rescore <scan-id> --z-years 30
 ```
 
 `fix` re-reads the target (a diff must be generated against the bytes that are
 there *now*, not the ones a stored CBOM remembers), proposes a patch per
-fixable finding, and proves each one on a sandbox copy before printing it.
-`--sector` and `--exposure` are re-supplied because the scan row does not keep
-them, and they matter: they decide whether a finding a fix *introduces* counts
-as Critical, and therefore whether that fix is rejected.
+fixable finding, and proves each one on a sandbox copy before printing it. It
+takes **no context flags**: sector, exposure and the CRQC horizon are read from
+the scan being fixed, so a fix is judged in the same context as the scan that
+found the problem. Flags override; they no longer have to be remembered.
+
+`rescore` re-applies the scoring pipeline to the **stored** document without
+running a single scanner — this is what the dashboard's Mosca slider calls.
+Both write a **new row** linked to the parent by `parent_scan_id`; neither
+amends it. An inventory somebody acted on is a record of what was true when
+they acted, so ECDAT adds to a scan's history rather than revising it:
+
+```
+$ ecdat rescore d3bd3e3d --z-years 30
+rescore_scan_id=29844d83 parent_scan_id=d3bd3e3d z_years=30 max_score=10
+                                    # was 40 at the 7-year horizon it was scanned with
+```
 
 `--sector`, `--data-class` and `--exposure` are the context that decides
 severity: the same RSA-2048 scores **98/Critical** in a BFSI system holding

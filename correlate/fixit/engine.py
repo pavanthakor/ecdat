@@ -47,7 +47,6 @@ from core import registry
 from core.identity import finding_identity, normalise_locator
 from core.logs import get_logger
 from core.normalise import normalise
-from core.orchestrator import default_context
 from core.scanner import ScanContext, Scanner, Target
 from core.schema import Finding
 from correlate.fixit.patch import PatchError, apply_unified_diff
@@ -370,7 +369,14 @@ def propose_fix(
         )
 
     resolved_packs = default_packs() if packs is None else list(packs)
-    ctx = default_context() if context is None else context
+    if context is None:
+        # Imported here, not at module scope: the orchestrator COMPOSES
+        # correlate (it runs the fix pass), so a module-level import back the
+        # other way would be a cycle as well as a layering inversion.
+        from core.orchestrator import default_context
+
+        context = default_context()
+    ctx = context
     return _verify(
         finding, target, template, diff, scanner, ctx, resolved_packs, z_years
     )

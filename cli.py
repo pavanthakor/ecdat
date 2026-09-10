@@ -28,10 +28,17 @@ from pathlib import Path
 
 from core import registry, store
 from core.logs import configure_logging
-from core.orchestrator import default_context, run_scan
-from core.scanner import Exposure, ScanContext, Scanner, Sector, Target, TargetKind
-from core.schema import Finding
-from correlate.fixit.apply import apply_fixes, propose_fixes, write_patches
+from core.orchestrator import (
+    UnknownScanError,
+    UnscannableTargetError,
+    default_context,
+    resolved_context,
+    run_fix,
+    run_rescore,
+    run_scan,
+)
+from core.scanner import Exposure, Sector, Target, TargetKind
+from correlate.fixit.apply import write_patches
 from correlate.fixit.engine import FixResult
 from policy.apply import DEFAULT_Z_YEARS
 
@@ -132,31 +139,28 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="re-collect findings with only this scanner; repeatable",
     )
-    # sector and exposure are NOT persisted on the scan row (see PUNCHLIST), so
-    # they have to be supplied again. They matter here: they decide whether a
-    # finding the fix introduces counts as Critical.
+    # These default to None, not to "other"/"unknown" -- the difference is
+    # load-bearing. An unsupplied flag means "use what the parent scan
+    # recorded"; falling straight to the permissive defaults would judge a fix
+    # more leniently than the scan that found the problem (ADR-0016).
     fix.add_argument(
         "--sector",
         choices=SECTORS,
-        default="other",
-        help=(
-            "sector this target serves. Not stored on the scan row, so it is "
-            "re-supplied here; it decides whether an introduced finding is "
-            "Critical"
-        ),
+        default=None,
+        help="override the sector recorded on the scan being fixed",
     )
     fix.add_argument(
         "--exposure",
         choices=EXPOSURES,
-        default="unknown",
-        help="how reachable the target is; same caveat as --sector",
+        default=None,
+        help="override the exposure recorded on the scan being fixed",
     )
     fix.add_argument(
         "--crqc-years",
         type=int,
-        default=DEFAULT_Z_YEARS,
+        default=None,
         metavar="Z",
-        help=f"years until a CRQC (default {DEFAULT_Z_YEARS})",
+        help="override the CRQC horizon recorded on the scan being fixed",
     )
     fix.add_argument(
         "--out",
@@ -171,6 +175,29 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="write the fix-annotated CBOM here",
+    )
+
+    rescore = subcommands.add_parser(
+        "rescore",
+        help="re-score a stored CBOM under a new CRQC horizon (no re-scan)",
+    )
+    rescore.add_argument("scan_id", help="the id of a scan already in the store")
+    rescore.add_argument(
+        "--z-years",
+        type=int,
+        default=None,
+        metavar="Z",
+        help=(
+            "years until a cryptographically relevant quantum computer. "
+            "Defaults to the horizon the scan was originally scored against"
+        ),
+    )
+    rescore.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=None,
+        help="write the re-scored CBOM here instead of stdout",
     )
     return parser
 
@@ -218,39 +245,6 @@ def _scan(args: argparse.Namespace) -> int:
     return 0
 
 
-def _stored_kind(value: str) -> TargetKind | None:
-    """Narrow a target kind read back out of the store to the closed vocabulary.
-
-    ``store.Scan.target_kind`` is a plain column, so a row could in principle
-    hold anything. Refusing an unrecognised kind is better than casting: a fix
-    run against a target ECDAT cannot classify would pick the wrong scanners.
-    """
-    for kind in TARGET_KINDS:
-        if value == kind:
-            return kind
-    return None
-
-
-def _collect_findings(
-    scanners: Sequence[Scanner], target: Target, ctx: ScanContext
-) -> list[Finding]:
-    """Re-read the target so fixes are proposed against what is there NOW.
-
-    A stored CBOM records what a scan saw; a fix has to be generated against
-    the current bytes, or it patches a line that has since moved. A scanner
-    that fails degrades the fix run the same way it degrades a scan.
-    """
-    findings: list[Finding] = []
-    for scanner in scanners:
-        if not scanner.supports(target):
-            continue
-        try:
-            findings.extend(scanner.scan(target, ctx))
-        except Exception as exc:  # plugin isolation, as in the orchestrator
-            print(f"scanner {scanner.id!r} failed: {exc}", file=sys.stderr)
-    return findings
-
-
 def _status_line(result: FixResult) -> str:
     if result.verified:
         return result.reason
@@ -278,6 +272,22 @@ def _print_fix(index: int, total: int, reference: str, result: FixResult) -> Non
     print()
 
 
+def _inherited_context(
+    scan: store.Scan,
+    sector: str | None,
+    exposure: str | None,
+    z_years: int | None,
+) -> store.StoredContext:
+    """Explicit flag > what the parent scan recorded > the permissive default.
+
+    A seam, so `tests/test_store_migration.py` can disable the middle term and
+    prove it is load-bearing: without it, `ecdat fix` silently scores against
+    `other`/`unknown` and judges an introduced Critical more leniently than the
+    scan that found the original problem.
+    """
+    return resolved_context(scan, sector=sector, exposure=exposure, z_years=z_years)
+
+
 def _fix(args: argparse.Namespace) -> int:
     scan = store.get_scan(args.scan_id)
     if scan is None:
@@ -290,56 +300,85 @@ def _fix(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
-    kind = _stored_kind(scan.target_kind)
-    if kind is None:
-        print(
-            f"scan {scan.id} records target kind {scan.target_kind!r}, which is "
-            f"not a kind ECDAT knows about",
-            file=sys.stderr,
-        )
-        return 2
+    context = _inherited_context(scan, args.sector, args.exposure, args.crqc_years)
 
     configure_logging()
-    target = Target(
-        kind=kind,
-        ref=scan.target_ref,
-        system=scan.target_system,
-        data_class=scan.target_data_class,
-        sector=args.sector,
-        exposure=args.exposure,
-    )
-    ctx = default_context()
+    try:
+        run = run_fix(
+            args.scan_id,
+            scanners,
+            default_context(),
+            sector=context.sector,
+            exposure=context.exposure,
+            z_years=context.z_years,
+        )
+    except (UnknownScanError, UnscannableTargetError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     print(f"ecdat fix -- scan {scan.id}")
-    print(f"target: {target.kind} {target.ref}")
+    print(f"target: {run.target.kind} {run.target.ref}")
+    print(
+        f"context: sector={context.sector} exposure={context.exposure} "
+        f"crqc_years={context.z_years}"
+        + ("" if scan.sector is None else "  (inherited from the scan)")
+    )
     print(
         "ECDAT NEVER applies a fix. Every diff below was applied to a throwaway "
         "sandbox copy and re-scanned; the target is untouched."
     )
     print()
 
-    findings = _collect_findings(scanners, target, ctx)
-    fixes = propose_fixes(findings, target, context=ctx, z_years=args.crqc_years)
-
+    fixes = run.fixes
     for index, reference in enumerate(sorted(fixes), start=1):
         _print_fix(index, len(fixes), reference, fixes[reference])
 
-    verified = sum(1 for r in fixes.values() if r.verified)
     unverified = sum(1 for r in fixes.values() if r.applicable and not r.verified)
     declined = sum(1 for r in fixes.values() if not r.applicable)
     print(
-        f"findings={len(findings)} fixable={len(fixes)} verified={verified} "
-        f"unverified={unverified} not_applicable={declined}"
+        f"findings={run.finding_count} fixable={len(fixes)} "
+        f"verified={run.verified} unverified={unverified} "
+        f"not_applicable={declined}"
     )
+    print(f"fix_scan_id={run.scan_id} parent_scan_id={run.parent_scan_id}")
 
     if args.out is not None:
         written = write_patches(fixes, args.out)
         print(f"saved {len(written)} verified patch(es) to {args.out}")
 
     if args.output is not None:
-        args.output.write_text(apply_fixes(scan.cbom_json, fixes), encoding="utf-8")
-        print(f"fix-annotated CBOM written to {args.output}")
+        stored = store.get_scan(run.scan_id)
+        if stored is not None:
+            args.output.write_text(stored.cbom_json, encoding="utf-8")
+            print(f"fix-annotated CBOM written to {args.output}")
 
+    return 0
+
+
+def _rescore(args: argparse.Namespace) -> int:
+    """Re-score a stored CBOM. No scanner runs; the parent row is untouched."""
+    if store.get_scan(args.scan_id) is None:
+        print(f"no scan with id {args.scan_id!r} in the store", file=sys.stderr)
+        return 2
+
+    configure_logging()
+    try:
+        scan_id = run_rescore(args.scan_id, default_context(), z_years=args.z_years)
+    except (UnknownScanError, UnscannableTargetError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    rescored = store.get_scan(scan_id)
+    if rescored is None:  # pragma: no cover - the row was just committed
+        print("rescore disappeared after saving", file=sys.stderr)
+        return 1
+
+    if args.output is not None:
+        args.output.write_text(rescored.cbom_json, encoding="utf-8")
+    print(
+        f"rescore_scan_id={scan_id} parent_scan_id={args.scan_id} "
+        f"z_years={rescored.z_years} max_score={rescored.max_score}"
+    )
     return 0
 
 
@@ -353,6 +392,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _scan(args)
     if args.command == "fix":
         return _fix(args)
+    if args.command == "rescore":
+        return _rescore(args)
     parser.error("a command is required (or use --list-scanners)")
 
 
