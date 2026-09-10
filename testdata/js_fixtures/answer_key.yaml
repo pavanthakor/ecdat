@@ -147,6 +147,47 @@ expected:
       asset_type: algorithm
       count: 1
 
+  # ---- WEAK RNG BY DATAFLOW (ADR-0030) ----------------------------------
+  # `material` is not key-named, so only the taint rule sees it.
+  must_fire/js_rng_dataflow.js:
+    - rule_id: js-math-random-dataflow
+      algorithm: Math.random
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+    - rule_id: js-createcipheriv
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1          # the cipher it feeds, reported normally
+
+  # BOTH rules fire here: the variable IS named AND the value flows. They agree
+  # on every identifying field, so the normaliser folds them into ONE component
+  # -- asserted in tests/test_js_rng_taint.py rather than either being switched
+  # off. Declared twice here because the answer key scores FINDINGS, and two
+  # rules producing one component is exactly the thing being checked.
+  must_fire/js_rng_named_and_flowing.js:
+    - rule_id: js-math-random
+      algorithm: Math.random
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+    - rule_id: js-math-random-dataflow
+      algorithm: Math.random
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+    - rule_id: js-createcipheriv
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
   must_fire/js_hardcoded_key.js:
     - rule_id: js-hardcoded-key
       algorithm: unknown

@@ -1,0 +1,51 @@
+# Java call sites whose API NAMES the usage (ADR-0030).
+#
+# The Cipher mode constant is the interesting one. `Cipher.getInstance` takes
+# the SAME transformation string for wrapping a key and for encrypting bulk
+# data -- `RSA/ECB/OAEPWithSHA-256AndMGF1Padding` either way -- so the
+# transformation cannot distinguish them and the `init` mode is the only thing
+# that can. Without reading it, a key-wrapping site is recommended
+# bulk-encryption advice.
+#
+# Sources: NIST IR 8547 ipd Table 1; FIPS 203 (ML-KEM); FIPS 204 (ML-DSA);
+# Java Cryptography Architecture reference, `Cipher.WRAP_MODE`.
+rules:
+  - id: java-cipher-wrap-mode
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: RSA
+      primitive: pke
+      usage: key-transport
+      asset_type: algorithm
+      quantum_note: >-
+        `Cipher.WRAP_MODE` is KEY TRANSPORT: this cipher wraps another key
+        rather than encrypting data. That makes it the harvest-now-decrypt-
+        later case -- a recorded wrapped key is recoverable once a
+        cryptanalytically relevant quantum computer exists. Replace with ML-KEM
+        (FIPS 203), not ML-DSA. The transformation string is identical to the
+        bulk-encryption case, so the init mode is the only signal.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: $C.init(Cipher.WRAP_MODE, ...)
+      - pattern: $C.wrap(...)
+
+  - id: java-signature-verify
+    languages: [java]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      algorithm: unknown
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      quantum_note: >-
+        Signature VERIFICATION. The ALGORITHM is not knowable here -- it was
+        chosen at `Signature.getInstance` and this call only initialises the
+        verify direction -- so the algorithm is reported as unknown and the
+        USAGE is the fact this rule adds. A verifier must accept ML-DSA
+        (FIPS 204) before any signer can emit it (NIST IR 8547).
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: $S.initVerify(...)

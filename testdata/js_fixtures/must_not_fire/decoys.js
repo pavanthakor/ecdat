@@ -54,3 +54,17 @@ function signUnlisted(claims, key) {
 }
 
 module.exports.decoyStrings = { aes, md5, signingAlgorithmLabel, signUnlisted };
+
+// Math.random() with no cryptographic sink anywhere. What makes the taint rule
+// safe to ship is the SINK, not the source -- an animation frame, a jittered
+// retry and a Monte Carlo trial all reach nothing cryptographic.
+function easeFrame(from, to) {
+  const t = Math.random();
+  return from + (to - from) * t;
+}
+
+function shuffleDeck(cards) {
+  return cards.sort(() => Math.random() - 0.5);
+}
+
+module.exports.animation = { easeFrame, shuffleDeck };

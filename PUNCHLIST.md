@@ -413,16 +413,54 @@
   classifies with attribute references throughout, so there is no string to
   propagate.
   *Raised: dataflow slice. Const-prop half resolved: all-languages slice.*
-- **TAINT rules are still PYTHON-ONLY.** ADR-0028 generalised constant
-  propagation and not taint. `mode: taint` works in Go, JS and Java, so the
-  three Python taint rules -- the configurability annotation, the assembled-key
-  rule and weak-RNG-by-flow -- have no counterpart in those packs. The JS one is
-  the most wanted (`Math.random()` reaching a key sink) and is more than a
-  translation: the identity-merge argument ADR-0026 made for the two Python RNG
-  rules has to be re-made for JS sinks, or the name-scoped and flow-based rules
-  double-report.
-  *Raised: all-languages slice, see
-  [ADR-0028](docs/adr/0028-dataflow-all-languages.md).*
+- **TAINT rules are still mostly PYTHON-ONLY.** ~~The JS one is the most
+  wanted.~~ **The JS weak-RNG-by-flow rule shipped** in
+  [ADR-0030](docs/adr/0030-usage-classification.md) with the identity-merge
+  argument re-made for JS sinks and the single-component outcome asserted, so
+  the name-scoped and flow-based rules can both ship without double-reporting.
+  Still owed: the configurability annotation and the assembled-key rule have no
+  counterpart in Go, JS or Java, and Go and Java have no weak-RNG-by-flow rule
+  at all.
+  *Raised: all-languages slice. JS weak-RNG resolved: usage-classification
+  slice.*
+- ~~**usage classification is thin: nothing consumes it, and keygen sites stay
+  unknown forever.**~~ **Resolved** by
+  [ADR-0030](docs/adr/0030-usage-classification.md), and the audit found worse
+  than "thin": **no policy rule conditioned on `usage` at all**, so the RSA
+  advice was one string listing every option, and the Python and JS JWT rules
+  matched `jwt.decode`/`jwt.verify` while reporting `usage: sign` -- every token
+  VERIFIER in an estate was recommended a signing migration. The quantum pack
+  now branches (sign/verify -> ML-DSA, transport/exchange -> ML-KEM, otherwise
+  the agnostic advice, which SAYS it could not determine the usage); `verify`,
+  `key-transport` and `key-exchange` rules exist across four packs where the API
+  names them; and a Python keygen refines from its use site.
+  *Raised: Scanner A slice. Resolved: usage-classification slice.*
+- **USE-SITE REFINEMENT is PYTHON-ONLY and INTRA-PROCEDURAL.** Go, JS and Java
+  need the same `pattern-inside` shapes against their own keygen and use-site
+  APIs -- not written, not faked. More limiting than the language gap: a key
+  generated in a factory and used by its caller, which is the common shape in
+  real code, stays `unknown` in every language. Semgrep Pro's interprocedural
+  analysis is the fix. A key used for TWO things also reports only one usage
+  (first in sorted rule order -- deterministic, and a limit).
+  *Raised: usage-classification slice.*
+- **Two usage rules report an algorithm they cannot know.**
+  `java-signature-verify` reports `algorithm: unknown` because the algorithm was
+  chosen at `Signature.getInstance` and `initVerify` only sets the direction --
+  joining the two calls is use-site refinement for Java, which is not built. And
+  `java-cipher-wrap-mode` reports `RSA` unconditionally: `Cipher.WRAP_MODE`
+  names the usage but not the algorithm, and RSA is the overwhelmingly common
+  case rather than the only one, so an AES key-wrap would be mislabelled.
+  *Raised: usage-classification slice.*
+- **A policy pack rule can be silently detached from its `verified` flag.**
+  `quantum.yaml`'s layout let a rule's `verified:`/`source:` block sit after a
+  COMMENT introducing the NEXT rule. Inserting a rule between them moved the
+  flag onto the wrong rule, made `quantum-shor-broken-asymmetric` provisional
+  and dropped its score to ZERO -- caught by the suite, not by review, during
+  the usage slice. The block is attached directly now, but nothing structurally
+  prevents a repeat: a pack lint asserting every rule owns its own
+  `verified`/`source` (and that no rule's block follows a comment belonging to
+  another) is what would.
+  *Raised: usage-classification slice.*
 - **A propagated path reports the VARIABLE NAME as the captured parameter, in
   every language.** `metavariable-pattern` constrains a binding without
   rewriting it, so `String t = "AES/ECB/PKCS5Padding"` yields

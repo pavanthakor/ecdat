@@ -1,0 +1,83 @@
+# Python call sites whose API NAMES the usage (ADR-0030).
+#
+# usage decides the post-quantum target: RSA for signing becomes ML-DSA
+# (FIPS 204), RSA for key transport becomes ML-KEM (FIPS 203). ADR-0004 fixed
+# `usage: unknown` at every KEYGEN because a fresh key may do either -- but at
+# a USE site the API usually says which, and until now the pack did not read
+# it.
+#
+# The three rules here are the ones the Python pack had no counterpart for at
+# all: an RSA key-wrapping site produced NO finding, so the artefact that most
+# needs ML-KEM was the one missing from the inventory.
+#
+# Sources:
+#   NIST IR 8547 ipd Table 1 -- RSA and ECDH deprecated after 2030, disallowed
+#     after 2035.
+#   FIPS 203 (ML-KEM) for key establishment and transport; FIPS 204 (ML-DSA)
+#     for signatures.
+#   NIST SP 800-56A Rev.3 -- ECDH key agreement.
+#   RFC 8017 s7.1 -- RSAES-OAEP, the key-transport primitive.
+#   cryptography (pyca) API reference for the call shapes.
+rules:
+  - id: py-rsa-key-transport
+    languages: [python]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: RSA
+      primitive: pke
+      usage: key-transport
+      asset_type: algorithm
+      quantum_note: >-
+        RSA used as a CIPHER is key transport -- wrapping a symmetric key, not
+        bulk encryption -- and that makes it the harvest-now-decrypt-later
+        case: a recorded ciphertext is decryptable the day a cryptanalytically
+        relevant quantum computer exists, so the exposure begins when the
+        traffic is captured rather than in 2035. Broken outright by Shor;
+        disallowed after 2035 (NIST IR 8547). Replace with ML-KEM (FIPS 203) --
+        NOT ML-DSA, which is the answer for the signing case.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: $PUB.encrypt($DATA, padding.OAEP(...))
+      - pattern: $PUB.encrypt($DATA, padding.PKCS1v15(...))
+      - pattern: $KEY.public_key().encrypt(...)
+      - pattern: PKCS1_OAEP.new($K).encrypt(...)
+
+  - id: py-ecdh-exchange
+    languages: [python]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: ECDH
+      primitive: key-agreement
+      usage: key-exchange
+      asset_type: algorithm
+      quantum_note: >-
+        ECDH key agreement (NIST SP 800-56A Rev.3). Broken by Shor and
+        deprecated after 2030 (NIST IR 8547), and urgent for the same reason as
+        key transport: a recorded handshake can be decrypted later. Replace
+        with ML-KEM (FIPS 203), or an X25519+ML-KEM hybrid group during the
+        transition.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: $KEY.exchange(ec.ECDH(), ...)
+      - pattern: $KEY.exchange(...)
+
+  - id: py-rsa-verify
+    languages: [python]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      algorithm: RSA
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      quantum_note: >-
+        RSA signature VERIFICATION. Broken by Shor and disallowed after 2035
+        (NIST IR 8547), and the side that must migrate FIRST: nothing can be
+        sent an ML-DSA (FIPS 204) signature until its verifier accepts one, so
+        a verify site is a lead item rather than a lagging one.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: $PUB.verify($SIG, $DATA, padding.PKCS1v15(...), ...)
+      - pattern: $PUB.verify($SIG, $DATA, padding.PSS(...), ...)

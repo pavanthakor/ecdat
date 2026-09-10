@@ -62,6 +62,41 @@ rules:
                 - pattern: '"PS384"'
                 - pattern: '"PS512"'
       - patterns:
+          - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](RS|PS)(256|384|512)["']$
+      - patterns:
+          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](RS|PS)(256|384|512)["']$
+
+  # USAGE = VERIFY (ADR-0030). Split out of `py-jwt-rsa`, which matched this
+  # call and reported `usage: sign` -- so every token VERIFIER in an estate was
+  # recommended a signing migration. Verification is also the side that must
+  # move FIRST: nothing can accept an ML-DSA token until its verifier does.
+  - id: py-jwt-rsa-verify
+    languages: ['python']
+    severity: WARNING
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: RSA
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        RS*/PS* JWT VERIFICATION. The signature scheme is broken by Shor and
+        disallowed after 2035 (NIST IR 8547), and a verifier is where the
+        migration starts: a service cannot be sent ML-DSA (FIPS 204) tokens
+        until it accepts them, so verify sites lead and sign sites follow.
+        RFC 8725 s2.1 also requires the expected algorithm to be pinned at
+        verification rather than read from the token header.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - patterns:
           - pattern: jwt.decode(..., algorithms=[$ALG], ...)
           - metavariable-pattern:
               metavariable: $ALG
@@ -73,12 +108,7 @@ rules:
                 - pattern: '"PS384"'
                 - pattern: '"PS512"'
       - patterns:
-          - pattern: jwt.encode(..., algorithm=$ALG, ...)
-          - metavariable-regex:
-              metavariable: $ALG
-              regex: ^["'](RS|PS)(256|384|512)["']$
-      - patterns:
-          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - pattern: jwt.decode(..., algorithms=[$ALG], ...)
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](RS|PS)(256|384|512)["']$
@@ -129,6 +159,34 @@ rules:
                 - pattern: '"ES384"'
                 - pattern: '"ES512"'
       - patterns:
+          - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["']ES(256|256K|384|512)["']$
+      - patterns:
+          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["']ES(256|256K|384|512)["']$
+
+  # USAGE = VERIFY (ADR-0030). Split out of `py-jwt-ecdsa`, which matched this
+  # call and reported `usage: sign`.
+  - id: py-jwt-ecdsa-verify
+    languages: ['python']
+    severity: INFO
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: ECDSA
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        ES* JWT VERIFICATION. ECDSA falls to Shor with fewer logical qubits than RSA-2048 needs; disallowed after 2035 (NIST IR 8547). A verifier must accept ML-DSA (FIPS 204) before any signer can emit it.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - patterns:
           - pattern: jwt.decode(..., algorithms=[$ALG], ...)
           - metavariable-pattern:
               metavariable: $ALG
@@ -138,12 +196,7 @@ rules:
                 - pattern: '"ES384"'
                 - pattern: '"ES512"'
       - patterns:
-          - pattern: jwt.encode(..., algorithm=$ALG, ...)
-          - metavariable-regex:
-              metavariable: $ALG
-              regex: ^["']ES(256|256K|384|512)["']$
-      - patterns:
-          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - pattern: jwt.decode(..., algorithms=[$ALG], ...)
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["']ES(256|256K|384|512)["']$
@@ -193,6 +246,34 @@ rules:
                 - pattern: '"HS384"'
                 - pattern: '"HS512"'
       - patterns:
+          - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["']HS(256|384|512)["']$
+      - patterns:
+          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["']HS(256|384|512)["']$
+
+  # USAGE = VERIFY (ADR-0030). Split out of `py-jwt-hmac`, which matched this
+  # call and reported `usage: sign`.
+  - id: py-jwt-hmac-verify
+    languages: ['python']
+    severity: INFO
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: HMAC
+      primitive: mac
+      usage: verify
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        HS* JWT VERIFICATION. Symmetric, so Shor does not apply and Grover only halves the effective strength -- a key-management question, not a migration. RFC 8725 s2.1 requires the expected algorithm to be pinned at verification: accepting the token's own `alg` is the algorithm-confusion bug behind CVE-2015-9235.
+      flags: [symmetric]
+    pattern-either:
+      - patterns:
           - pattern: jwt.decode(..., algorithms=[$ALG], ...)
           - metavariable-pattern:
               metavariable: $ALG
@@ -201,12 +282,7 @@ rules:
                 - pattern: '"HS384"'
                 - pattern: '"HS512"'
       - patterns:
-          - pattern: jwt.encode(..., algorithm=$ALG, ...)
-          - metavariable-regex:
-              metavariable: $ALG
-              regex: ^["']HS(256|384|512)["']$
-      - patterns:
-          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - pattern: jwt.decode(..., algorithms=[$ALG], ...)
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["']HS(256|384|512)["']$
@@ -255,6 +331,34 @@ rules:
                 - pattern: '"None"'
                 - pattern: '"NONE"'
       - patterns:
+          - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](?i:none)["']$
+      - patterns:
+          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](?i:none)["']$
+
+  # USAGE = VERIFY (ADR-0030). Split out of `py-jwt-none`, which matched this
+  # call and reported `usage: sign`.
+  - id: py-jwt-none-verify
+    languages: ['python']
+    severity: INFO
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: none
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        `alg: none` accepted at VERIFICATION is the complete bypass -- the service will accept a token anyone can mint. RFC 8725 s3.1 requires it to be rejected. Nothing to do with quantum.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - patterns:
           - pattern: jwt.decode(..., algorithms=[$ALG], ...)
           - metavariable-pattern:
               metavariable: $ALG
@@ -263,12 +367,7 @@ rules:
                 - pattern: '"None"'
                 - pattern: '"NONE"'
       - patterns:
-          - pattern: jwt.encode(..., algorithm=$ALG, ...)
-          - metavariable-regex:
-              metavariable: $ALG
-              regex: ^["'](?i:none)["']$
-      - patterns:
-          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - pattern: jwt.decode(..., algorithms=[$ALG], ...)
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:none)["']$

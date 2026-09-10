@@ -1,0 +1,41 @@
+# JavaScript / TypeScript call sites whose API NAMES the usage (ADR-0030).
+#
+# Sources: NIST IR 8547 ipd Table 1; FIPS 203 (ML-KEM); FIPS 204 (ML-DSA);
+# NIST SP 800-56A Rev.3 (ECDH); Node.js crypto API reference.
+rules:
+  - id: js-rsa-key-transport
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: RSA
+      primitive: pke
+      usage: key-transport
+      asset_type: algorithm
+      quantum_note: >-
+        `publicEncrypt` is RSA key transport -- wrapping a symmetric key. The
+        harvest-now-decrypt-later case: a recorded ciphertext is decryptable
+        later, so the exposure begins when the traffic is captured. Replace
+        with ML-KEM (FIPS 203), not ML-DSA.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: crypto.publicEncrypt(...)
+      - pattern: publicEncrypt(...)
+
+  - id: js-ecdh-exchange
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: ECDH
+      primitive: key-agreement
+      usage: key-exchange
+      asset_type: algorithm
+      quantum_note: >-
+        ECDH key agreement (NIST SP 800-56A Rev.3). Broken by Shor and urgent
+        for the same reason as key transport: a recorded handshake can be
+        decrypted later. Replace with ML-KEM (FIPS 203) or a hybrid group.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: crypto.createECDH(...)
+      - pattern: createECDH(...)

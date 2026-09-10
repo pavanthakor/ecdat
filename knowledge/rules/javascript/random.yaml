@@ -44,3 +44,57 @@ rules:
       - metavariable-regex:
           metavariable: $NAME
           regex: (?i).*(key|token|secret|nonce|salt|iv|seed|password|credential).*
+
+  # ------------------------------------------------------------------
+  # THE TAINT SIBLING (ADR-0030, owed from ADR-0028).
+  #
+  # The name-scoped rule above can only see the NAME. A value called `material`
+  # or `buf` that reaches a key sink is a key-recovery bug and was invisible,
+  # while the cipher it fed was reported normally.
+  #
+  # BOTH RULES SHIP. Neither is a superset:
+  #
+  #   * the name-scoped rule catches `const token = Math.random()` with NO sink
+  #     in the same function -- taint is intra-procedural, so a value returned
+  #     to a caller is invisible to this rule;
+  #   * this rule catches the flowing-but-badly-named case the name says
+  #     nothing about.
+  #
+  # Where both fire they must produce ONE component. They agree on algorithm,
+  # primitive, usage and params, so they carry one identity and the normaliser
+  # folds them -- the ADR-0026 pattern, re-made for JS sinks. `flags` must stay
+  # equal between the two for that to hold: `critical` sets `params.flagged`,
+  # and a params mismatch would split the identity and double-report the same
+  # weak key. tests/test_js_rng_taint.py asserts the single component.
+  # ------------------------------------------------------------------
+  - id: js-math-random-dataflow
+    languages: [javascript, typescript]
+    severity: ERROR
+    mode: taint
+    message: "ecdat|"
+    metadata:
+      algorithm: Math.random
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      quantum_note: >-
+        `Math.random` is not a CSPRNG; ECMA-262 s21.4.2.28 states it carries no
+        security guarantee, and V8 implements it with xorshift128+, whose state
+        is recoverable from a few observed outputs. Caught here by DATAFLOW
+        rather than by the variable's name: the value reaches a key, MAC or
+        token sink, which is what makes it a key-recovery bug regardless of
+        what it was called on the way. Recoverable TODAY -- no quantum computer
+        required. NIST SP 800-133 Rev.2 s4 requires an approved RBG
+        (SP 800-90A Rev.1). Use `crypto.randomBytes` or
+        `crypto.getRandomValues`.
+      flags: [weak, critical, dataflow]
+    pattern-sources:
+      - pattern: Math.random()
+    pattern-sinks:
+      - pattern: crypto.createCipheriv($S, $KEY, ...)
+      - pattern: createCipheriv($S, $KEY, ...)
+      - pattern: crypto.createHmac($D, $KEY)
+      - pattern: createHmac($D, $KEY)
+      - pattern: crypto.createSecretKey(...)
+      - pattern: jwt.sign(...)
+      - pattern: new Buffer.from(...)

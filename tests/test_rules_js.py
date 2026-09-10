@@ -173,7 +173,12 @@ def test_the_js_rng_rule_is_name_scoped(findings: list[Finding]) -> None:
     """It fires on a token, and NOT on jitter, a shuffle or a banner pick."""
     rng = [f for f in findings if rule_id_of(f) == "js-math-random"]
     assert rng, "js-math-random did not fire on its must_fire fixture"
-    assert all(_rel(f) == "must_fire/js_math_random.js" for f in rng)
+    # Two fixtures since ADR-0030: its own, and the one where the name AND the
+    # flow agree (which the taint sibling also matches). Never a decoy.
+    assert {_rel(f) for f in rng} == {
+        "must_fire/js_math_random.js",
+        "must_fire/js_rng_named_and_flowing.js",
+    }
 
 
 # ---------------------------------------------------------------------------

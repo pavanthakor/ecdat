@@ -1,0 +1,95 @@
+# USE-SITE REFINEMENT: what a generated key is FOR (ADR-0030).
+#
+# ADR-0004 fixed `usage: unknown` at every keygen and said the correlator would
+# refine it from the use site, because a fresh RSA key may sign or transport
+# and the replacement differs (ML-DSA vs ML-KEM). Nothing refined it. These
+# rules do.
+#
+# THEY ARE ANNOTATIONS, NOT FINDINGS. `annotates: usage` tells
+# scanners/source to apply the metadata `usage` to the finding already reported
+# at the same line, and never to emit one of its own -- the ADR-0026
+# mechanism. A second finding would double-count the key, and because `usage`
+# is IDENTIFYING the two would carry different identities and not even merge.
+#
+# They match the KEYGEN and require the use site in the same function, so
+# semgrep reports at the keygen line -- which is where the finding to annotate
+# already is. Intra-procedural by construction: `pattern-inside` cannot see
+# through a function boundary, and neither can OSS taint (ADR-0026 STEP 0).
+#
+# A keygen with NO visible use site matches nothing here and stays `unknown`,
+# which is the honest answer. Guessing would put a confidently wrong migration
+# target on a real key, and the policy pack already carries usage-agnostic
+# advice for exactly that case.
+rules:
+  - id: py-keygen-used-for-signing
+    languages: [python]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      annotates: usage
+      usage: sign
+      algorithm: unknown
+      primitive: unknown
+      quantum_note: >-
+        Not a detection. Records that the key generated at this line is used to
+        SIGN in the same function, so its post-quantum target is ML-DSA
+        (FIPS 204) rather than ML-KEM. See ADR-0030.
+    patterns:
+      - pattern-either:
+          - pattern: rsa.generate_private_key(...)
+          - pattern: ec.generate_private_key(...)
+          - pattern: dsa.generate_private_key(...)
+      - pattern-either:
+          - pattern-inside: |
+              $K = rsa.generate_private_key(...)
+              ...
+              $K.sign(...)
+          - pattern-inside: |
+              $K = ec.generate_private_key(...)
+              ...
+              $K.sign(...)
+          - pattern-inside: |
+              $K = dsa.generate_private_key(...)
+              ...
+              $K.sign(...)
+
+  - id: py-keygen-used-for-key-transport
+    languages: [python]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      annotates: usage
+      usage: key-transport
+      algorithm: unknown
+      primitive: unknown
+      quantum_note: >-
+        Not a detection. Records that the key generated at this line wraps
+        another key in the same function, so its post-quantum target is ML-KEM
+        (FIPS 203) rather than ML-DSA -- and it is a harvest-now-decrypt-later
+        item rather than a 2035 one. See ADR-0030.
+    patterns:
+      - pattern: rsa.generate_private_key(...)
+      - pattern-inside: |
+          $K = rsa.generate_private_key(...)
+          ...
+          $K.public_key().encrypt(...)
+
+  - id: py-keygen-used-for-key-exchange
+    languages: [python]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      annotates: usage
+      usage: key-exchange
+      algorithm: unknown
+      primitive: unknown
+      quantum_note: >-
+        Not a detection. Records that the key generated at this line performs
+        an ECDH agreement in the same function, so its target is ML-KEM
+        (FIPS 203) or a hybrid group. See ADR-0030.
+    patterns:
+      - pattern: ec.generate_private_key(...)
+      - pattern-inside: |
+          $K = ec.generate_private_key(...)
+          ...
+          $K.exchange(...)
