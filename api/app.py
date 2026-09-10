@@ -171,7 +171,16 @@ class ScanSummary(BaseModel):
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
     configure_logging()
     store.init_db()
-    _log.info("api_started", extra={"event": "api_started"})
+    # The absolute path, because "the dashboard is empty" is almost always
+    # "the server opened a different file than the scan wrote to" (ADR-0020).
+    _log.info(
+        "api_started",
+        extra={
+            "event": "api_started",
+            "database": str(store.database_location()),
+            "console": "built" if WEB_DIST.is_dir() else "not built",
+        },
+    )
     yield
 
 
@@ -522,6 +531,46 @@ def create_system_scan(body: SystemManifestIn) -> ScanCreated:
     if scan is None:  # pragma: no cover - the row was just committed
         raise HTTPException(status_code=500, detail="scan disappeared after saving")
     return ScanCreated(scan_id=scan.id, component_count=scan.component_count)
+
+
+# ---------------------------------------------------------------------------
+# Reports: PDFs rendered from a stored scan (ADR-0020)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/scans/{scan_id}/report/{kind}",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def get_report(scan_id: str, kind: str) -> Response:
+    """Render one of the three reports for a stored scan.
+
+    Nothing is re-scanned: the PDF is a projection of the CBOM already on the
+    row, so it cannot disagree with what the dashboard shows for the same scan.
+    """
+    from reports import UnknownScanError, render, report_for
+
+    try:
+        report = report_for(kind)
+    except ValueError as exc:
+        # Names the kinds that DO exist rather than 404ing into silence.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        payload = render(report, scan_id)
+    except UnknownScanError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return Response(
+        content=payload,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="ecdat-{kind}-{scan_id[:8]}.pdf"'
+            )
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

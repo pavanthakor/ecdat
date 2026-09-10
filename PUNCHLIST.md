@@ -246,6 +246,54 @@
   live and must never be presented as though it does; `make prove-pillar2` is
   where the live eBPF claim lives.
   *Raised: system-scan slice.*
+- ~~**`reports/` is an empty directory.**~~ **Resolved** by the reports slice
+  (ADR-0020). Three PDFs render from a STORED scan with no re-scan: `executive`
+  (headline numbers, top 5 by risk, the DST framing with its confirmed source),
+  `technical` (drift first, then every artefact by band with evidence, fired
+  rules, per-category scores and verified fix diffs) and `coverage` (which
+  scanners ran, which views were and were NOT collected, and the standing list
+  of what ECDAT cannot detect at all). `ecdat report <scan-id> --kind ...` and
+  `GET /scans/{id}/report/{kind}`. Provisional facts render as provisional in
+  the TEXT, and output is byte-identical across renders.
+  *Raised: project start. Resolved: reports slice, see
+  [ADR-0020](docs/adr/0020-reports.md).*
+- **A module-scoped fixture must isolate its own database.** pytest
+  instantiates fixtures broadest-scope-first, so a `scope="module"` fixture
+  runs BEFORE the function-scoped autouse fixture in `tests/conftest.py` that
+  points `ECDAT_DB` at a tmp file. `tests/test_reports.py` hoists its expensive
+  system scan to module scope for speed and therefore has to set `ECDAT_DB`
+  itself (`_own_database`). Anyone adding another broad-scoped fixture that
+  touches the store needs the same wrapper --
+  `test_the_store_writes_where_ecdat_db_points` is the canary that catches it.
+  *Raised: reports slice.*
+- **Report styling is functional, not designed.** Helvetica, rules and a
+  two-column grid -- an artefact you can hand to an auditor, not a brochure. A
+  designed template (typography, a cover, the ECDAT mark) is later work and does
+  not change any of the content decisions in ADR-0020.
+  *Raised: reports slice.*
+- **The technical report grows with the estate.** QuantumBank's 26 components
+  make ~88KB across a dozen pages; a thousand-component estate would produce
+  something nobody reads. Wants filtering (by band, by system, by drift) before
+  it is run against anything real.
+  *Raised: reports slice.*
+- **No report frames a CHANGE.** A fix row and a rescore row are ordinary scans
+  and render fine, but nothing says "here is what moved between these two
+  scans". A comparison report is the obvious next one, and it is what an
+  operator actually wants after a rescore or a fix pass.
+  *Raised: reports slice.*
+- **The database mismatch is DIAGNOSABLE, not resolved.** `ecdat scan` /
+  `scan-system` print the absolute `db=` they wrote to, the API logs the
+  absolute path it opened, and `ecdat scans` lists what is actually in the
+  current one. Two shells with different `ECDAT_DB` values still produce an
+  empty console -- deliberately, because two processes using two databases is a
+  legitimate thing to want and reconciling them would be guessing. The rule
+  (one `ECDAT_DB` for scanning and serving) is an OPERATIONAL one, documented in
+  web/README.md, docs/ONBOARDING.md and the README.
+  *Raised: reports slice. See [ADR-0020](docs/adr/0020-reports.md).*
+- **reportlab ships no type stubs**, so `reports/layout.py` is an untyped edge
+  with a mypy override. Contained to that one module by design; revisit if a
+  maintained `types-reportlab` for 4.x appears.
+  *Raised: reports slice.*
 - **The API has no authentication and `GET /scans` is unpaginated.** It serves
   an estate's complete cryptographic inventory over plain localhost CORS. Needs
   authn/authz and pagination before it is exposed anywhere but a developer

@@ -5,7 +5,7 @@ PY ?= .venv/bin/python
 SHELLCHECK ?= .venv/bin/shellcheck
 
 .PHONY: help install lint format typecheck test validate golden serve check \
-        web web-dev web-test
+        web web-dev web-test scans reports
 
 help:
 	@echo "ECDAT -- make targets"
@@ -34,6 +34,10 @@ help:
 	@echo "    web         build the dashboard into web/dist (run before a demo)"
 	@echo "    web-dev     vite dev server on :5173, proxying /api to :8000"
 	@echo "    web-test    vitest data-logic suite"
+	@echo ""
+	@echo "  REPORT"
+	@echo "    reports SCAN=<id>   executive + technical + coverage PDFs -> reports-out/"
+	@echo "    scans       list the scans in the current database (and name the file)"
 	@echo ""
 	@echo "  RUN"
 	@echo "    serve       run the API + built console on http://127.0.0.1:8000"
@@ -70,6 +74,33 @@ golden:
 
 serve:
 	$(PY) -m uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
+
+# Which database am I on? The one question worth being able to answer in one
+# command before a demo (ADR-0020).
+scans:
+	$(PY) cli.py scans
+
+# All three reports for one scan. SCAN defaults to the newest row.
+#
+# The default is resolved INSIDE the recipe, not with `$(shell ...)`: make
+# expands that at parse time, so a `$(shell)` here would open the database on
+# `make -n reports` -- a dry run that writes a file is the kind of surprise
+# that leaves a stray ecdat.db in a working tree.
+SCAN ?=
+
+reports:
+	@scan="$(SCAN)"; \
+	if [ -z "$$scan" ]; then \
+		scan=$$($(PY) -c "from core import store; rows=store.list_scans(); print(rows[0].id if rows else '')"); \
+	fi; \
+	if [ -z "$$scan" ]; then \
+		echo "no scans in $$($(PY) -c 'from core import store; print(store.database_location())')"; \
+		echo "run a scan first, or pass SCAN=<id>"; \
+		exit 2; \
+	fi; \
+	for kind in executive technical coverage; do \
+		$(PY) cli.py report "$$scan" --kind $$kind || exit 1; \
+	done
 
 # ---------------------------------------------------------------------------
 # The console. `make web` is the only step that needs Node; once it has run,

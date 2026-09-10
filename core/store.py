@@ -68,7 +68,9 @@ __all__ = [
     "Scan",
     "ScannerRecord",
     "StoredContext",
+    "UnknownScanError",
     "children_of",
+    "database_location",
     "database_path",
     "database_url",
     "get_scan",
@@ -109,6 +111,16 @@ class StoredContext:
     sector: str | None = None
     exposure: str | None = None
     z_years: int | None = None
+
+
+class UnknownScanError(LookupError):
+    """No scan with that id in THIS database.
+
+    Defined here rather than in each caller because the condition is one
+    condition: the store was asked for a row it does not have. A second
+    exception type with the same meaning is a second `except` clause somebody
+    will forget.
+    """
 
 
 class Base(DeclarativeBase):
@@ -225,6 +237,21 @@ _INITIALISED: set[str] = set()
 
 def database_path() -> Path:
     return Path(os.environ.get(ENV_DB_PATH, DEFAULT_DB_PATH))
+
+
+def database_location() -> Path:
+    """The ABSOLUTE path of the database this process is using.
+
+    Reported by every writer and by the API at startup. A relative path in a
+    log line only means something with the working directory beside it, and
+    the failure this exists to make diagnosable -- scanning into one file and
+    serving from another -- is precisely the one where the two shells have
+    different working directories.
+
+    Resolved without requiring the file to exist: it is reported BEFORE the
+    first write as well as after.
+    """
+    return database_path().expanduser().resolve()
 
 
 def database_url() -> str:

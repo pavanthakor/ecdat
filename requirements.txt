@@ -34,3 +34,9 @@ uvicorn>=0.30,<1
 # scanners.source.PINNED_SEMGREP_VERSION, which a test asserts; a scan run
 # against any other version records the mismatch on its row.
 semgrep==1.176.1
+
+# Report generation (reports/). Pure-Python wheel with no system libraries --
+# which is why it, and not weasyprint, is the choice here: weasyprint needs
+# cairo/pango installed at the OS level, and a report generator that cannot run
+# on an air-gapped box is no use to the estates ECDAT is for.
+reportlab>=4.2,<5

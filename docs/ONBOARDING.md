@@ -189,3 +189,46 @@ Every one of these is a snag that actually happened.
 
 If `make verify` passes and something still does not work, that is worth a bug
 report — the health check is meant to catch exactly this class of problem.
+
+---
+
+## One database, or the dashboard is empty
+
+ECDAT writes to `./ecdat.db` unless `ECDAT_DB` says otherwise. **The scanner and
+the server must agree**, and nothing reconciles them for you — two processes
+using two databases is a legitimate thing to want, so the tool makes the path
+visible rather than guessing.
+
+```bash
+# Pick one database and export it in EVERY shell you use.
+export ECDAT_DB="$PWD/ecdat.db"
+
+ecdat scan-system testdata/quantumbank/system.yaml   # prints  db=/abs/path
+ecdat scans                                          # lists what is in it
+make serve                                           # logs    "database": "/abs/path"
+```
+
+If the console is empty, run `ecdat scans`. It prints the absolute path it
+opened and the rows it found — comparing that with the `db=` the scan printed
+and the `database` in the server's startup log identifies the mismatch in one
+command. `make kpi` deliberately uses its own `.ecdat-kpi.db`, so its scans will
+never appear in the console.
+
+---
+
+## Reports
+
+```bash
+ecdat report <scan-id> --kind executive    # 2 pages for a decision
+ecdat report <scan-id> --kind technical    # every artefact, with its evidence
+ecdat report <scan-id> --kind coverage     # what this scan did NOT look at
+```
+
+PDFs land in `./reports-out/` unless `-o` says otherwise, and
+`GET /scans/{id}/report/{kind}` serves the same bytes. Nothing is re-scanned: a
+report is a projection of the stored CBOM, so it cannot disagree with the
+dashboard about the same scan, and it re-renders byte-identically.
+
+The **coverage statement** is the one to read first. It says which views were
+collected, which were not, and what ECDAT cannot detect at all — because a
+finding count means nothing without the list of what it declined to measure.

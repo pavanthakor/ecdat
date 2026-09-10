@@ -452,8 +452,9 @@ class FixRun:
         return sum(1 for result in self.fixes.values() if result.verified)
 
 
-class UnknownScanError(LookupError):
-    """A derived pass was asked for a scan the store does not have."""
+#: Re-exported so callers of a derived pass can catch it without importing the
+#: store; it IS the store's exception, not a second one with the same name.
+UnknownScanError = store.UnknownScanError
 
 
 class UnscannableTargetError(ValueError):

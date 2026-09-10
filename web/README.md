@@ -20,6 +20,28 @@ watcher, and nothing to fall over mid-presentation.
 you would rather the demo machine not need npm at all, build on a laptop and
 copy `web/dist/` across — the API serves whatever is in that directory.
 
+## One database, or the dashboard is empty
+
+ECDAT writes to `./ecdat.db` unless `ECDAT_DB` says otherwise. **The scanner and
+the server must agree**, and nothing reconciles them for you — two processes
+using two databases is a legitimate thing to want, so the tool makes the path
+visible rather than guessing.
+
+```bash
+# Pick one database and export it in EVERY shell you use.
+export ECDAT_DB="$PWD/ecdat.db"
+
+ecdat scan-system testdata/quantumbank/system.yaml   # prints  db=/abs/path
+ecdat scans                                          # lists what is in it
+make serve                                           # logs    "database": "/abs/path"
+```
+
+If the console is empty, run `ecdat scans`. It prints the absolute path it
+opened and the rows it found — comparing that with the `db=` the scan printed
+and the `database` in the server's startup log identifies the mismatch in one
+command. `make kpi` deliberately uses its own `.ecdat-kpi.db`, so its scans will
+never appear in the console.
+
 ## Develop
 
 ```bash

@@ -45,6 +45,7 @@ from core.system import ManifestError, TargetUnreadableError, load_manifest, sca
 from correlate.fixit.apply import write_patches
 from correlate.fixit.engine import FixResult
 from policy.apply import DEFAULT_Z_YEARS
+from reports import REPORT_KINDS, render, report_for
 
 __all__ = ["main"]
 
@@ -56,6 +57,9 @@ TARGET_KINDS: tuple[TargetKind, ...] = (
     "endpoint",
     "spool",
 )
+
+#: Where a report lands when no -o is given.
+DEFAULT_REPORT_DIR = "reports-out"
 
 SECTORS: tuple[Sector, ...] = (
     "government",
@@ -162,6 +166,33 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="write the CBOM here instead of stdout",
+    )
+
+    report = subcommands.add_parser(
+        "report",
+        help="render a PDF report from a stored scan (no re-scan)",
+    )
+    report.add_argument("scan_id", help="the id of a scan already in the store")
+    report.add_argument(
+        "--kind",
+        choices=sorted(REPORT_KINDS),
+        required=True,
+        help=(
+            "executive: two pages for a decision. technical: every artefact "
+            "with its evidence. coverage: what this scan did NOT look at"
+        ),
+    )
+    report.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=None,
+        help="write the PDF here (default ./reports-out/<kind>-<scan>.pdf)",
+    )
+
+    subcommands.add_parser(
+        "scans",
+        help="list the scans stored in the current database (and name the file)",
     )
 
     fix = subcommands.add_parser(
@@ -277,7 +308,8 @@ def _scan(args: argparse.Namespace) -> int:
 
     destination = str(args.output) if args.output is not None else "stdout"
     print(
-        f"scan_id={scan.id} component_count={scan.component_count} cbom={destination}",
+        f"scan_id={scan.id} component_count={scan.component_count} "
+        f"cbom={destination} db={store.database_location()}",
         file=sys.stderr,
     )
     return 0
@@ -457,11 +489,64 @@ def _scan_system(args: argparse.Namespace) -> int:
         f"scan_id={scan.id} system={manifest.system} "
         f"targets={len(manifest.targets)} "
         f"component_count={scan.component_count} "
-        f"drift_count={drift_total} cbom={destination}",
+        f"drift_count={drift_total} cbom={destination} "
+        f"db={store.database_location()}",
         file=sys.stderr,
     )
     for kind, count in sorted(summary.drift_counts.items()):
         print(f"  drift {kind}={count}", file=sys.stderr)
+    return 0
+
+
+def _scans(args: argparse.Namespace) -> int:  # noqa: ARG001 - uniform handler
+    """List what is actually in the database this environment points at.
+
+    The one-command answer to "I scanned, why is the dashboard empty?". The
+    path is printed with the rows, so the answer and the question arrive
+    together (ADR-0020).
+    """
+    location = store.database_location()
+    print(f"database: {location}")
+
+    scans = store.list_scans()
+    if not scans:
+        # Distinct from printing nothing: an empty database and a command that
+        # silently did nothing look identical otherwise.
+        print("no scans in this database")
+        return 0
+
+    print(f"{'scan id':36}  {'kind':8}  {'components':>10}  {'drift':>7}  created")
+    for scan in scans:
+        drift = sum((scan.drift_counts or {}).values())
+        print(
+            f"{scan.id:36}  {scan.kind:8}  {scan.component_count:>10}  "
+            f"drift={drift:<2}  {scan.created_at.isoformat(timespec='seconds')}"
+        )
+    print(f"{len(scans)} scan(s)")
+    return 0
+
+
+def _report(args: argparse.Namespace) -> int:
+    """Render a report from a STORED scan. Nothing is re-scanned (ADR-0020)."""
+    try:
+        payload = render(report_for(args.kind), args.scan_id)
+    except UnknownScanError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except ValueError as exc:  # an unknown kind, named
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    destination = args.output
+    if destination is None:
+        directory = Path(DEFAULT_REPORT_DIR)
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / f"{args.kind}-{args.scan_id[:8]}.pdf"
+    else:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+    destination.write_bytes(payload)
+    print(f"report={destination} kind={args.kind} bytes={len(payload)}")
     return 0
 
 
@@ -475,6 +560,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _scan(args)
     if args.command == "scan-system":
         return _scan_system(args)
+    if args.command == "scans":
+        return _scans(args)
+    if args.command == "report":
+        return _report(args)
     if args.command == "fix":
         return _fix(args)
     if args.command == "rescore":

@@ -360,6 +360,25 @@ key lists it instead.
 
 ---
 
+## Reports
+
+```bash
+ecdat report <scan-id> --kind executive    # 2 pages for a decision
+ecdat report <scan-id> --kind technical    # every artefact, with its evidence
+ecdat report <scan-id> --kind coverage     # what this scan did NOT look at
+```
+
+PDFs land in `./reports-out/` unless `-o` says otherwise, and
+`GET /scans/{id}/report/{kind}` serves the same bytes. Nothing is re-scanned: a
+report is a projection of the stored CBOM, so it cannot disagree with the
+dashboard about the same scan, and it re-renders byte-identically.
+
+The **coverage statement** is the one to read first. It says which views were
+collected, which were not, and what ECDAT cannot detect at all — because a
+finding count means nothing without the list of what it declined to measure.
+
+---
+
 ## Honest limitations
 
 The living list is [`PUNCHLIST.md`](PUNCHLIST.md). The ones a reader should know
