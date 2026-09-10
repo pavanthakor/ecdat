@@ -1,0 +1,5 @@
+# The manifest declares a RANGE. The lockfile below pins the exact version, and
+# the scanner must prefer the lockfile (ADR-0021).
+cryptography>=41.0,<43
+requests>=2.31
+pyjwt==2.8.0

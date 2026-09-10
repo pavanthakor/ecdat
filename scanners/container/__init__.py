@@ -38,7 +38,6 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-import yaml
 from cryptography import x509
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
@@ -47,6 +46,14 @@ from cryptography.x509.oid import NameOID
 
 from core.scanner import ScanContext, Target
 from core.schema import AssetType, Evidence, Finding, Occurrence, Primitive, View
+from scanners.libraries import (
+    DISTRO,
+    LibraryFact,
+    LibraryPackMissingError,
+    index_for,
+    is_pqc_capable,
+    upstream_version,
+)
 
 __all__ = [
     "ContainerScanError",
@@ -55,9 +62,6 @@ __all__ = [
     "ImageUnreadableError",
     "LibraryPackMissingError",
 ]
-
-#: Where the library knowledge pack lives under ``ScanContext.knowledge_dir``.
-LIBRARY_PACK = Path("libraries.yaml")
 
 #: Package databases we know how to read, as in-layer paths.
 DPKG_STATUS_PATH = "var/lib/dpkg/status"
@@ -108,110 +112,38 @@ class ImageLayoutError(ContainerScanError):
     """The archive opened, but it is not a container image we understand."""
 
 
-class LibraryPackMissingError(ContainerScanError):
-    """``knowledge/libraries.yaml`` is not where the knowledge directory says."""
-
-
 # ---------------------------------------------------------------------------
 # The knowledge pack
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
-class LibraryFact:
-    """One entry from ``knowledge/libraries.yaml``."""
-
-    name: str
-    provides: tuple[str, ...]
-    pqc_capable_from: str | None
-    eol: str | None
-    source: str
-    #: Whether ``pqc_capable_from`` has been confirmed against upstream
-    #: release material. Defaults to FALSE, and an unverified floor produces
-    #: no ``pqc_capable`` parameter at all (ADR-0017) -- so a version filled
-    #: in without a source cannot quietly start driving drift.
-    pqc_capable_verified: bool = False
-    pqc_capable_source: str | None = None
+# The pack is read through `scanners.libraries`, which the dependency scanner
+# (ADR-0021) shares. Two readers of one pack is how a version comparison drifts
+# until the same OpenSSL is PQC-capable in one view and not in the other.
+#
+# The lookup is scoped to `distro` -- system packages -- so a PyPI wheel called
+# `cryptography` can never be matched against a dpkg entry, and vice versa.
+# They are different artefacts with different version numbering.
 
 
 def _load_library_pack(knowledge_dir: Path) -> dict[str, LibraryFact]:
-    """``package name -> LibraryFact``, lower-cased for matching.
-
-    Fails loudly when the pack is missing. A container scan that silently
-    reports no cryptographic libraries because its knowledge pack was absent is
-    indistinguishable from a clean image, and someone would believe it.
-    """
-    path = knowledge_dir / LIBRARY_PACK
-    if not path.is_file():
-        raise LibraryPackMissingError(
-            f"the library knowledge pack is missing: {path} does not exist. "
-            "Set ECDAT_KNOWLEDGE_DIR or restore knowledge/libraries.yaml."
-        )
-
-    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    index: dict[str, LibraryFact] = {}
-    for entry in document.get("libraries", []):
-        fact = LibraryFact(
-            name=str(entry["name"]),
-            provides=tuple(entry.get("provides") or ()),
-            pqc_capable_from=entry.get("pqc_capable_from"),
-            eol=entry.get("eol"),
-            source=str(entry.get("source", "")),
-            pqc_capable_verified=bool(entry.get("pqc_capable_verified", False)),
-            pqc_capable_source=entry.get("pqc_capable_source"),
-        )
-        for package in entry.get("packages") or ():
-            index[str(package).lower()] = fact
-    return index
-
-
-def _version_tuple(version: str) -> tuple[int, ...]:
-    """``"3.5.7"`` -> ``(3, 5, 7)``. Non-numeric tails stop the parse."""
-    parts: list[int] = []
-    for chunk in version.split("."):
-        digits = ""
-        for character in chunk:
-            if not character.isdigit():
-                break
-            digits += character
-        if not digits:
-            break
-        parts.append(int(digits))
-    return tuple(parts)
+    """``dpkg/apk package name -> LibraryFact``, lower-cased for matching."""
+    return index_for(knowledge_dir, DISTRO)
 
 
 def _is_pqc_capable(fact: LibraryFact, version: str) -> bool | None:
-    """``None`` when the pack does not know -- never a guess.
+    """``None`` when the pack does not know -- never a guess (ADR-0017)."""
+    return is_pqc_capable(fact, version)
 
-    "Does not know" now covers two cases, and the second is the point of
-    ADR-0017: no floor recorded at all, OR a floor nobody has confirmed
-    against upstream release material. An unverified floor is data, not a
-    fact, and a scan must not compare against it -- otherwise filling in a
-    plausible version without checking it would silently start producing drift
-    verdicts.
-    """
-    if fact.pqc_capable_from is None or not fact.pqc_capable_verified:
-        return None
-    return _version_tuple(version) >= _version_tuple(fact.pqc_capable_from)
+
+def _upstream_version(raw: str) -> str:
+    """Strip distro packaging from a version. See `scanners.libraries`."""
+    return upstream_version(raw)
 
 
 # ---------------------------------------------------------------------------
 # Package database parsers
 # ---------------------------------------------------------------------------
-
-
-def _upstream_version(raw: str) -> str:
-    """Strip distro packaging from a version.
-
-    ``1:3.0.2-0ubuntu1.10`` -> ``3.0.2``; ``3.5.7-r0`` -> ``3.5.7``. The
-    upstream version is the one the knowledge pack's PQC floor is expressed in,
-    so comparing without stripping would put 3.5.7-r0 below 3.5.0.
-    """
-    version = raw.strip()
-    _, _, after_epoch = version.rpartition(":")
-    version = after_epoch or version
-    version = version.split("-", 1)[0]
-    return version.split("+", 1)[0]
 
 
 def _parse_dpkg_status(text: str) -> list[dict[str, str]]:

@@ -116,6 +116,7 @@ def test_registered_in_the_registry() -> None:
     assert registry.available_ids() == [
         "config",
         "container",
+        "deps",
         "runtime-spool",
         "source",
     ]

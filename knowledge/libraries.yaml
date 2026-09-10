@@ -13,10 +13,22 @@
 # ENTRY SCHEMA
 # ---------------------------------------------------------------------------
 #   name              Canonical library name as it should appear in the CBOM.
-#   packages          Distro package names that provide it. Matched
-#                     case-insensitively against dpkg `Package:` and apk `P:`
-#                     lines. This is how a scanner gets from "libssl3" to
-#                     "OpenSSL" without knowing anything about either.
+#   ecosystem         WHICH NAMESPACE `packages` is spelled in:
+#                       distro  system packages -- dpkg/apk, what an image
+#                               SHIPS (Scanner C). The default when omitted.
+#                       pypi | npm | go
+#                               declared dependencies, what a project says it
+#                               DEPENDS ON (Scanner B, ADR-0021).
+#                     Lookups are always scoped to one ecosystem, so a PyPI
+#                     package called `openssl` can never inherit the system
+#                     OpenSSL's capability floor -- they are different software
+#                     with different version numbering.
+#   packages          Names that provide it, IN THAT ECOSYSTEM. Matched
+#                     case-insensitively against dpkg `Package:` / apk `P:`
+#                     lines, or against a manifest's dependency names. This is
+#                     how a scanner gets from "libssl3" to "OpenSSL", or from
+#                     "node-forge" to node-forge, without knowing anything
+#                     about either.
 #   provides          Algorithms the library implements. Feeds blast-radius
 #                     reasoning: what breaks if this library is the weak link.
 #   pqc_capable_from  First upstream version with usable post-quantum KEM or
@@ -65,6 +77,7 @@ version: 1
 
 libraries:
   - name: OpenSSL
+    ecosystem: distro
     packages:
       - libssl3
       - libssl3t64
@@ -114,6 +127,7 @@ libraries:
       DST deadlines, not here.
 
   - name: GnuTLS
+    ecosystem: distro
     packages:
       - libgnutls30
       - libgnutls30t64
@@ -148,6 +162,7 @@ libraries:
       readiness on this entry until it is verified.
 
   - name: libgcrypt
+    ecosystem: distro
     packages:
       - libgcrypt20
       - libgcrypt
@@ -184,6 +199,7 @@ libraries:
       NEWS when this pack was written. Left null deliberately.
 
   - name: NSS
+    ecosystem: distro
     packages:
       - libnss3
       - nss
@@ -211,3 +227,313 @@ libraries:
       UNVERIFIED for post-quantum. Included so an NSS-shipping image is
       inventoried rather than silently missed; PQC scoring is out of scope
       until the field is verified.
+
+# ===========================================================================
+# DECLARED DEPENDENCIES (Scanner B, ADR-0021)
+#
+# Third-party crypto libraries a project takes on by depending on them. These
+# are a DIFFERENT namespace from the distro entries above and are never matched
+# against each other: `python3-cryptography` the dpkg package and
+# `cryptography` the PyPI wheel are different artefacts with different version
+# numbers, and conflating them would put a capability verdict on the wrong one.
+#
+# NOT IN HERE, on purpose: the standard libraries. Python's `hashlib`, Go's
+# `crypto/*` and Node's `crypto` are not dependencies -- they appear in no
+# manifest, and their USE is a call site that Scanner A finds. A library
+# finding and an algorithm finding are different assets (ADR-0002).
+#
+# VERIFICATION (ADR-0017). `pqc_capable_from` is `null` for every entry below
+# and every `pqc_capable_verified` is false, because NONE of these libraries
+# has a post-quantum floor this project has confirmed against upstream release
+# material. That is the honest state: an unverified floor produces no
+# capability verdict at all rather than a guess. Each carries a FILL marker
+# naming exactly what would settle it. `provides` and `source` ARE confirmed --
+# they come from each project's own documentation.
+# ===========================================================================
+
+  # ---- Python (PyPI) ----------------------------------------------------
+  - name: cryptography
+    ecosystem: pypi
+    packages: [cryptography]
+    provides: [RSA, DSA, ECDSA, ECDH, X25519, Ed25519, AES, ChaCha20-Poly1305,
+               SHA-2, SHA-3, HMAC, PBKDF2, Scrypt, X.509]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: confirm against the pyca/cryptography CHANGELOG whether and from
+      which release ML-KEM/ML-DSA are exposed (it binds OpenSSL, so the
+      binding's own version is what matters here, not the linked OpenSSL's),
+      then set pqc_capable_from and pqc_capable_verified: true.
+    eol: null
+    weak_defaults: []
+    source: >-
+      pyca/cryptography documentation, "Primitives" and "X.509"
+      (cryptography.io/en/latest/). The de-facto standard Python crypto
+      library; it binds OpenSSL for its asymmetric and cipher primitives.
+
+  - name: pyOpenSSL
+    ecosystem: pypi
+    packages: [pyopenssl]
+    provides: [RSA, DSA, ECDSA, X.509, TLS]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: pyOpenSSL is a thin wrapper over the linked OpenSSL, so its own
+      version does not determine PQC capability -- the SHIPPED OpenSSL does
+      (see the distro entry above). Confirm whether the wrapper exposes the
+      ML-KEM/ML-DSA APIs at all before recording a floor.
+    eol: null
+    weak_defaults: []
+    source: >-
+      pyOpenSSL documentation (pyopenssl.org). A wrapper around a subset of
+      OpenSSL; upstream directs new code to pyca/cryptography.
+
+  - name: PyCryptodome
+    ecosystem: pypi
+    packages: [pycryptodome, pycryptodomex]
+    provides: [RSA, DSA, ECDSA, AES, ChaCha20-Poly1305, DES, 3DES, RC4,
+               Blowfish, SHA-1, SHA-2, SHA-3, HMAC, PBKDF2, Scrypt]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: confirm against the PyCryptodome changelog
+      (pycryptodome.readthedocs.io) whether any post-quantum KEM or signature
+      is implemented, then set pqc_capable_from and pqc_capable_verified: true.
+    eol: null
+    weak_defaults:
+      - >-
+        Ships DES, 3DES, RC4, Blowfish and MD5 as usable primitives.
+        Availability is not deprecation: a caller can select a 64-bit block
+        cipher or a broken hash without any warning.
+    source: >-
+      PyCryptodome documentation, "API documentation" listing Cipher, Hash,
+      PublicKey and Protocol modules (pycryptodome.readthedocs.io).
+
+  - name: PyNaCl
+    ecosystem: pypi
+    packages: [pynacl]
+    provides: [X25519, Ed25519, XSalsa20-Poly1305, ChaCha20-Poly1305, Argon2,
+               BLAKE2b]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: confirm against libsodium's release notes and the PyNaCl changelog
+      whether a post-quantum KEM is exposed, then set the floor and
+      pqc_capable_verified: true.
+    eol: null
+    weak_defaults: []
+    source: >-
+      PyNaCl documentation (pynacl.readthedocs.io); bindings to libsodium,
+      whose primitives are the Networking and Cryptography library's curve25519
+      and Salsa/ChaCha family.
+
+  - name: PyJWT
+    ecosystem: pypi
+    packages: [pyjwt]
+    provides: [HMAC, RSA, ECDSA, Ed25519]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: JWS has no registered post-quantum algorithm identifiers yet
+      (IANA JOSE registry). Confirm the registry state and PyJWT's supported
+      `algorithms` list before recording a floor.
+    eol: null
+    weak_defaults:
+      - >-
+        The `alg: none` unsecured JWS mode exists in the spec; PyJWT requires
+        it to be requested explicitly, but a caller that passes a
+        caller-controlled algorithms list can still reach it.
+    source: >-
+      PyJWT documentation, "Algorithms" (pyjwt.readthedocs.io), listing the
+      HS/RS/ES/PS/EdDSA families.
+
+  - name: bcrypt
+    ecosystem: pypi
+    packages: [bcrypt]
+    provides: [bcrypt]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      NOT APPLICABLE rather than unconfirmed: bcrypt is a password hash. Shor
+      and Grover do not give a quantum adversary a useful advantage over a
+      memory-hard KDF beyond the generic square-root speed-up, so a
+      "PQC-capable" floor is not a meaningful field for this entry. Recorded as
+      null so nothing scores on it.
+    eol: null
+    weak_defaults:
+      - >-
+        Silently truncates passwords at 72 bytes, so a long passphrase carries
+        less entropy than it appears to.
+    source: >-
+      Provos and Mazieres, "A Future-Adaptable Password Scheme" (USENIX 1999);
+      pyca/bcrypt README (github.com/pyca/bcrypt).
+
+  - name: passlib
+    ecosystem: pypi
+    packages: [passlib]
+    provides: [bcrypt, PBKDF2, Argon2, scrypt, MD5-crypt, SHA-crypt]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      NOT APPLICABLE: passlib is a password-hashing framework. See the bcrypt
+      entry above.
+    eol: null
+    weak_defaults:
+      - >-
+        Ships legacy schemes (md5_crypt, des_crypt, ldap_md5) for reading old
+        hashes. A configuration that lists one as an acceptable scheme will
+        keep producing it.
+    source: >-
+      Passlib documentation, "Supported hashes"
+      (passlib.readthedocs.io/en/stable/lib/passlib.hash.html).
+
+  - name: paramiko
+    ecosystem: pypi
+    packages: [paramiko]
+    provides: [RSA, ECDSA, Ed25519, AES, HMAC, SSH-KEX]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: OpenSSH added the sntrup761x25519 hybrid key exchange in 8.5 and
+      made it default in 9.0. Confirm whether and from which release Paramiko
+      implements a post-quantum SSH KEX, then set the floor and
+      pqc_capable_verified: true.
+    eol: null
+    weak_defaults: []
+    source: >-
+      Paramiko documentation (docs.paramiko.org); a pure-Python SSHv2
+      implementation built on pyca/cryptography.
+
+  # ---- Node (npm) -------------------------------------------------------
+  - name: node-forge
+    ecosystem: npm
+    packages: [node-forge]
+    provides: [RSA, AES, DES, 3DES, RC2, SHA-1, SHA-2, MD5, HMAC, PBKDF2,
+               X.509, TLS]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: confirm against the node-forge CHANGELOG whether any post-quantum
+      algorithm is implemented, then set pqc_capable_from and
+      pqc_capable_verified: true.
+    eol: null
+    weak_defaults:
+      - >-
+        Implements DES, 3DES, RC2 and MD5 as usable primitives, and provides a
+        pure-JavaScript TLS stack rather than delegating to the platform's.
+    source: >-
+      node-forge README, "Features" (github.com/digitalbazaar/forge).
+
+  - name: crypto-js
+    ecosystem: npm
+    packages: [crypto-js]
+    provides: [AES, DES, 3DES, RC4, Rabbit, MD5, SHA-1, SHA-2, SHA-3, HMAC,
+               PBKDF2]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      NOT APPLICABLE in practice: crypto-js implements symmetric primitives and
+      hashes only, with no public-key algorithms, so there is nothing for Shor
+      to break and no PQC replacement to name. Recorded null so nothing scores
+      on it.
+    eol: null
+    weak_defaults:
+      - >-
+        Ships DES, 3DES, RC4 and MD5. Its default `AES.encrypt(msg, passphrase)`
+        form derives a key with a single MD5-based OpenSSL-compatible KDF and
+        uses CBC without authentication.
+    source: >-
+      crypto-js README (github.com/brix/crypto-js) listing the cipher, hash and
+      KDF modules.
+
+  - name: jsonwebtoken
+    ecosystem: npm
+    packages: [jsonwebtoken]
+    provides: [HMAC, RSA, ECDSA, Ed25519]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: as for PyJWT -- JWS has no registered post-quantum algorithm
+      identifiers yet (IANA JOSE registry). Confirm before recording a floor.
+    eol: null
+    weak_defaults:
+      - >-
+        Versions before 9.0.0 accepted an `alg` from the token itself when the
+        caller did not pin `algorithms`, which is the algorithm-confusion
+        weakness (CVE-2022-23540 and related).
+    source: >-
+      jsonwebtoken README, "Algorithms supported"
+      (github.com/auth0/node-jsonwebtoken).
+
+  - name: bcrypt
+    ecosystem: npm
+    packages: [bcrypt, bcryptjs]
+    provides: [bcrypt]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      NOT APPLICABLE: a password hash. See the PyPI bcrypt entry.
+    eol: null
+    weak_defaults:
+      - >-
+        Truncates at 72 bytes, as bcrypt does everywhere. `bcryptjs` is the
+        pure-JavaScript port and is materially slower, which for a
+        deliberately-slow hash means a lower practical cost factor.
+    source: >-
+      node.bcrypt.js README (github.com/kelektiv/node.bcrypt.js) and bcryptjs
+      README (github.com/dcodeIO/bcrypt.js).
+
+  - name: tweetnacl
+    ecosystem: npm
+    packages: [tweetnacl]
+    provides: [X25519, Ed25519, XSalsa20-Poly1305, SHA-512]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      NOT APPLICABLE: TweetNaCl is a fixed port of the 100-tweet NaCl
+      implementation and does not add algorithms. Its X25519 and Ed25519 are
+      Shor-broken, and the replacement is a different library entirely.
+    eol: null
+    weak_defaults: []
+    source: >-
+      TweetNaCl-js README (github.com/dchest/tweetnacl-js); a JavaScript port
+      of TweetNaCl (Bernstein et al., "TweetNaCl: a crypto library in 100
+      tweets", LATINCRYPT 2014).
+
+  - name: elliptic
+    ecosystem: npm
+    packages: [elliptic]
+    provides: [ECDSA, ECDH, Ed25519]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      NOT APPLICABLE: `elliptic` implements elliptic-curve cryptography, all of
+      which Shor breaks. There is no post-quantum version of this library; the
+      replacement is ML-KEM/ML-DSA from a different one.
+    eol: null
+    weak_defaults: []
+    source: >-
+      elliptic README (github.com/indutny/elliptic) listing the supported
+      curves and the ECDSA/EdDSA/ECDH interfaces.
+
+  # ---- Go (modules) -----------------------------------------------------
+  - name: golang.org/x/crypto
+    ecosystem: go
+    packages: [golang.org/x/crypto]
+    provides: [X25519, Ed25519, ChaCha20-Poly1305, HKDF, Argon2, bcrypt,
+               scrypt, SSH-KEX, BLAKE2]
+    pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: x/crypto has carried an internal ML-KEM implementation
+      (`internal/mlkem768`) used by crypto/tls's hybrid key exchange, and Go
+      1.24 promoted ML-KEM to the standard library as `crypto/mlkem`. Confirm
+      from which x/crypto release a CALLER can use it directly -- an internal
+      package is not an exported capability -- then set the floor and
+      pqc_capable_verified: true.
+    eol: null
+    weak_defaults: []
+    source: >-
+      pkg.go.dev/golang.org/x/crypto package index. The supplementary Go
+      cryptography module; the standard library's own crypto/* packages are
+      NOT dependencies and are not listed here (see the header note).

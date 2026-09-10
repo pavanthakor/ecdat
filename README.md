@@ -387,13 +387,15 @@ before believing anything above:
 - **Source scanning is Python-only.** Go, JavaScript, Java and C/C++ are not
   scanned. QuantumBank contains Go crypto specifically so this gap is *measured*
   rather than hidden.
-- **Dependency, binary and network scanners are designed, not built.** Four of a
-  planned seven scanner families exist.
+- **Binary and network scanners are designed, not built.** Five of a planned
+  seven scanner families exist; a statically linked binary and a packet capture
+  are still invisible. The dependency scanner landed in
+  [ADR-0021](docs/adr/0021-deps-scanner.md) — Python, Node and Go.
 - **Fix templates are a starter set** — four templates over nginx,
-  `openssl.cnf` and Python MD5. `dep-bump` and `dockerfile-base-bump` are
-  deliberately absent: nothing reads a Dockerfile or a dependency manifest yet,
-  so their diffs could be generated but never verified by re-scan, and ECDAT
-  does not ship a fix it cannot confirm.
+  `openssl.cnf` and Python MD5. `dockerfile-base-bump` is still absent because
+  nothing reads a Dockerfile, so its diff could be generated but never verified
+  by re-scan, and ECDAT does not ship a fix it cannot confirm. `dep-bump` is now
+  UNBLOCKED — the dependency scanner can re-verify it — and is the next slice.
 - **A fix is verified alone.** Two diffs touching one file are each proved on
   their own; nothing proves they apply together. The loop also costs a sandbox
   copy and two scans per finding, which is why it is opt-in rather than part of

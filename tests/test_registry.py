@@ -163,6 +163,7 @@ def test_the_default_registry_lists_every_built_in_scanner() -> None:
     assert registry.available_ids() == [
         "config",
         "container",
+        "deps",
         "runtime-spool",
         "source",
     ]
@@ -172,6 +173,7 @@ def test_module_level_helpers_delegate_to_the_default_registry() -> None:
     assert [s.id for s in registry.get_scanners(None)] == [
         "config",
         "container",
+        "deps",
         "runtime-spool",
         "source",
     ]

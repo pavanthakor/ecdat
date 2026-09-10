@@ -29,6 +29,7 @@ from collections.abc import Sequence
 from core.scanner import Scanner
 from scanners.config import ConfigScanner
 from scanners.container import ContainerScanner
+from scanners.deps import DepsScanner
 from scanners.runtime_spool import RuntimeSpoolScanner
 from scanners.source import SourceScanner
 
@@ -140,5 +141,6 @@ def available_ids() -> list[str]:
 
 register(ConfigScanner())
 register(ContainerScanner())
+register(DepsScanner())
 register(RuntimeSpoolScanner())
 register(SourceScanner())

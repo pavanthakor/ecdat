@@ -1,0 +1,81 @@
+# Ground truth for the dependency scanner (ADR-0021).
+#
+# Same contract as testdata/quantumbank/answer_key.yaml: everything planted is
+# listed, INCLUDING what ECDAT cannot yet see, and the decoys are named so
+# precision is measured rather than hoped for.
+#
+# ---------------------------------------------------------------------------
+# THE BOUNDARY THIS FIXTURE EXISTS TO PIN
+# ---------------------------------------------------------------------------
+# Scanner B finds THIRD-PARTY crypto LIBRARIES declared as dependencies. It does
+# NOT find stdlib crypto usage -- `hashlib.md5(...)` in Python or `crypto/aes`
+# in Go are call sites, and Scanner A owns those. A `library` finding and a
+# source `algorithm` finding are different assets about different things, and
+# they must not collapse into one component (ADR-0002).
+#
+# schema:
+#   id                stable name, used in the miss report
+#   ecosystem         pypi | npm | go
+#   package           the dependency's name as the manifest spells it
+#   library           the canonical name from knowledge/libraries.yaml
+#   version           the version the scanner must report
+#   version_is_range  true when only a manifest range was available
+#   locator_contains  substring the evidence locator must contain
+#   pqc_capable       expected ecdat:param:pqc_capable, or null when the pack
+#                     declines to say (unverified floor -- ADR-0017)
+
+findings:
+  # ---- Python -----------------------------------------------------------
+  - id: py-cryptography
+    ecosystem: pypi
+    package: cryptography
+    library: cryptography
+    # LOCKFILE-PREFERRED: requirements.txt says ">=41.0,<43", poetry.lock pins
+    # 42.0.5. The exact resolved version wins.
+    version: "42.0.5"
+    version_is_range: false
+    locator_contains: python_repo/poetry.lock
+    pqc_capable: null
+  - id: py-pyjwt
+    ecosystem: pypi
+    package: pyjwt
+    library: PyJWT
+    version: "2.8.0"
+    version_is_range: false
+    locator_contains: python_repo/poetry.lock
+    pqc_capable: null
+
+  # ---- Node -------------------------------------------------------------
+  - id: node-forge
+    ecosystem: npm
+    package: node-forge
+    library: node-forge
+    version: "1.3.1"
+    version_is_range: false
+    locator_contains: node_repo/package-lock.json
+    pqc_capable: null
+  - id: node-jsonwebtoken
+    ecosystem: npm
+    package: jsonwebtoken
+    library: jsonwebtoken
+    version: "8.5.1"
+    version_is_range: false
+    locator_contains: node_repo/package-lock.json
+    pqc_capable: null
+
+  # ---- Go ---------------------------------------------------------------
+  - id: go-x-crypto
+    ecosystem: go
+    package: golang.org/x/crypto
+    library: golang.org/x/crypto
+    version: "0.31.0"
+    version_is_range: false
+    locator_contains: go_repo/go.mod
+    pqc_capable: null
+
+# ANY finding whose package matches one of these is a precision failure. These
+# are ordinary dependencies with no cryptographic role.
+decoys:
+  - requests
+  - lodash
+  - github.com/gorilla/mux

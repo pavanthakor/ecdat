@@ -102,7 +102,7 @@ def test_get_scanners_lists_the_registered_ids(client: TestClient) -> None:
     response = client.get("/scanners")
 
     assert response.status_code == 200
-    assert response.json() == ["config", "container", "runtime-spool", "source"]
+    assert response.json() == ["config", "container", "deps", "runtime-spool", "source"]
 
 
 def test_post_scans_rejects_an_unknown_target_kind(client: TestClient) -> None:

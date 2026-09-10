@@ -281,9 +281,14 @@ def test_the_scan_row_records_every_scanner_that_ran_across_the_targets(
 
     assert record is not None
     assert record.scanners_ran is not None
+    # `deps` is here because it supports repo targets and therefore RAN --
+    # QuantumBank simply declares no dependency manifests, so it found nothing.
+    # "Ran and found nothing" and "never looked" are different answers, and
+    # scanners_ran is the column that keeps them apart (ADR-0016).
     assert {entry["id"] for entry in record.scanners_ran} == {
         "config",
         "container",
+        "deps",
         "runtime-spool",
         "source",
     }
@@ -468,6 +473,7 @@ def test_post_systems_scan_stores_a_three_view_scan_with_drift(
     assert {e["id"] for e in summary["scanners_ran"]} == {
         "config",
         "container",
+        "deps",
         "runtime-spool",
         "source",
     }

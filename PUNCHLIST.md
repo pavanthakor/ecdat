@@ -294,6 +294,38 @@
   with a mypy override. Contained to that one module by design; revisit if a
   maintained `types-reportlab` for 4.x appears.
   *Raised: reports slice.*
+- ~~**`scanners/deps` is an empty directory.**~~ **Resolved** by Scanner B
+  (ADR-0021). Python (`poetry.lock`, `Pipfile.lock`, `requirements.txt`,
+  `pyproject.toml`), Node (`package-lock.json`, `yarn.lock`, `package.json`)
+  and Go (`go.mod`, `go.sum`), lockfile-preferred, with a manifest-only range
+  recorded AS a range and no capability verdict placed on it. 100% recall and
+  100% decoy precision on `testdata/deps_fixtures`.
+  *Raised: Phase 0. Resolved: deps-scanner slice.*
+- **Java and Rust dependencies are not scanned.** `pom.xml`, `build.gradle`,
+  `Cargo.toml` and `Cargo.lock` are each another grammar; the parser-per-format
+  shape in `scanners/deps` makes each addition self-contained. A fast follow to
+  ADR-0021, deliberately not half-done in the same slice.
+  *Raised: deps-scanner slice.*
+- **A dependency finding is not evidence the library is USED.** A manifest entry
+  says the code CAN reach a library, not that it does. Pairing a `library`
+  finding with the source call sites that import it is real correlation work and
+  is not done: the two sit side by side in the CBOM and nothing joins them. It
+  is also what would let a migration plan say "this RSA call site comes from
+  THIS dependency", which is the question an engineer actually asks.
+  *Raised: deps-scanner slice.*
+- **Transitive dependencies are read where the lockfile lists them and not
+  otherwise.** `package-lock.json` and `go.sum` name the whole graph;
+  `requirements.txt` names only what was asked for. The same project therefore
+  reports a different dependency count depending on which file it has, and
+  nothing in the output distinguishes "direct dependencies" from "the whole
+  resolved graph". A `direct` flag on the finding would.
+  *Raised: deps-scanner slice.*
+- **Dependency version comparison is numeric-prefix only.** `42.0.5rc1`
+  compares as `(42, 0, 5)` -- the conservative reading for a capability
+  question, and neither PEP 440 nor semver. A pre-release that genuinely
+  precedes its release compares as equal to it. Shared with the container
+  scanner via `scanners/libraries.py`, so a fix lands in one place.
+  *Raised: deps-scanner slice.*
 - **The API has no authentication and `GET /scans` is unpaginated.** It serves
   an estate's complete cryptographic inventory over plain localhost CORS. Needs
   authn/authz and pagination before it is exposed anywhere but a developer
@@ -353,19 +385,22 @@
   first. Fine for base images and the fixtures; a multi-gigabyte application
   image will want a spooled temporary file under `ctx.scratch_dir`.
   *Raised: Scanner C slice.*
-- **GnuTLS and libgcrypt PQC capability is unverified — MECHANISM BUILT,
-  values STILL await confirmation.** The one remaining data fill. Entries carry
-  `pqc_capable_verified` / `pqc_capable_source`, and `_is_pqc_capable()`
-  returns `None` for an unverified floor, so a version filled in WITHOUT a
-  confirmed source produces no `pqc_capable` parameter rather than a drift
-  verdict nobody checked (ADR-0017). GnuTLS, libgcrypt and NSS are
-  `verified: false` with `FILL:` markers naming the upstream NEWS that would
-  settle each; OpenSSL 3.5.0 is verified against its release announcement and
-  CHANGES.md, which is the one the drift demo depends on.
-  **REMAINING WORK:** check GnuTLS NEWS (3.8.x), libgcrypt NEWS (1.11) and the
-  Mozilla NSS release notes, then set the version and the flag together.
-  *Raised: Scanner C slice. Mechanism: verified-fact slice, see
-  [ADR-0017](docs/adr/0017-verified-facts.md).*
+- **PQC capability is unverified for most of the library pack -- MECHANISM
+  BUILT, values await confirmation.** `_is_pqc_capable()` returns `None` for an
+  unverified floor, so an unconfirmed value produces no capability verdict
+  rather than a guess (ADR-0017). Currently unverified: GnuTLS, libgcrypt and
+  NSS (distro), and **every one of the fifteen dependency entries added in
+  ADR-0021** -- cryptography, pyOpenSSL, PyCryptodome, PyNaCl, PyJWT, paramiko,
+  node-forge, jsonwebtoken and golang.org/x/crypto carry `FILL:` markers naming
+  what would settle each. Some are marked NOT APPLICABLE with a reason instead:
+  bcrypt/passlib are password hashes, crypto-js has no public-key algorithm,
+  and elliptic/tweetnacl are entirely Shor-broken with no later version to
+  upgrade to. OpenSSL 3.5.0 remains the one verified floor, and it is the one
+  the drift demo depends on.
+  **REMAINING WORK:** upstream release notes per library. `provides`,
+  `weak_defaults` and `source` ARE confirmed from each project's own docs.
+  *Raised: Scanner C slice. Widened: deps-scanner slice, see
+  [ADR-0021](docs/adr/0021-deps-scanner.md).*
 - **`libssl3` and `libcrypto3` are inventoried as two components.** They are
   one source package shipped as two binaries, and the scanner reports both
   because the image ships both. `params.source_package` carries the link, but
@@ -660,21 +695,18 @@
   `correlate/fixit/template.py` was written to make each addition
   self-contained: one class, one entry in `DEFAULT_TEMPLATES`.
   *Raised: fix-it slice.*
-- **`dep-bump` and `dockerfile-base-bump` are BLOCKED on their producer
-  scanner.** Both were in the fix-it slice as framed and were deliberately not
-  shipped: nothing in ECDAT reads a Dockerfile or a dependency manifest
-  (`scanners/deps` is an empty directory), and the container scanner reads
-  `dpkg`/`apk` databases from inside layer blobs of an image tar, which a
-  unified text diff cannot patch. Both diffs could be generated and neither
-  could be verified by re-scan, which is the one thing ADR-0015 refuses to
-  ship. **Add the fix template when the scanner lands** — a Dockerfile parser
-  (`FROM`, pinned `apt-get install pkg=version`) resolved against
-  `knowledge/libraries.yaml`, or a real `scanners/deps`. The capability floor
-  the templates would use is already in the pack
-  (`OpenSSL pqc_capable_from: 3.5.0`).
+- **`dockerfile-base-bump` is BLOCKED on a Dockerfile parser; `dep-bump` is
+  now UNBLOCKED.** ~~Both~~ were held out of ADR-0015 because a fix that cannot
+  be re-verified by a scanner is a fix ECDAT will not ship. `scanners/deps`
+  (ADR-0021) is that producer for dependencies, so **`dep-bump` can now be
+  written and re-verified against a manifest** -- it is the next slice.
+  `dockerfile-base-bump` still has none: nothing parses a Dockerfile, and the
+  container scanner reads `dpkg`/`apk` databases from inside layer blobs, which
+  a unified text diff cannot patch.
   `test_every_shipped_template_names_a_registered_scanner` is what stops an
-  unverifiable template creeping back in.
-  *Raised: fix-it slice. See [ADR-0015](docs/adr/0015-fixit.md).*
+  unverifiable template creeping in.
+  *Raised: fix-it slice. Half-resolved: deps-scanner slice, see
+  [ADR-0021](docs/adr/0021-deps-scanner.md).*
 - **Fixes are verified one at a time, and the loop is expensive.** One sandbox
   copy plus two scans per finding — negligible for config, ~3s per finding for
   source, because semgrep runs twice. Two verified diffs touching the same file
