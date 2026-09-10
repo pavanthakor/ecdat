@@ -596,6 +596,78 @@ def _finding(
 
 
 # ---------------------------------------------------------------------------
+# Dataflow annotations -- ADR-0026
+# ---------------------------------------------------------------------------
+
+#: A rule carrying this metadata key does not describe a cryptographic
+#: artefact. It reports something ABOUT one that another rule already found,
+#: and the scanner applies it as a correction instead of emitting a Finding.
+ANNOTATES = "annotates"
+
+#: The only annotation kind so far: "the value reaching this call site came
+#: from the environment, so the artefact is configurable".
+ANNOTATE_CONFIGURABLE = "configurable"
+
+
+def _site(result: dict[str, Any]) -> tuple[str, int]:
+    """``(path, line)`` -- what an annotation and its finding must share.
+
+    The line is the SINK's line for a taint rule and the match line for a
+    pattern rule, and for the call sites this applies to they are the same
+    line: `rsa.generate_private_key(..., key_size=BITS)` is both.
+    """
+    return (
+        str(result.get("path", "")),
+        int((result.get("start") or {}).get("line", 0)),
+    )
+
+
+def _partition(
+    results: Sequence[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split semgrep's results into ANNOTATIONS and detections.
+
+    An annotation is a rule whose metadata declares `annotates:`. It never
+    becomes a Finding -- see :data:`ANNOTATES` and ADR-0026 for why a
+    configurability verdict cannot be one.
+    """
+    annotations: list[dict[str, Any]] = []
+    detections: list[dict[str, Any]] = []
+    for result in results:
+        metadata = (result.get("extra") or {}).get("metadata") or {}
+        kind = metadata.get(ANNOTATES) if isinstance(metadata, dict) else None
+        if kind == ANNOTATE_CONFIGURABLE:
+            annotations.append(result)
+        elif kind is not None:
+            raise RulePackContractError(
+                f"rule {result.get('check_id')!r}: unknown annotation kind "
+                f"{kind!r}; the scanner knows only {ANNOTATE_CONFIGURABLE!r}"
+            )
+        else:
+            detections.append(result)
+    return annotations, detections
+
+
+def _mark_configurable(finding: Finding) -> Finding:
+    """Apply a dataflow configurability verdict to a finding.
+
+    Two fields move, and both for the same reason -- the verdict replaces a
+    guess with evidence:
+
+    * ``configurable`` becomes True. The shape heuristic reads `RSA_BITS` as a
+      resolved constant because it is ALL_CAPS; dataflow says it came from
+      `os.environ`. This flag feeds the crypto-agility score and the Mosca Y
+      estimate, so it is the whole point of the rule.
+    * ``confidence`` returns to 1.0 where the heuristic had docked it to
+      :data:`_UNRESOLVED_CONFIDENCE` for an unresolved lower-case name. The
+      penalty exists because the scanner did not know what the value was; here
+      it does know where it came from, which is the question `configurable`
+      asks.
+    """
+    return finding.model_copy(update={"configurable": True, "confidence": 1.0})
+
+
+# ---------------------------------------------------------------------------
 # The plugin
 # ---------------------------------------------------------------------------
 
@@ -651,6 +723,12 @@ class SourceScanner:
             ),
         )
 
+        annotations, detections = _partition(ordered)
+        configurable_sites = {_site(result) for result in annotations}
+
         cache: dict[Path, list[str]] = {}
-        for result in ordered:
-            yield _finding(result, cache, self.id)
+        for result in detections:
+            finding = _finding(result, cache, self.id)
+            if _site(result) in configurable_sites:
+                finding = _mark_configurable(finding)
+            yield finding

@@ -28,6 +28,15 @@ rules:
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:md5)["']$
+    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
+    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
+    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
+    # Semgrep's constant propagation works on the PATTERN, not the capture, so
+    # spelling the literal out is what reaches a value assigned earlier.
+    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
+    # one covers spellings (MD5, Md5) the literals do not.
+      - pattern: hmac.new(..., digestmod="md5")
+      - pattern: hmac.new(..., digestmod='md5')
 
   - id: py-hmac-sha1
     languages: [python]
@@ -51,3 +60,12 @@ rules:
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:sha1|sha-1)["']$
+    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
+    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
+    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
+    # Semgrep's constant propagation works on the PATTERN, not the capture, so
+    # spelling the literal out is what reaches a value assigned earlier.
+    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
+    # one covers spellings (MD5, Md5) the literals do not.
+      - pattern: hmac.new(..., digestmod="sha1")
+      - pattern: hmac.new(..., digestmod='sha1')

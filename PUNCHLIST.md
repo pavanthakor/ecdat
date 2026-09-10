@@ -372,17 +372,59 @@
   credentials than an inventory alone. STILL OWED, and now the largest open
   item on this list.
   *Raised: Phase 0, scan pipe slice. Widened: store migration.*
-- **Source detection has no dataflow, so two classes of finding are missed.**
-  Scanner A matches per call site. An ALL_CAPS constant assigned from
-  `os.environ` is reported as hard-coded when it is genuinely configurable, and
-  a key assembled by concatenation before reaching a cipher is not recognised
-  as key material. The weak-RNG rule is likewise scoped by variable name
-  (`key|token|secret|nonce|...`) because an unscoped `random.random()` rule
-  would fire on every simulation in an estate; a weak RNG feeding a
-  badly-named variable is missed. Needs constant propagation and taint
-  tracking -- Semgrep Pro or a tree-sitter pass.
-  *Raised: Scanner A slice. See
-  [ADR-0004](docs/adr/0004-source-scanning-semgrep.md) Consequences.*
+- ~~**Source detection has no dataflow, so two classes of finding are
+  missed.**~~ **Resolved for PYTHON** by
+  [ADR-0026](docs/adr/0026-dataflow.md), and it needed neither Semgrep Pro nor
+  a tree-sitter pass -- the OSS build has constant propagation and `mode:
+  taint`, which STEP 0 measured before any rule was written.
+  An env-sourced key size now reports `configurable=True` while a literal one
+  still reports `False` (same algorithm, same rule, the flag is the only
+  difference); a concatenation-assembled key reaching a cipher is a key-material
+  finding; and a weak RNG is caught by FLOW as well as by name.
+  The configurability verdict is applied as an ANNOTATION rather than a second
+  finding, because the normaliser's merge rule makes `configurable=False` beat
+  `True` -- a correction emitted as its own finding would have been silently
+  overruled by the finding it was meant to correct.
+  *Raised: Scanner A slice. Resolved (Python): dataflow slice.*
+- **Dataflow is PYTHON-ONLY.** Go, JS/TS and Java have exactly the same
+  call-site-only blind spots, and semgrep supports taint in all of them, so
+  each is an additive rule file against the shape ADR-0026 established -- a
+  configurability annotation scoped to that language's crypto sinks, an
+  assembled-key rule, and a weak-RNG-by-flow rule. Nothing was written for them
+  in this slice.
+  *Raised: dataflow slice, see [ADR-0026](docs/adr/0026-dataflow.md).*
+- **Taint is INTRA-PROCEDURAL in the OSS build, so a flow through a function
+  call is missed.** Measured, not assumed (ADR-0026 STEP 0): a key assembled in
+  a helper and used by its caller is invisible to every taint rule here. That
+  is Semgrep Pro's interprocedural analysis. Recorded as a `known_limit` in
+  `testdata/dataflow_fixtures/answer_key.yaml` rather than left as a silent
+  recall gap.
+  *Raised: dataflow slice.*
+- **Constant propagation does not follow a class or attribute reference, and
+  only the digest/MAC rules were given propagation REACH.** Two separate
+  limits.
+  First: `algo = algorithms.AES` then `algo(key)` is invisible -- OSS
+  propagates literals, not class references.
+  `testdata/dataflow_fixtures/must_not_fire/constprop_limit.py` pins that with
+  a test that FAILS if a semgrep upgrade starts catching it, so the limit
+  cannot go stale.
+  Second, and more actionable: propagation applies to the PATTERN, not to the
+  capture, so a rule written as `hashlib.new($ALG, ...)` plus a
+  `metavariable-regex` sees the source text `algo` and never the propagated
+  value. Twelve Python rules are written that way. The five digest rules and
+  two MAC rules now carry literal branches as well; **`py-ssl-weak-protocol`
+  and the four `py-jwt-*` rules still do not**, and miss propagated constants
+  for the same reason. Mechanical, and owed.
+  *Raised: dataflow slice.*
+- **The configurability annotation joins on `(path, line)`, and `configurable`
+  is still binary.** The join is exact for the call sites here -- the taint
+  sink and the pattern match are the same line -- but a sink on a different
+  line from the finding it should annotate would be missed; keying on the
+  semgrep match range would be precise. Separately, "read from the environment"
+  and "read from a signed policy file behind a change-control ticket" are both
+  `configurable=True`, and they are not the same migration cost -- which is the
+  number this flag feeds.
+  *Raised: dataflow slice.*
 - ~~**Determinism is only guaranteed within one semgrep version.**~~
   **Resolved** by the verified-fact slice. `requirements.txt` pins
   `semgrep==1.176.1` exactly rather than a range, and a test asserts it equals

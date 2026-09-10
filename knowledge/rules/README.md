@@ -113,6 +113,33 @@ the integer `2048` — which matters, because `params` is identifying and
 `key_size: 2048` and `key_size: "2048"` hash to different artefacts
 (PUNCHLIST: untyped params).
 
+### Constant propagation reaches PATTERNS, not captures
+
+Semgrep propagates literals: `algo = "md5"` followed by `hashlib.new(algo, ...)`
+is matched by a pattern written against `hashlib.new("md5", ...)`. It works
+through locals, module-level constants and branches.
+
+It does **not** reach a `metavariable-regex`. The metavariable binds the SOURCE
+TEXT at the call site — `algo`, not `"md5"` — so a rule written like this sees
+nothing when the value is assigned earlier:
+
+```yaml
+# Matches only a literal AT the call site.
+- patterns:
+    - pattern: hashlib.new($ALG, ...)
+    - metavariable-regex: {metavariable: $ALG, regex: '^["'](?i:md5)["']$'}
+
+# ALSO matches `algo = "md5"; hashlib.new(algo, ...)`.
+- pattern: hashlib.new("md5", ...)
+```
+
+So a rule whose algorithm is a short closed vocabulary should carry **both**:
+the literal branches for propagation reach, the regex branch for spellings the
+literals do not enumerate (`MD5`, `Md5`). Measured in ADR-0026 STEP 0.
+
+What propagation does NOT do in the OSS build: it does not follow a class or
+attribute reference. `algo = algorithms.AES` then `algo(key)` is invisible.
+
 ### A constant the source cannot vary
 
 Captures are extracted from the message by PARAMETER NAME, not by looking up a

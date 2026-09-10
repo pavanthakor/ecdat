@@ -1,0 +1,197 @@
+# Dataflow rules: constant propagation and taint (ADR-0026).
+#
+# Every other rule in this pack matches a CALL SITE. That is most of what
+# matters and it is not all of it, and ADR-0004 recorded the two things it
+# costs. These rules close both using Semgrep's own dataflow -- `mode: taint`
+# and the constant propagation that is on by default -- rather than a second
+# engine.
+#
+# WHAT THE OSS BUILD ACTUALLY DOES, measured before these rules were written
+# (ADR-0026 STEP 0):
+#
+#   * Constant propagation: WORKS. `algo = "AES"` then `Cipher(algo)` matches a
+#     pattern written against `Cipher("AES")`. Note that the metavariable still
+#     binds the SOURCE TEXT (`algo`), not the propagated value -- propagation
+#     happens in matching, not in capture.
+#   * Taint mode: WORKS, and only INTRA-PROCEDURALLY. A flow inside one
+#     function is tracked; a flow through a function call is NOT. That is
+#     Semgrep Pro's interprocedural analysis, and the rules below are written
+#     to be honest about it rather than to pretend otherwise.
+#
+# Sources:
+#   CPython docs, `random`: "not suitable for security purposes" -- MT19937 is
+#     fully predictable after 624 outputs.
+#   NIST SP 800-90A Rev.1 -- approved DRBG constructions.
+#   NIST SP 800-133 Rev.2 s4 -- keys must come from an approved RBG.
+#   NIST SP 800-57 Part 1 Rev.5 s5.3 -- key material lifetime.
+#   CWE-321 (hard-coded key), CWE-330 (insufficiently random values).
+rules:
+  # -------------------------------------------------------------------------
+  # MISS-CLASS 1: the `configurable` flag
+  #
+  # This rule is NOT a detection. `annotates: configurable` tells
+  # scanners/source to use it as a CORRECTION to a flag on a finding some other
+  # rule already produced, and never to emit a Finding of its own.
+  #
+  # Why it cannot be an ordinary rule: the artefact is already reported. What
+  # is wrong is `configurable`, which the scanner infers from the SHAPE of the
+  # captured value -- `RSA_BITS` is ALL_CAPS, so it reads as a resolved
+  # constant and scores False. It is read from the environment. That flag feeds
+  # the crypto-agility score and the Mosca Y estimate, so backwards here
+  # inflates the migration cost of the site.
+  #
+  # And why it cannot be a SECOND finding: the normaliser's merge rule makes
+  # `configurable=False` beat `True` (one site that cannot be changed without a
+  # code edit makes the artefact not freely configurable -- a deliberate,
+  # conservative choice for merging across sites). A second finding carrying
+  # the correction would be silently overruled by the one it was meant to
+  # correct.
+  - id: py-configurable-crypto-input
+    languages: [python]
+    severity: INFO
+    mode: taint
+    message: "ecdat|"
+    metadata:
+      annotates: configurable
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      quantum_note: >-
+        Not a cryptographic claim. Records that a value reaching a
+        cryptographic parameter came from the environment or a config read, so
+        the artefact is CONFIGURABLE: changing it is a restart, not a code
+        change, a review and a redeploy. Feeds the crypto-agility score and the
+        Mosca Y (migration-time) estimate, which is why it is worth a rule of
+        its own rather than a shape heuristic.
+      flags: [dataflow]
+    pattern-sources:
+      - pattern: os.environ[...]
+      - pattern: os.environ.get(...)
+      - pattern: os.getenv(...)
+      - pattern: $CFG.get($SECTION, $OPTION)
+      - pattern: $CFG.getint($SECTION, $OPTION)
+    # Scoped to CRYPTOGRAPHIC sinks on purpose. An env-sourced value is only
+    # interesting where it selects an algorithm or a key size; `PAGE_SIZE` is
+    # not a cryptographic fact, and a rule that said so would fire on every
+    # settings module in an estate.
+    pattern-sinks:
+      - pattern: rsa.generate_private_key(...)
+      - pattern: ec.generate_private_key(...)
+      - pattern: dsa.generate_private_key(...)
+      - pattern: RSA.generate(...)
+      - pattern: ECC.generate(...)
+      - pattern: algorithms.AES(...)
+      - pattern: algorithms.TripleDES(...)
+      - pattern: algorithms.ChaCha20(...)
+      - pattern: AES.new(...)
+      - pattern: DES3.new(...)
+      - pattern: hashlib.new(...)
+      - pattern: hmac.new(...)
+      - pattern: ssl.SSLContext(...)
+      - pattern: $CTX.set_ciphers(...)
+      - pattern: jwt.encode(...)
+
+  # -------------------------------------------------------------------------
+  # MISS-CLASS 2: key material that exists only along a flow
+  # -------------------------------------------------------------------------
+  - id: py-assembled-key-material
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|"
+    mode: taint
+    metadata:
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      redact: true
+      quantum_note: >-
+        A key ASSEMBLED in code -- concatenated, joined or formatted from
+        parts -- and passed to a cipher. There is no `key = b"..."` literal for
+        a per-call-site rule to match, so the artefact that matters is
+        invisible to every other rule in this pack while the cipher it feeds is
+        reported normally.
+        Assembly is the problem, not the parts: a key built from a constant
+        prefix and a tenant name has whatever entropy the tenant name has, it
+        is derivable by anyone who knows the scheme, and rotating it means
+        changing the scheme (CWE-321; NIST SP 800-57 Part 1 Rev.5 s5.3 on key
+        lifetime, SP 800-133 Rev.2 s4 on generation). Quantum is irrelevant --
+        there is nothing to break. Derive it with an approved KDF from a
+        secret that came from an approved RBG, or load it from a KMS.
+      flags: [key-material, critical, dataflow]
+    pattern-sources:
+      - pattern: $A + $B
+      - pattern: $SEP.join(...)
+      - pattern: $FMT.format(...)
+      - pattern: f"..."
+    pattern-sinks:
+      - pattern: algorithms.AES(...)
+      - pattern: algorithms.TripleDES(...)
+      - pattern: algorithms.ChaCha20(...)
+      - pattern: AES.new(...)
+      - pattern: DES3.new(...)
+      - pattern: hmac.new(...)
+      - pattern: hmac.HMAC(...)
+      - pattern: Fernet(...)
+
+  # -------------------------------------------------------------------------
+  # The weak-RNG blind spot
+  #
+  # This rule does NOT replace `py-weak-random-secret`; both ship. They cover
+  # different halves and neither is a superset:
+  #
+  #   * the name-scoped rule sees `secret = random.random()` with no sink in
+  #     the same function -- taint is intra-procedural, so a value returned to
+  #     a caller that uses it is invisible to this rule;
+  #   * this rule sees `value = random.random()` flowing to a cipher, which the
+  #     name-scoped rule cannot see because the name says nothing.
+  #
+  # Where both fire they agree on algorithm, primitive, usage and params, so
+  # they carry ONE identity and the normaliser folds them into one component.
+  # That is what makes shipping both safe rather than noisy, and
+  # tests/test_dataflow.py asserts the single component rather than trusting
+  # it. `flags` must keep matching the name-scoped rule's for that to hold --
+  # `critical` sets `params.flagged`, and a params mismatch would split the
+  # identity and double-report.
+  # -------------------------------------------------------------------------
+  - id: py-weak-random-dataflow
+    languages: [python]
+    severity: ERROR
+    message: "ecdat|"
+    mode: taint
+    metadata:
+      algorithm: MT19937
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      quantum_note: >-
+        Not a cryptographic DRBG at all. MT19937 state is recoverable from 624
+        consecutive outputs, so anything derived from it is predictable today;
+        this is a classical break with nothing to do with quantum. Caught here
+        by DATAFLOW rather than by the variable's name: the value reaches a key
+        or token sink, which is what makes it a key-recovery bug regardless of
+        what it was called on the way. NIST SP 800-133 Rev.2 s4 requires an
+        approved RBG (SP 800-90A Rev.1) for key generation. Replace with
+        `secrets` or `os.urandom`.
+      flags: [weak, critical, dataflow]
+    pattern-sources:
+      - pattern: random.random()
+      - pattern: random.randint(...)
+      - pattern: random.randrange(...)
+      - pattern: random.getrandbits(...)
+      - pattern: random.choice(...)
+      - pattern: random.sample(...)
+      - pattern: random.uniform(...)
+      - pattern: $RNG.random()
+      - pattern: $RNG.getrandbits(...)
+    pattern-sinks:
+      - pattern: algorithms.AES(...)
+      - pattern: algorithms.TripleDES(...)
+      - pattern: algorithms.ChaCha20(...)
+      - pattern: AES.new(...)
+      - pattern: DES3.new(...)
+      - pattern: hmac.new(...)
+      - pattern: hmac.HMAC(...)
+      - pattern: Fernet(...)
+      - pattern: jwt.encode(...)
+      - pattern: $O.set_password(...)

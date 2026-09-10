@@ -1,0 +1,131 @@
+# Ground truth for the dataflow rules (ADR-0026).
+#
+# Two kinds of entry, because this slice does two different things.
+#
+# `findings` are ordinary detections the dataflow rules ADD -- a key-material
+# artefact the per-call-site rules cannot see, and a weak DRBG the name-scoped
+# rule cannot see. Scored like any other rule pack.
+#
+# `configurability` is NOT a finding. It is a CORRECTION to a flag on a finding
+# some other rule already produced, and it is scored separately because getting
+# it wrong is invisible in a recall number: the artefact is reported either way,
+# with the wrong migration cost attached. `expected_configurable` is what
+# `Finding.configurable` must be after the correction runs.
+
+# ---------------------------------------------------------------------------
+# MISS-CLASS 1: the configurable flag
+#
+# Every entry here is the SAME algorithm at the same kind of call site. Only
+# the flag differs, which is the whole point -- a test that checked the
+# algorithm would pass whether or not this slice worked.
+# ---------------------------------------------------------------------------
+configurability:
+  - fixture: must_fire/df_env_keysize.py
+    rule_id: py-rsa-keygen
+    algorithm: RSA
+    expected_configurable: true
+    why: >-
+      RSA_BITS is ALL_CAPS, so the shape heuristic reads it as a resolved
+      constant and sets configurable=False. It is read from os.environ:
+      changing it is a restart, not a code change and a redeploy.
+
+  - fixture: must_fire/df_getenv_keysize.py
+    rule_id: py-rsa-keygen
+    algorithm: RSA
+    expected_configurable: true
+    why: >-
+      The same correction through os.getenv. `bits` is lower-case, so the
+      shape heuristic already guesses configurable=True here -- the dataflow
+      rule turns a guess into evidence, and drops the 0.6 confidence penalty
+      that came with the guess.
+
+  - fixture: must_fire/df_literal_keysize.py
+    rule_id: py-rsa-keygen
+    algorithm: RSA
+    expected_configurable: false
+    why: >-
+      The control. A literal 2048 is genuinely hard-coded: changing it needs a
+      code change, a review and a redeploy, which is what the Mosca Y estimate
+      is meant to price.
+
+# ---------------------------------------------------------------------------
+# CONST-PROP: the value is followed, not just read at the call site
+# ---------------------------------------------------------------------------
+constant_propagation:
+  - fixture: must_fire/df_constprop_algo.py
+    algorithm: MD5
+    rule_id: py-hashlib-md5
+    count: 2
+    why: >-
+      `algo = "md5"` then `hashlib.new(algo, ...)`, and the same through a
+      module-level constant. The existing rule is written against
+      `hashlib.new("md5", ...)` and matches anyway, because semgrep propagates
+      the literal -- no new rule is needed, and the test exists to prove the
+      capability is real rather than assumed.
+
+# What constant propagation does NOT do in the OSS build. Measured in ADR-0026
+# STEP 0, listed here rather than left as a silent recall gap. These are NOT
+# decoys: a decoy should stay silent, and these should not.
+known_limits:
+  - fixture: must_not_fire/constprop_limit.py
+    missed: AES
+    why: >-
+      Semgrep OSS propagates LITERALS -- strings and numbers -- through locals,
+      module constants and branches. It does not propagate a class or attribute
+      reference, so `algo = algorithms.AES` then `algo(key)` is invisible to a
+      pattern written against `algorithms.AES(...)`. Needs a rule that matches
+      the aliased call shape, or Semgrep Pro.
+
+  - fixture: (any cross-function flow)
+    missed: every taint rule
+    why: >-
+      Taint mode in the OSS build is INTRA-PROCEDURAL. A value that leaves a
+      function and reaches a sink in its caller is not tracked, so a key
+      assembled in a helper and used by its caller is missed. Semgrep Pro's
+      interprocedural analysis is the fix; nothing in these rules pretends
+      otherwise.
+
+# ---------------------------------------------------------------------------
+# MISS-CLASS 2 and the weak-RNG blind spot: findings the dataflow rules ADD
+# ---------------------------------------------------------------------------
+findings:
+  must_fire/df_assembled_key.py:
+    - rule_id: py-assembled-key-material
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1
+
+  must_fire/df_weak_rng_dataflow.py:
+    - rule_id: py-weak-random-dataflow
+      algorithm: MT19937
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+
+  # Both RNG rules see this one. They agree on algorithm, primitive, usage and
+  # locus, so they carry ONE identity and the normaliser folds them into a
+  # single component -- asserted in tests/test_dataflow.py rather than either
+  # rule being switched off.
+  must_fire/df_weak_rng_named.py:
+    - rule_id: py-weak-random-dataflow
+      algorithm: MT19937
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+    - rule_id: py-weak-random-secret
+      algorithm: MT19937
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+
+#: A `random.random()` that reaches no cryptographic sink, an env read that
+#: selects a page size, and a concatenation that builds a label. None may
+#: produce a finding: what makes a taint rule safe to ship is the SINK, not
+#: the source.
+decoys:
+  - must_not_fire/decoys.py

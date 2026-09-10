@@ -30,6 +30,15 @@ rules:
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:md5)["']$
+    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
+    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
+    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
+    # Semgrep's constant propagation works on the PATTERN, not the capture, so
+    # spelling the literal out is what reaches a value assigned earlier.
+    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
+    # one covers spellings (MD5, Md5) the literals do not.
+      - pattern: hashlib.new("md5", ...)
+      - pattern: hashlib.new('md5', ...)
 
   - id: py-hashlib-sha1
     languages: [python]
@@ -52,6 +61,15 @@ rules:
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:sha1|sha-1)["']$
+    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
+    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
+    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
+    # Semgrep's constant propagation works on the PATTERN, not the capture, so
+    # spelling the literal out is what reaches a value assigned earlier.
+    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
+    # one covers spellings (MD5, Md5) the literals do not.
+      - pattern: hashlib.new("sha1", ...)
+      - pattern: hashlib.new('sha1', ...)
 
   - id: py-hashlib-sha256
     languages: [python]
@@ -74,6 +92,15 @@ rules:
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:sha256|sha-256)["']$
+    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
+    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
+    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
+    # Semgrep's constant propagation works on the PATTERN, not the capture, so
+    # spelling the literal out is what reaches a value assigned earlier.
+    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
+    # one covers spellings (MD5, Md5) the literals do not.
+      - pattern: hashlib.new("sha256", ...)
+      - pattern: hashlib.new('sha256', ...)
 
   - id: py-hashlib-sha384
     languages: [python]
@@ -95,6 +122,15 @@ rules:
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:sha384|sha-384)["']$
+    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
+    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
+    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
+    # Semgrep's constant propagation works on the PATTERN, not the capture, so
+    # spelling the literal out is what reaches a value assigned earlier.
+    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
+    # one covers spellings (MD5, Md5) the literals do not.
+      - pattern: hashlib.new("sha384", ...)
+      - pattern: hashlib.new('sha384', ...)
 
   - id: py-hashlib-sha512
     languages: [python]
@@ -115,3 +151,12 @@ rules:
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:sha512|sha-512)["']$
+    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
+    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
+    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
+    # Semgrep's constant propagation works on the PATTERN, not the capture, so
+    # spelling the literal out is what reaches a value assigned earlier.
+    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
+    # one covers spellings (MD5, Md5) the literals do not.
+      - pattern: hashlib.new("sha512", ...)
+      - pattern: hashlib.new('sha512', ...)

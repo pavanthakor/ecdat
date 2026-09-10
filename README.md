@@ -496,6 +496,7 @@ consequences:
 | [0023](docs/adr/0023-go-js-rules.md) | Go and JS/TS rule packs; the QuantumBank Go gap closed |
 | [0024](docs/adr/0024-java-rules.md) | Java rule pack; a language-neutral redaction net |
 | [0025](docs/adr/0025-binary-scanner.md) | Scanner D: binaries, heuristic and confidence-scored |
+| [0026](docs/adr/0026-dataflow.md) | Source dataflow: constant propagation and taint |
 
 ---
 
