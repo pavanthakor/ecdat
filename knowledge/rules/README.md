@@ -15,6 +15,13 @@ half-populated Finding.
         hashes.yaml      <- one file per algorithm family
         asymmetric.yaml
         ...
+      go/
+      javascript/        <- targets both .js and .ts
+
+Semgrep is pointed at `knowledge/rules/` itself, not at one language
+subdirectory, and every rule's own `languages:` decides which files it reads.
+So adding a language is adding a directory of YAML — no Python changes
+(ADR-0023).
 
 ## Why the message is a machine channel
 
@@ -105,6 +112,30 @@ the integer `2048` — which matters, because `params` is identifying and
 `key_size: 2048` and `key_size: "2048"` hash to different artefacts
 (PUNCHLIST: untyped params).
 
+### A constant the source cannot vary
+
+Captures are extracted from the message by PARAMETER NAME, not by looking up a
+metavariable — so a rule may write a constant it genuinely knows straight into
+the message:
+
+```yaml
+- id: go-aes-cbc
+  message: "ecdat|mode=CBC"
+  metadata:
+    capture:
+      mode: CBC        # the constant, not a $METAVAR -- see below
+```
+
+Use this only where the language puts the fact somewhere unbindable. In Python
+the cipher mode is an argument (`modes.CBC(iv)`) and binds normally; in Go it is
+part of the function NAME (`cipher.NewCBCEncrypter`) and there is nothing to
+bind. Writing the constant is then the honest report — the call site cannot
+select another mode without a code change, and `_is_resolved` correctly reads it
+as hard-coded. Spell the constant in `capture` rather than a fake `$METAVAR`, so
+a reader can see which it is.
+
+Do **not** use it to assert something the pattern has not actually established.
+
 ### Resolved vs configurable
 
 The scanner decides `configurable` and `confidence` from the *shape* of every
@@ -147,7 +178,10 @@ matches usage, and collapsing them produces confident wrong advice.
 
 * Unique across the whole pack, and **no dots** — the scanner recovers the bare
   id from Semgrep's `check_id` by taking the last dotted segment.
-* Prefix with the language: `py-`, then `go-`, `java-`, as packs are added.
+* Prefix with the language: `py-`, `go-`, `js-`, then `java-` as packs are
+  added. `js-` covers both `.js` and `.ts`; the rules declare
+  `languages: [javascript, typescript]` and a test asserts the `.ts` half
+  actually matches rather than trusting the declaration.
 * The id ends up in every Finding's `Occurrence.detail` as `rule=<id>`, so it
   is what an auditor sees. Name it after what it detects, not after the CVE.
 
@@ -180,11 +214,20 @@ is there. Write the `redact` flag anyway; do not rely on the net.
 
 Every rule needs three things before it lands, all under `testdata/`:
 
-1. `must_fire/<rule_id>.py` — minimal code that must produce the Finding.
+1. `must_fire/<rule_id>.<ext>` — minimal code that must produce the Finding.
+   One fixture root per language: `testdata/python_fixtures`,
+   `testdata/go_fixtures`, `testdata/js_fixtures`, each with its OWN
+   `answer_key.yaml` and its own score. Language packs are never averaged
+   together — one combined number would let a strong pack carry a weak one
+   (ADR-0023).
 2. An entry in `answer_key.yaml` giving the expected algorithm, primitive,
    usage, asset type, occurrence count, and any `params_any` values the rule
    must capture.
-3. Nothing new firing on `must_not_fire/decoys.py`.
+3. Nothing new firing on that language's `must_not_fire/decoys.<ext>`. Each
+   decoy file plants the four false positives worth worrying about: prose
+   naming an algorithm, an identifier that reads like a digest holding a
+   non-secret, a name-scoped RNG rule's non-key use, and a non-crypto import
+   whose name looks cryptographic.
 
 The answer key is scored, and **precision is asserted at exactly 1.0**. A rule
 that fires on something not declared as ground truth fails the build even if

@@ -1,0 +1,150 @@
+# JavaScript / TypeScript hash functions.
+#
+# Sources:
+#   MD5    -- RFC 6151 (collision attacks; MUST NOT where collision resistance
+#             is required); NIST SP 800-131A Rev.2 Table 8.
+#   SHA-1  -- NIST SP 800-131A Rev.2 (disallowed for signature generation since
+#             2013); SHAttered (Stevens et al., 2017).
+#   SHA-2  -- FIPS 180-4. Grover halves the effective preimage strength, so
+#             SHA-256 keeps ~128-bit preimage resistance against a quantum
+#             adversary.
+#   Node.js `crypto.createHash` (nodejs.org/api/crypto.html); crypto-js
+#     (github.com/brix/crypto-js).
+#
+# EVERY RULE HERE TARGETS BOTH `.js` AND `.ts`. `languages: [javascript,
+# typescript]` is what makes a rule apply to a `.ts` file, and
+# tests/test_rules_js.py asserts the `.ts` half actually matches rather than
+# trusting the declaration.
+#
+# Both quote styles are listed explicitly. Semgrep matches string literals by
+# their content, but the pack spells out `"md5"` and `'md5'` so a reader can
+# see that a single-quoted codebase is covered.
+rules:
+  - id: js-hash-md5
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        Classically broken: chosen-prefix collisions are practical on commodity
+        hardware (RFC 6151; NIST SP 800-131A Rev.2 Table 8 disallows MD5 for
+        digital signatures). Quantum is not the issue -- this is already unfit.
+        Replace with SHA-256 (FIPS 180-4) for integrity, or a memory-hard KDF
+        (Argon2id, scrypt) if it is hashing a credential.
+      flags: [weak]
+    pattern-either:
+      - pattern: crypto.createHash("md5")
+      - pattern: crypto.createHash('md5')
+      - pattern: createHash("md5")
+      - pattern: createHash('md5')
+
+  - id: js-hash-sha1
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: SHA-1
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        Collision resistance is broken classically (SHAttered, 2017);
+        disallowed for digital signature generation since 2013 (NIST SP
+        800-131A Rev.2). Replace with SHA-256 (FIPS 180-4).
+      flags: [weak]
+    pattern-either:
+      - pattern: crypto.createHash("sha1")
+      - pattern: crypto.createHash('sha1')
+      - pattern: createHash("sha1")
+      - pattern: createHash('sha1')
+
+  - id: js-hash-sha256
+    languages: [javascript, typescript]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      algorithm: SHA-256
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        FIPS 180-4. Grover's algorithm halves the effective preimage strength,
+        leaving roughly 128 bits against a quantum adversary -- adequate, and
+        no migration is required. Recorded as a CONTROL so coverage and drift
+        can be measured, not because it is a problem.
+      flags: [control]
+    pattern-either:
+      - pattern: crypto.createHash("sha256")
+      - pattern: crypto.createHash('sha256')
+      - pattern: createHash("sha256")
+      - pattern: createHash('sha256')
+
+  - id: js-cryptojs-md5
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        crypto-js's MD5. Same classical break as Node's (RFC 6151), and worth
+        recording separately because crypto-js is a browser-side library whose
+        default PBKDF2 KDF is also MD5-based -- so an MD5 call here is often
+        the visible edge of a weaker key-derivation path. Replace with SHA-256
+        (FIPS 180-4), or move key derivation to a memory-hard KDF.
+      flags: [weak]
+    pattern-either:
+      - pattern: CryptoJS.MD5(...)
+      - pattern: CryptoJS.algo.MD5.create(...)
+
+  - id: js-hmac-weak
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: HMAC-MD5
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      quantum_note: >-
+        HMAC-MD5 (RFC 2104 with RFC 6151). HMAC is more resilient to the
+        underlying hash's collisions than a bare digest, so this is not the
+        immediate break MD5-for-signatures is -- but MD5 is disallowed by NIST
+        SP 800-131A Rev.2 and no new system should use it. Symmetric, so Shor
+        does not apply and Grover only halves the effective strength. Replace
+        with HMAC-SHA-256 (FIPS 198-1).
+      flags: [weak]
+    pattern-either:
+      - pattern: crypto.createHmac("md5", ...)
+      - pattern: crypto.createHmac('md5', ...)
+      - pattern: createHmac("md5", ...)
+      - pattern: createHmac('md5', ...)
+
+  - id: js-hmac-sha1
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: HMAC-SHA1
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      quantum_note: >-
+        HMAC-SHA1 (RFC 2104 with FIPS 180-4). HMAC's security does not rest on
+        the hash's collision resistance, so SHAttered does not break it and
+        NIST SP 800-131A Rev.2 still permits HMAC-SHA-1 for most uses -- but it
+        is on the way out and new systems should not adopt it. Symmetric:
+        Shor does not apply, Grover halves the effective strength. Move to
+        HMAC-SHA-256 (FIPS 198-1).
+      flags: [weak]
+    pattern-either:
+      - pattern: crypto.createHmac("sha1", ...)
+      - pattern: crypto.createHmac('sha1', ...)
+      - pattern: createHmac("sha1", ...)
+      - pattern: createHmac('sha1', ...)

@@ -1,0 +1,79 @@
+# Go TLS configuration.
+#
+# Sources:
+#   RFC 8996 -- TLS 1.0 and TLS 1.1 are deprecated and MUST NOT be used.
+#   RFC 8446 -- TLS 1.3.
+#   NIST SP 800-52 Rev.2 -- TLS 1.2 minimum for US federal systems.
+#   RFC 7465 -- RC4 prohibited in TLS.
+#   CVE-2016-2183 (Sweet32) -- 3DES cipher suites over long-lived connections.
+#   NIST IR 8547 -- classical key agreement (ECDHE) deprecated after 2030.
+#   Go standard library: crypto/tls, `tls.Config` (pkg.go.dev).
+#
+# A TLS version is a PROTOCOL, not a primitive: `asset_type: protocol`,
+# `primitive: unknown`. The suites it negotiates are the cryptography, and they
+# are captured separately (knowledge/rules/README.md).
+rules:
+  - id: go-tls-minversion
+    languages: [go]
+    severity: WARNING
+    message: "ecdat|version=$VERSION"
+    metadata:
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      capture:
+        version: $VERSION
+      quantum_note: >-
+        The negotiated protocol floor. TLS 1.0 and 1.1 are deprecated and MUST
+        NOT be used (RFC 8996); NIST SP 800-52 Rev.2 requires TLS 1.2 as a
+        minimum. Quantum-wise the version matters because only TLS 1.3
+        (RFC 8446) has the extension mechanism the hybrid ML-KEM groups use --
+        a service pinned below 1.3 cannot negotiate a post-quantum key exchange
+        at all.
+      flags: [override]
+    pattern-either:
+      - pattern: "tls.Config{..., MinVersion: $VERSION, ...}"
+      - pattern: $CFG.MinVersion = $VERSION
+
+  - id: go-tls-ciphersuites
+    languages: [go]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      quantum_note: >-
+        An explicit cipher-suite list overrides Go's defaults, which are chosen
+        and kept current by the Go security team. Pinning a list is how RC4
+        (prohibited by RFC 7465) and 3DES (Sweet32, CVE-2016-2183) survive in
+        production long after the runtime dropped them. The suites themselves
+        are symmetric and only Grover-affected; the key exchange they pair with
+        is the quantum-vulnerable half.
+      flags: [override]
+    pattern-either:
+      - pattern: "tls.Config{..., CipherSuites: $SUITES, ...}"
+      - pattern: $CFG.CipherSuites = $SUITES
+
+  - id: go-tls-curvepreferences
+    languages: [go]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: ECDH
+      primitive: key-agreement
+      usage: key-exchange
+      asset_type: algorithm
+      quantum_note: >-
+        An explicit CurvePreferences list fixes the TLS key-agreement groups.
+        Every classical group here (P-256, P-384, X25519) is broken by Shor and
+        deprecated after 2030 (NIST IR 8547); worse, pinning the list is what
+        stops a runtime from negotiating X25519MLKEM768 once it supports it.
+        Harvest-now-decrypt-later applies: a recorded handshake is decryptable
+        later. Add a hybrid group, or remove the override.
+      flags: [override, quantum-vulnerable]
+    pattern-either:
+      - pattern: "tls.Config{..., CurvePreferences: $CURVES, ...}"
+      - pattern: $CFG.CurvePreferences = $CURVES

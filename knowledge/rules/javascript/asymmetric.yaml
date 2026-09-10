@@ -1,0 +1,93 @@
+# JavaScript / TypeScript public-key cryptography -- the Shor-broken family.
+#
+# Sources:
+#   NIST IR 8547 (initial public draft, Nov 2024) -- RSA, ECDSA, ECDH, DH and
+#     EdDSA deprecated after 2030, disallowed after 2035.
+#   FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA), Aug 2024.
+#   Node.js `crypto.generateKeyPair` / `generateKeyPairSync`
+#     (nodejs.org/api/crypto.html).
+#   node-forge `forge.pki.rsa.generateKeyPair` (github.com/digitalbazaar/forge).
+#
+# usage=unknown at key generation, matching the Python and Go packs: a
+# generated key may sign or transport, and the replacement differs (ML-DSA vs
+# ML-KEM). The correlator refines usage from the use site (ADR-0004).
+#
+# Patterns containing `{` or `:` are YAML-quoted. Unquoted, `{..., bits: $B}`
+# parses as a YAML flow mapping and semgrep rejects the file.
+rules:
+  - id: js-keypair-rsa
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|key_size=$BITS"
+    metadata:
+      algorithm: RSA
+      primitive: pke
+      usage: unknown
+      asset_type: algorithm
+      keysize_metavar: $BITS
+      quantum_note: >-
+        Broken outright by Shor's algorithm; key size does not help --
+        RSA-4096 falls to the same attack as RSA-2048. Deprecated after 2030
+        and disallowed after 2035 (NIST IR 8547). Replacement depends on usage:
+        ML-KEM (FIPS 203) for key transport, ML-DSA (FIPS 204) for signatures.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: 'crypto.generateKeyPair("rsa", {..., modulusLength: $BITS, ...}, ...)'
+      - pattern: "crypto.generateKeyPair('rsa', {..., modulusLength: $BITS, ...}, ...)"
+      - pattern: 'crypto.generateKeyPairSync("rsa", {..., modulusLength: $BITS, ...})'
+      - pattern: "crypto.generateKeyPairSync('rsa', {..., modulusLength: $BITS, ...})"
+
+  - id: js-keypair-ec
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|curve=$CURVE"
+    metadata:
+      algorithm: ECDSA
+      primitive: signature
+      usage: unknown
+      asset_type: algorithm
+      capture:
+        curve: $CURVE
+      quantum_note: >-
+        Elliptic-curve discrete log is broken by Shor, and a 256-bit curve
+        needs fewer logical qubits than RSA-2048, so EC falls first.
+        Deprecated after 2030 and disallowed after 2035 (NIST IR 8547).
+        Replace signatures with ML-DSA (FIPS 204); if the key is used for
+        agreement rather than signing, ML-KEM (FIPS 203) is the replacement --
+        the correlator decides that from the use site, not from here.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: 'crypto.generateKeyPair("ec", {..., namedCurve: $CURVE, ...}, ...)'
+      - pattern: "crypto.generateKeyPair('ec', {..., namedCurve: $CURVE, ...}, ...)"
+      - pattern: 'crypto.generateKeyPairSync("ec", {..., namedCurve: $CURVE, ...})'
+      - pattern: "crypto.generateKeyPairSync('ec', {..., namedCurve: $CURVE, ...})"
+
+  - id: js-forge-rsa-keygen
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|key_size=$BITS"
+    metadata:
+      algorithm: RSA
+      primitive: pke
+      usage: unknown
+      asset_type: algorithm
+      keysize_metavar: $BITS
+      quantum_note: >-
+        node-forge's RSA key generation. Same Shor break as Node's built-in
+        (NIST IR 8547), recorded separately because node-forge is a pure-JS
+        implementation that also ships DES and RC2 -- a project generating keys
+        with it is usually reachable by those too. Replace with ML-KEM
+        (FIPS 203) or ML-DSA (FIPS 204) depending on usage.
+      flags: [quantum-vulnerable]
+    patterns:
+      - pattern-either:
+          - pattern: 'forge.pki.rsa.generateKeyPair({..., bits: $BITS, ...})'
+          - pattern: 'forge.pki.rsa.generateKeyPair($BITS, ...)'
+          - pattern: 'pki.rsa.generateKeyPair({..., bits: $BITS, ...})'
+      # forge takes EITHER an options object or a positional bit count, and the
+      # positional pattern also matches the object -- which fired the rule twice
+      # and captured `key_size: '{ bits: 2048 }'`. Requiring a number keeps both
+      # call styles supported and reports a key size that is actually a size.
+      - metavariable-regex:
+          metavariable: $BITS
+          regex: ^[0-9]+$

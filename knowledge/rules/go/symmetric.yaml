@@ -1,0 +1,158 @@
+# Go symmetric ciphers, and the mode they are used in.
+#
+# Sources:
+#   AES     -- FIPS 197. Grover halves the effective key strength, so AES-128
+#              retains ~64-bit security against a quantum adversary and AES-256
+#              retains ~128; NIST SP 800-131A Rev.2 and CNSA 2.0 both require
+#              AES-256 for long-lived data.
+#   ECB     -- NIST SP 800-38A Appendix A: identical plaintext blocks produce
+#              identical ciphertext blocks, so ECB leaks plaintext structure.
+#   GCM     -- NIST SP 800-38D (authenticated encryption).
+#   CBC     -- NIST SP 800-38A; unauthenticated, and padding-oracle prone
+#              (Vaudenay 2002) unless paired with a MAC.
+#   3DES    -- NIST SP 800-131A Rev.2: disallowed after 2023. Sweet32
+#              (CVE-2016-2183) exploits the 64-bit block.
+#   RC4     -- RFC 7465 prohibits RC4 in TLS; the keystream is biased.
+#   Go standard library: crypto/aes, crypto/cipher, crypto/des, crypto/rc4.
+#
+# The mode is recorded, not assumed. "AES" alone is not an inventory entry a
+# migration plan can act on: AES-CBC without a MAC, AES-GCM and AES-ECB are
+# three different risks.
+#
+# HOW THE MODE IS REPORTED. In Python the mode is an argument (`modes.CBC(iv)`)
+# and binds to a metavariable. In Go it is part of the FUNCTION NAME --
+# `cipher.NewCBCEncrypter` -- so there is nothing to bind. The rule states the
+# constant it genuinely knows, by writing it into the message directly. The
+# scanner extracts captures by PARAMETER NAME from the message
+# (`_parse_captures`), so `mode=CBC` lands in `params.mode` exactly as a bound
+# metavariable would, and `_is_resolved` reads it as hard-coded -- which it is,
+# because the call site cannot select a different mode without a code change.
+# The `capture` entry names the constant rather than a `$METAVAR` to keep that
+# visible to whoever reads the rule.
+rules:
+  - id: go-aes-cbc
+    languages: [go]
+    severity: WARNING
+    message: "ecdat|mode=CBC"
+    metadata:
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        mode: CBC
+      quantum_note: >-
+        AES itself (FIPS 197) survives quantum: Grover halves the effective key
+        strength, so AES-256 keeps ~128-bit security and is what CNSA 2.0
+        requires for long-lived data. CBC is the classical concern -- it is
+        unauthenticated and padding-oracle prone (NIST SP 800-38A; Vaudenay
+        2002). Prefer AES-256-GCM (NIST SP 800-38D).
+      flags: [symmetric]
+      mode_flags:
+        ECB: "identical plaintext blocks leak as identical ciphertext blocks"
+    pattern-either:
+      - pattern: cipher.NewCBCEncrypter($BLOCK, $IV)
+      - pattern: cipher.NewCBCDecrypter($BLOCK, $IV)
+
+  - id: go-aes-gcm
+    languages: [go]
+    severity: INFO
+    message: "ecdat|mode=GCM"
+    metadata:
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        mode: GCM
+      quantum_note: >-
+        AES-GCM (FIPS 197 with NIST SP 800-38D): authenticated encryption, and
+        the correct default. Grover halves the effective key strength, so
+        AES-256 retains ~128-bit security; CNSA 2.0 requires AES-256 for data
+        that must stay confidential past 2035. Recorded as a CONTROL.
+      flags: [symmetric, control]
+    pattern-either:
+      - pattern: cipher.NewGCM($BLOCK)
+      - pattern: cipher.NewGCMWithNonceSize($BLOCK, $N)
+      - pattern: cipher.NewGCMWithTagSize($BLOCK, $N)
+
+  - id: go-aes-ecb
+    languages: [go]
+    severity: ERROR
+    message: "ecdat|mode=ECB"
+    metadata:
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        mode: ECB
+      quantum_note: >-
+        Go has no ECB mode type: calling the block cipher's own Encrypt/Decrypt
+        directly IS ECB. NIST SP 800-38A Appendix A warns that identical
+        plaintext blocks produce identical ciphertext blocks, so structure
+        survives encryption -- a classical break with nothing to do with
+        quantum. Use an AEAD: AES-256-GCM (NIST SP 800-38D).
+      flags: [symmetric, weak]
+      mode_flags:
+        ECB: "identical plaintext blocks leak as identical ciphertext blocks"
+    patterns:
+      - pattern-inside: |
+          $BLOCK, $ERR := aes.NewCipher(...)
+          ...
+      - pattern-either:
+          - pattern: $BLOCK.Encrypt($DST, $SRC)
+          - pattern: $BLOCK.Decrypt($DST, $SRC)
+
+  - id: go-3des
+    languages: [go]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: 3DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      quantum_note: >-
+        Triple DES is DISALLOWED after 2023 (NIST SP 800-131A Rev.2). Its
+        64-bit block makes Sweet32 (CVE-2016-2183) practical on long-lived
+        connections regardless of key length. Quantum is not the argument --
+        this is already retired. Replace with AES-256-GCM (FIPS 197).
+      flags: [weak, symmetric]
+    pattern-either:
+      - pattern: des.NewTripleDESCipher($KEY)
+
+  - id: go-des
+    languages: [go]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      quantum_note: >-
+        Single DES has a 56-bit key and has been brute-forceable since 1998
+        (EFF Deep Crack); disallowed by NIST SP 800-131A Rev.2. Replace with
+        AES-256-GCM (FIPS 197).
+      flags: [weak, symmetric, critical]
+    pattern-either:
+      - pattern: des.NewCipher($KEY)
+
+  - id: go-rc4
+    languages: [go]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: RC4
+      primitive: stream-cipher
+      usage: encrypt
+      asset_type: algorithm
+      quantum_note: >-
+        RC4's keystream is biased and partially recoverable; RFC 7465 prohibits
+        it in TLS outright, and Go's own crypto/rc4 documentation states it is
+        broken and should not be used. Classically dead; quantum irrelevant.
+        Replace with AES-256-GCM (FIPS 197) or ChaCha20-Poly1305 (RFC 8439).
+      flags: [weak, critical]
+    pattern-either:
+      - pattern: rc4.NewCipher($KEY)

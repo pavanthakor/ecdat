@@ -147,14 +147,14 @@ def test_a_known_gap_is_still_reported() -> None:
                 id="go-ecdsa",
                 known_gap=True,
                 locator_contains="sign.go",
-                note="Scanner A is Python-only",
+                note="a language ECDAT does not scan yet",
             ),
         ],
         decoys=[],
     )
 
     assert [g.id for g in score.known_gaps] == ["go-ecdsa"]
-    assert "Python-only" in score.known_gaps[0].note
+    assert "does not scan yet" in score.known_gaps[0].note
 
 
 def test_a_known_gap_that_is_found_anyway_is_not_counted_as_a_miss() -> None:
@@ -334,13 +334,36 @@ def test_the_kpi_is_deterministic() -> None:
     assert first.drift.recall == second.drift.recall
 
 
-def test_the_known_gaps_are_reported_for_quantumbank() -> None:
-    """The Go gateway is real crypto ECDAT cannot see. It must be on the page."""
+def test_the_quantumbank_go_gateway_is_scored_not_excluded() -> None:
+    """The Go gateway was the known gap. ADR-0023 closed it.
+
+    It used to be real crypto ECDAT could not see, excluded from the recall
+    denominator and printed on every run so the gap stayed visible. The Go rule
+    pack detects both artefacts now, so they must be SCORED -- if they had
+    stayed marked `known_gap` the denominator would never grow and recall would
+    look identical whether or not the rules worked.
+    """
+    from kpi.harness import load_answer_key
+
+    key = load_answer_key()
+    gateway = [f for f in key["findings"] if "sign.go" in f["locator_contains"]]
+
+    assert gateway, "the Go gateway entries vanished from the fixture"
+    assert not any(f["known_gap"] for f in gateway), (
+        "the Go gateway is still marked known_gap; the Go rules detect it now"
+    )
+
+
+def test_any_remaining_known_gap_still_says_why() -> None:
+    """The mechanism outlives QuantumBank's own gaps.
+
+    There are none in this fixture today. The invariant is what must not rot:
+    an artefact excluded from the denominator has to carry the reason, or the
+    exclusion becomes a way to make a score look better.
+    """
     from kpi.harness import load_answer_key
 
     key = load_answer_key()
     gaps = [f for f in key["findings"] if f["known_gap"]]
 
-    assert gaps, "the fixture claims no known gaps; that is unlikely to be true"
     assert all(g.get("note") for g in gaps), "a known gap must say why"
-    assert any("sign.go" in g["locator_contains"] for g in gaps)

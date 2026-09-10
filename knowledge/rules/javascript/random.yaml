@@ -1,0 +1,46 @@
+# Randomness in JavaScript / TypeScript.
+#
+# Sources:
+#   NIST SP 800-90A Rev.1 -- approved DRBG constructions.
+#   NIST SP 800-133 Rev.2 -- key generation requires an approved RBG.
+#   ECMA-262 s21.4.2.28 -- `Math.random` explicitly provides no cryptographic
+#     guarantee; implementations use xorshift128+ or similar.
+#   Node.js `crypto.randomBytes` / WebCrypto `crypto.getRandomValues` are the
+#     CSPRNGs (nodejs.org/api/crypto.html).
+#
+# NAME-SCOPED, exactly like the Python and Go weak-RNG rules. `Math.random` is
+# entirely legitimate for jitter, sampling, shuffling a display list or picking
+# a banner, and a rule that fired on every use would be noise an operator
+# learns to ignore. It fires only where the value is bound to a name that reads
+# like a key, token, secret or nonce -- a heuristic, which is why the decoy
+# files plant a `jitter`, a display shuffle and a banner pick that must NOT
+# fire, in both `.js` and `.ts`.
+rules:
+  - id: js-math-random
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: Math.random
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      quantum_note: >-
+        `Math.random` is a non-cryptographic PRNG; ECMA-262 s21.4.2.28 states
+        it carries no security guarantee, and V8 implements it with
+        xorshift128+. An attacker who observes a few outputs recovers the
+        internal state and predicts every subsequent value, so a key or token
+        drawn from it is recoverable TODAY -- no quantum computer required.
+        NIST SP 800-133 Rev.2 requires an approved RBG (SP 800-90A Rev.1) for
+        key generation. Use `crypto.randomBytes` in Node or
+        `crypto.getRandomValues` in a browser.
+      flags: [weak, critical]
+    patterns:
+      - pattern-either:
+          - pattern-inside: const $NAME = ...;
+          - pattern-inside: let $NAME = ...;
+          - pattern-inside: var $NAME = ...;
+      - pattern: Math.random()
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(key|token|secret|nonce|salt|iv|seed|password|credential).*

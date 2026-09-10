@@ -1,0 +1,54 @@
+# Go randomness.
+#
+# Sources:
+#   NIST SP 800-90A Rev.1 -- approved DRBG constructions.
+#   NIST SP 800-133 Rev.2 -- key generation requires an approved RBG.
+#   Go standard library: math/rand is documented as "not suitable for
+#     security-sensitive work"; crypto/rand is the CSPRNG (pkg.go.dev).
+#
+# NAME-SCOPED, exactly like the Python weak-RNG rule. `math/rand` is entirely
+# legitimate for jitter, sampling, shuffling a display list or picking a test
+# fixture, and a rule that fired on every use would be noise an operator learns
+# to ignore. It fires only where the result is assigned to something named like
+# a key, token, secret or nonce -- which is a heuristic, and is why the decoy
+# file plants a `jitter` and a display shuffle that must NOT fire.
+rules:
+  - id: go-weak-random
+    languages: [go]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: math/rand
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      quantum_note: >-
+        math/rand is a deterministic PRNG seeded from a small state; Go's own
+        documentation says it is unsuitable for security-sensitive work. An
+        attacker who observes enough output recovers the state and predicts
+        every subsequent value, so a key or token drawn from it is recoverable
+        TODAY -- no quantum computer required. NIST SP 800-133 Rev.2 requires
+        an approved RBG (SP 800-90A Rev.1) for key generation. Use crypto/rand.
+      flags: [weak, critical]
+    patterns:
+      - pattern-either:
+          - pattern: rand.Int()
+          - pattern: rand.Intn($N)
+          - pattern: rand.Int31()
+          - pattern: rand.Int63()
+          - pattern: rand.Uint32()
+          - pattern: rand.Uint64()
+          - pattern: rand.Read($BUF)
+      - pattern-either:
+          - pattern-inside: |
+              $KEY := ...
+              ...
+          - pattern-inside: |
+              $KEY = ...
+              ...
+          - pattern-inside: |
+              var $KEY = ...
+              ...
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: (?i).*(key|token|secret|nonce|salt|iv|seed|password|credential).*

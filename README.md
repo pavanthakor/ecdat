@@ -145,7 +145,7 @@ here.
 
 | id | view | what it reads |
 |---|---|---|
-| `source` | declared | Python source via Semgrep, 28 cited rules |
+| `source` | declared | Python, Go and JS/TS source via Semgrep — 28 + 23 + 20 cited rules |
 | `config` | declared | nginx `server{}` blocks, `sshd_config`, `openssl.cnf` |
 | `container` | shipped | `docker save` tar / OCI dir — dpkg+apk DBs, certs, keys |
 | `runtime-spool` | observed | JSONL the eBPF agent left in a directory |
@@ -389,9 +389,13 @@ finding count means nothing without the list of what it declined to measure.
 The living list is [`PUNCHLIST.md`](PUNCHLIST.md). The ones a reader should know
 before believing anything above:
 
-- **Source scanning is Python-only.** Go, JavaScript, Java and C/C++ are not
-  scanned. QuantumBank contains Go crypto specifically so this gap is *measured*
-  rather than hidden.
+- **Source scanning covers Python, Go and JavaScript/TypeScript.** Java, C/C++,
+  Rust and C# are not scanned — four of seven planned language families.
+  QuantumBank's Go gateway was a *measured* known gap until
+  [ADR-0023](docs/adr/0023-go-js-rules.md) closed it; the KPI denominator grew
+  from 20 to 22 rather than the gap being quietly dropped. C/C++ is the hard
+  one: OpenSSL call sites are macro-heavy, so that pack is a tree-sitter
+  question rather than more YAML.
 - **Binary and network scanners are designed, not built.** Five of a planned
   seven scanner families exist; a statically linked binary and a packet capture
   are still invisible. The dependency scanner landed in
@@ -470,6 +474,15 @@ consequences:
 | [0012](docs/adr/0012-correlator-drift.md) | The correlator and three-view drift |
 | [0013](docs/adr/0013-config-scanner.md) | The config scanner; endpoint as the join key |
 | [0014](docs/adr/0014-quantumbank-kpi.md) | QuantumBank and the honest KPI harness |
+| [0015](docs/adr/0015-fixit.md) | Verified fix-it: propose a diff, prove it by re-scan, never auto-apply |
+| [0016](docs/adr/0016-store-migration.md) | Self-describing re-runnable scan rows; a fix is a new row, never an amend |
+| [0017](docs/adr/0017-verified-facts.md) | The verified-fact gate and engine version pinning |
+| [0018](docs/adr/0018-dashboard.md) | The dashboard console |
+| [0019](docs/adr/0019-system-scan.md) | Unified system scan: three views, one CBOM |
+| [0020](docs/adr/0020-reports.md) | Executive/technical/coverage PDFs and DB-path visibility |
+| [0021](docs/adr/0021-deps-scanner.md) | Scanner B: dependencies, lockfile-preferred |
+| [0022](docs/adr/0022-dep-bump-fix.md) | dep-bump: manifest bump, verified target only |
+| [0023](docs/adr/0023-go-js-rules.md) | Go and JS/TS rule packs; the QuantumBank Go gap closed |
 
 ---
 

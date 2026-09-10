@@ -1,0 +1,75 @@
+# Go hash functions.
+#
+# Sources:
+#   MD5    -- RFC 6151 (collision attacks; MUST NOT where collision resistance
+#             is required); NIST SP 800-131A Rev.2 Table 8 (disallowed for
+#             digital signatures).
+#   SHA-1  -- NIST SP 800-131A Rev.2 (disallowed for signature generation since
+#             2013); SHAttered (Stevens et al., 2017) demonstrated a practical
+#             collision.
+#   SHA-2  -- FIPS 180-4. Grover halves the effective preimage strength, so
+#             SHA-256 retains ~128-bit preimage resistance against a quantum
+#             adversary; NIST SP 800-208 treats SHA-256 as adequate.
+#   Go standard library: crypto/md5, crypto/sha1, crypto/sha256 (pkg.go.dev).
+#
+# Note the SHA-256 CONTROL rule. An inventory that lists only problems cannot
+# show coverage, and drift detection needs to know what is correct as well as
+# what is not (knowledge/rules/README.md).
+rules:
+  - id: go-md5
+    languages: [go]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        Classically broken: chosen-prefix collisions are practical on commodity
+        hardware (RFC 6151; NIST SP 800-131A Rev.2 Table 8 disallows MD5 for
+        digital signatures). Quantum computing is not the problem here --
+        this is already unfit. Replace with SHA-256 (FIPS 180-4) for integrity,
+        or a memory-hard KDF if it is hashing a credential.
+      flags: [weak]
+    pattern-either:
+      - pattern: md5.New()
+      - pattern: md5.Sum($DATA)
+
+  - id: go-sha1
+    languages: [go]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: SHA-1
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        Collision resistance is broken classically (SHAttered, 2017); disallowed
+        for digital signature generation since 2013 (NIST SP 800-131A Rev.2).
+        Replace with SHA-256 (FIPS 180-4).
+      flags: [weak]
+    pattern-either:
+      - pattern: sha1.New()
+      - pattern: sha1.Sum($DATA)
+
+  - id: go-sha256
+    languages: [go]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      algorithm: SHA-256
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        FIPS 180-4. Grover's algorithm halves the effective preimage strength,
+        leaving roughly 128 bits against a quantum adversary -- adequate, and
+        no migration is required. Recorded as a CONTROL so coverage and drift
+        can be measured, not because it is a problem.
+      flags: [control]
+    pattern-either:
+      - pattern: sha256.New()
+      - pattern: sha256.Sum256($DATA)
+      - pattern: sha256.Sum224($DATA)

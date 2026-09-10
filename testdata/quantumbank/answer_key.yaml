@@ -90,7 +90,7 @@ findings:
     known_gap: false
     redacted: true
 
-  # ---- SOURCE, but not in a language we scan ---------------------------
+  # ---- SOURCE, Go (was a known gap until ADR-0023) ---------------------
   - id: gateway-ecdsa-p256
     scanner: source
     view: declared
@@ -98,11 +98,12 @@ findings:
     locator_contains: services/gateway/sign.go
     endpoint: null
     count: 1
-    known_gap: true
+    known_gap: false
     note: >-
-      Scanner A is Python-only (ADR-0004). The Go gateway's ECDSA P-256 signing
-      is real crypto in a real service and ECDAT cannot see it. Go/JS rule
-      packs are the next language slice.
+      DETECTED since ADR-0023. Was a known gap while Scanner A was Python-only
+      (ADR-0004); the Go rule pack (`go-ecdsa-keygen`) reads it now and
+      captures curve=P256, so it counts toward recall instead of being excluded
+      from the denominator.
   - id: gateway-embedded-cert
     scanner: source
     view: declared
@@ -111,10 +112,12 @@ findings:
     locator_contains: services/gateway/sign.go
     endpoint: null
     count: 1
-    known_gap: true
+    known_gap: false
     note: >-
-      The PEM regex rule is scoped to `languages: [python]`, so an embedded
-      certificate in a .go file is invisible. Same gap as above.
+      DETECTED since ADR-0023. The PEM rule used to be scoped to
+      `languages: [python]`; `go-pem-block` covers .go files now, and the
+      snippet is redacted, so the certificate is inventoried without its bytes
+      reaching the CBOM.
 
   # ---- CONFIG (endpoint-oriented declared view) ------------------------
   - id: payments-hybrid-group

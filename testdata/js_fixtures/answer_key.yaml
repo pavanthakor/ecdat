@@ -1,0 +1,185 @@
+# Ground truth for the JavaScript/TypeScript rule pack (ADR-0023).
+#
+# Same contract as the Python and Go keys: tests/test_rules_js.py scores RECALL
+# against `expected` and PRECISION against the union of every entry here, with
+# precision asserted at exactly 1.0. The key must be EXHAUSTIVE.
+#
+# Both extensions are represented on purpose. `ts_*.ts` entries are what prove
+# TypeScript is scanned rather than assumed, and `must_not_fire/decoys.ts`
+# proves it on the precision side too.
+
+expected:
+  must_fire/js_hash_md5.js:
+    - rule_id: js-hash-md5
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/ts_hash_md5.ts:
+    - rule_id: js-hash-md5
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/js_hash_sha1.js:
+    - rule_id: js-hash-sha1
+      algorithm: SHA-1
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/js_hash_sha256.js:
+    - rule_id: js-hash-sha256
+      algorithm: SHA-256
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/js_keypair_rsa.js:
+    - rule_id: js-keypair-rsa
+      algorithm: RSA
+      primitive: pke
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - key_size: 2048
+
+  must_fire/ts_keypair_ec.ts:
+    - rule_id: js-keypair-ec
+      algorithm: ECDSA
+      primitive: signature
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - curve: P-256
+
+  must_fire/js_cipher_cbc.js:
+    - rule_id: js-createcipheriv
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - cipher_suite: aes-128-cbc
+
+  must_fire/js_cipher_gcm.js:
+    - rule_id: js-createcipheriv
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - cipher_suite: aes-256-gcm
+
+  must_fire/js_hmac_md5.js:
+    - rule_id: js-hmac-weak
+      algorithm: HMAC-MD5
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/js_jwt_rsa.js:
+    - rule_id: js-jwt-rsa
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/js_jwt_none.js:
+    - rule_id: js-jwt-none
+      algorithm: none
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/js_cryptojs_md5.js:
+    - rule_id: js-cryptojs-md5
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/js_forge_rsa.js:
+    - rule_id: js-forge-rsa-keygen
+      algorithm: RSA
+      primitive: pke
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - key_size: 2048
+
+  must_fire/js_tls_config.js:
+    - rule_id: js-tls-minversion
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      count: 1
+      params_any:
+        - version: TLSv1
+    - rule_id: js-tls-ciphers
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      count: 1
+
+  must_fire/js_math_random.js:
+    - rule_id: js-math-random
+      algorithm: Math.random
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+
+  must_fire/js_hardcoded_key.js:
+    - rule_id: js-hardcoded-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 2          # the key literal and the IV literal
+    - rule_id: js-createcipheriv
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1          # the cipher rule legitimately matches this file too
+
+  must_fire/js_pem_private_key.js:
+    - rule_id: js-pem-block
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: certificate
+      count: 1
+
+  must_fire/ts_pem_certificate.ts:
+    - rule_id: js-pem-block
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: certificate
+      count: 1
+
+# Planted inside the fixtures' key material. None may reach any Finding --
+# tests/test_rules_js.py::test_no_planted_secret_reaches_any_js_finding.
+secret_sentinels:
+  - JSSECRETSENTINEL
+  - JSNOTAREALKEY
+  - JSNOTAREALCERT

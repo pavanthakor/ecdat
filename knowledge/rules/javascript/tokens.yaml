@@ -1,0 +1,123 @@
+# JWT signing in JavaScript / TypeScript (jsonwebtoken).
+#
+# Sources:
+#   RFC 7518 (JSON Web Algorithms) -- the `alg` registry.
+#   RFC 8725 (JWT Best Current Practices) s3.1 -- reject `alg: none`;
+#     s2.1 -- algorithm confusion between the HMAC and RSA families.
+#   NIST IR 8547 -- RSA and ECDSA signatures deprecated after 2030, disallowed
+#     after 2035.
+#   node-jsonwebtoken (github.com/auth0/node-jsonwebtoken); CVE-2015-9235 is
+#     the original `alg: none` / algorithm-confusion advisory for this library.
+#
+# ONE RULE PER FAMILY, matching the Python and Go packs. `metadata.algorithm`
+# is per-rule and the family decides the migration: RS256/ES256 are Shor-broken
+# and become ML-DSA, HS256 is symmetric and only needs a key-size review, and
+# `none` is not a signature at all. One rule for all four would give one answer
+# to four different questions.
+rules:
+  - id: js-jwt-rsa
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        RS*/PS* JWTs are RSA (PKCS#1 v1.5 and PSS) signatures. Broken outright
+        by Shor; deprecated after 2030 and disallowed after 2035 (NIST IR
+        8547). Replace with ML-DSA (FIPS 204). RFC 8725 s2.1 additionally warns
+        against algorithm confusion between the RSA and HMAC families at
+        verification time -- the bug behind CVE-2015-9235 in this library.
+      flags: [quantum-vulnerable]
+    patterns:
+      - pattern-either:
+          - pattern: 'jwt.sign($CLAIMS, $KEY, {..., algorithm: $ALG, ...})'
+          - pattern: 'sign($CLAIMS, $KEY, {..., algorithm: $ALG, ...})'
+          - pattern: 'jwt.verify($TOKEN, $KEY, {..., algorithms: [$ALG], ...})'
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: ^["'](RS|PS)(256|384|512)["']$
+
+  - id: js-jwt-ecdsa
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: ECDSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        ES* JWTs are ECDSA signatures over a NIST prime curve. The discrete log
+        is broken by Shor with fewer logical qubits than RSA-2048 needs, so EC
+        falls first; deprecated after 2030, disallowed after 2035 (NIST IR
+        8547). Replace with ML-DSA (FIPS 204).
+      flags: [quantum-vulnerable]
+    patterns:
+      - pattern-either:
+          - pattern: 'jwt.sign($CLAIMS, $KEY, {..., algorithm: $ALG, ...})'
+          - pattern: 'sign($CLAIMS, $KEY, {..., algorithm: $ALG, ...})'
+          - pattern: 'jwt.verify($TOKEN, $KEY, {..., algorithms: [$ALG], ...})'
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: ^["']ES(256|384|512)["']$
+
+  - id: js-jwt-hmac
+    languages: [javascript, typescript]
+    severity: INFO
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: HMAC
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        HS* JWTs are HMAC-SHA2 (RFC 7518). Symmetric, so Shor does not apply
+        and Grover only halves the effective key strength -- HS256 with a
+        256-bit secret keeps ~128-bit security. This is a key-management
+        question (RFC 8725 s3.5 requires a high-entropy secret), not a
+        post-quantum migration.
+      flags: [symmetric]
+    patterns:
+      - pattern-either:
+          - pattern: 'jwt.sign($CLAIMS, $KEY, {..., algorithm: $ALG, ...})'
+          - pattern: 'sign($CLAIMS, $KEY, {..., algorithm: $ALG, ...})'
+          - pattern: 'jwt.verify($TOKEN, $KEY, {..., algorithms: [$ALG], ...})'
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: ^["']HS(256|384|512)["']$
+
+  - id: js-jwt-none
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: none
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        `alg: none` disables signature verification entirely: any party can
+        mint a token the service will accept. RFC 8725 s3.1 requires it to be
+        rejected, and CVE-2015-9235 is this exact bypass in this library. A
+        total authentication bypass today, with nothing to do with quantum
+        computing.
+      flags: [weak, critical]
+    patterns:
+      - pattern-either:
+          - pattern: 'jwt.sign($CLAIMS, $KEY, {..., algorithm: $ALG, ...})'
+          - pattern: 'sign($CLAIMS, $KEY, {..., algorithm: $ALG, ...})'
+          - pattern: 'jwt.verify($TOKEN, $KEY, {..., algorithms: [$ALG], ...})'
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: ^["']none["']$

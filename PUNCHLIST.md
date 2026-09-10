@@ -34,8 +34,20 @@
   **Update (Scanner C):** now also enforced for the container scanner, in the
   `shipped` view -- private keys carry a public-key fingerprint and a redacted
   snippet, keystores are never opened, and a negative test reads the planted
-  key back out of the fixture and asserts none of its body escaped. Two of
-  six scanner families are covered; the schema-level guard is still owed.
+  key back out of the fixture and asserts none of its body escaped.
+  **Update (Go/JS rule packs, ADR-0023):** now also enforced for **source-Go**
+  and **source-JS/TS**. Both packs carry `redact: true` key-material rules that
+  never interpolate the metavariable binding the secret, each fixture tree
+  plants its own sentinels (`GOSECRETSENTINEL`/`GONOTAREALKEY`/`GONOTAREALCERT`
+  and the `JS*` equivalents) inside real key material, and a negative test per
+  language asserts none reaches any Finding -- including via a DIFFERENT rule
+  that matches the same line, which is why the AES rule is declared against the
+  hard-coded-key fixture in both answer keys.
+  **The second layer does NOT extend, and that is a real hole.** The
+  byte-literal net is Python-specific (`b"..."`), so on Go and JS what holds is
+  the PEM-banner scrub plus each rule author remembering `redact: true`. Four
+  scanner families are now covered by discipline; **the schema-level guard is
+  still owed** and is what would make it structural.
   *Raised: Phase 0, core schema slice. Partially resolved: Scanner A slice,
   see [ADR-0004](docs/adr/0004-source-scanning-semgrep.md).*
 - **Cross-view merging only happens when the normalised locus matches.** The
@@ -664,16 +676,42 @@
   two, so "this endpoint's certificate is RSA-2048 and expires in 2027" is not
   answerable from a config scan alone.
   *Raised: config scanner slice.*
-- **KNOWN GAP: Go and JavaScript source are not scanned.** QuantumBank's
-  gateway signs partner callbacks with ECDSA P-256 and embeds a PEM
-  certificate, in Go. Scanner A is Python-only (ADR-0004), so ECDAT sees
-  neither. Both are planted in the fixture, marked `known_gap: true`, excluded
-  from the recall denominator and PRINTED on every `make kpi` run -- the point
-  being that the gap is visible rather than hidden by omitting the artefact.
-  Go and JS rule packs are the next language slice; the rule-metadata contract
-  in `knowledge/rules/README.md` was written to be language-agnostic for
-  exactly this.
-  *Raised: KPI slice. See [ADR-0014](docs/adr/0014-quantumbank-kpi.md).*
+- ~~**KNOWN GAP: Go and JavaScript source are not scanned.**~~ **Resolved** by
+  [ADR-0023](docs/adr/0023-go-js-rules.md). `knowledge/rules/go/` (23 rules) and
+  `knowledge/rules/javascript/` (20 rules, `.js` and `.ts`) run on the same
+  Semgrep engine and the same metadata contract, which is the claim
+  `knowledge/rules/README.md` has always made and this is the first test of it
+  against a language the contract was not designed on. QuantumBank's
+  `gateway-ecdsa-p256` and `gateway-embedded-cert` are DETECTED and their
+  `known_gap` flags are REMOVED, so the KPI declared denominator grows 14 -> 16
+  and overall 20 -> 22 with recall still 100% -- the gap closed rather than the
+  measurement moving. The KNOWN GAPS section of `make kpi` is now empty.
+  *Raised: KPI slice. Resolved: Go/JS rule-pack slice.*
+- **Java, C/C++, Rust and C# source are still not scanned.** Four of seven
+  planned language families. Java is the obvious next one -- JCA
+  (`KeyPairGenerator.getInstance`, `Cipher.getInstance`, `MessageDigest`) is
+  well shaped for Semgrep patterns and needs no engine work. C/C++ is the hard
+  one: OpenSSL call sites are macro-heavy and a Semgrep pattern over them is
+  fragile, so that pack is a tree-sitter question rather than a YAML one and
+  should not be forced into this engine.
+  *Raised: Go/JS rule-pack slice, see [ADR-0023](docs/adr/0023-go-js-rules.md).*
+- **The Go and JS packs are a starting set, not a complete inventory.** 23 and
+  20 rules. Unmatched today: Go's `crypto/ecdh` X25519 path and
+  `golang.org/x/crypto` (nacl, bcrypt, argon2); browser WebCrypto
+  (`crypto.subtle.*`); the `jose` / `node-jose` JWT families. Each is additive
+  YAML against the existing contract. Also unmatched in every language:
+  a suite or algorithm passed as a VARIABLE rather than a literal --
+  `createCipheriv(algo, ...)` does not fire, deliberately, because
+  `cipher_suite: algo` is a parameter nobody can act on. Constant propagation
+  is the fix and is the same limit ADR-0004 recorded for Python.
+  *Raised: Go/JS rule-pack slice.*
+- **The name-scoped weak-RNG rules are heuristics in all three languages.**
+  `Math.random()` assigned to `sessionToken` fires; assigned to `t` does not.
+  Same for Go's `math/rand`. The decoy files pin the FALSE-POSITIVE side
+  (jitter, a display shuffle, a banner pick, all of which must stay silent);
+  the false-negative side is unbounded and untested, and closing it needs
+  taint tracking from the RNG to a key-consuming sink rather than a name regex.
+  *Raised: Scanner A slice; extended to Go and JS by ADR-0023.*
 - ~~**P3 fix-it is not built.**~~ **Resolved** by the fix-it slice.
   `correlate/fixit/` proposes a unified diff, applies it to a `tempfile`
   sandbox copy, re-runs the producing scanner over the copy, and releases the

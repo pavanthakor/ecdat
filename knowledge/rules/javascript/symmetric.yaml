@@ -1,0 +1,83 @@
+# JavaScript / TypeScript symmetric ciphers.
+#
+# Sources:
+#   AES      -- FIPS 197. Grover halves the effective key strength, so AES-128
+#               retains ~64-bit security against a quantum adversary and
+#               AES-256 ~128; CNSA 2.0 requires AES-256 for long-lived data.
+#   CBC      -- NIST SP 800-38A; unauthenticated and padding-oracle prone
+#               (Vaudenay 2002) unless paired with a MAC.
+#   GCM      -- NIST SP 800-38D (authenticated encryption).
+#   ECB      -- NIST SP 800-38A Appendix A: identical plaintext blocks produce
+#               identical ciphertext blocks.
+#   DES/3DES -- NIST SP 800-131A Rev.2 (3DES disallowed after 2023);
+#               Sweet32, CVE-2016-2183.
+#   Node.js `crypto.createCipheriv` (nodejs.org/api/crypto.html); node-forge
+#     `forge.cipher.createCipher` (github.com/digitalbazaar/forge).
+#
+# THE WHOLE SUITE STRING IS CAPTURED, as `cipher_suite`. In Node the algorithm,
+# key size and mode are one token -- `aes-256-gcm` says all three -- and
+# splitting it inside the rule would discard what the source actually said. The
+# rule reports the token verbatim; the policy engine reads it.
+rules:
+  - id: js-createcipheriv
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "ecdat|cipher_suite=$SUITE"
+    metadata:
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        cipher_suite: $SUITE
+      quantum_note: >-
+        AES (FIPS 197) survives quantum: Grover halves the effective key
+        strength, so AES-256 keeps ~128-bit security and is what CNSA 2.0
+        requires for data that must stay confidential past 2035. The MODE is
+        the classical question -- `-cbc` is unauthenticated and padding-oracle
+        prone (NIST SP 800-38A; Vaudenay 2002), `-ecb` leaks plaintext
+        structure (SP 800-38A Appendix A), and `-gcm` is the AEAD to prefer
+        (SP 800-38D). The captured suite carries key size and mode together,
+        which is how Node spells them.
+      flags: [symmetric]
+    patterns:
+      - pattern-either:
+          - pattern: crypto.createCipheriv($SUITE, ...)
+          - pattern: crypto.createDecipheriv($SUITE, ...)
+          - pattern: createCipheriv($SUITE, ...)
+          - pattern: createDecipheriv($SUITE, ...)
+      # Anchored at the start (semgrep uses Python `re.match`), and the bound
+      # content includes the quote character, so both styles are listed. A
+      # non-literal first argument -- a variable holding the suite -- does not
+      # match, and that is deliberate: reporting `cipher_suite: algo` would be
+      # a parameter nobody can act on.
+      - metavariable-regex:
+          metavariable: $SUITE
+          regex: ^["']aes-
+
+  - id: js-forge-legacy-cipher
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "ecdat|cipher_suite=$SUITE"
+    metadata:
+      algorithm: 3DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        cipher_suite: $SUITE
+      quantum_note: >-
+        node-forge ships DES, 3DES and RC2 alongside AES. 3DES is disallowed
+        after 2023 (NIST SP 800-131A Rev.2) and its 64-bit block makes Sweet32
+        (CVE-2016-2183) practical on long-lived connections; single DES has
+        been brute-forceable since 1998 (EFF Deep Crack); RC2 has no modern
+        standing. None of these is a quantum problem -- they are already
+        broken. Replace with AES-256-GCM (FIPS 197 with NIST SP 800-38D).
+      flags: [weak, symmetric, critical]
+    patterns:
+      - pattern-either:
+          - pattern: forge.cipher.createCipher($SUITE, ...)
+          - pattern: forge.cipher.createDecipher($SUITE, ...)
+      - metavariable-regex:
+          metavariable: $SUITE
+          regex: ^["'](3DES|DES|RC2)

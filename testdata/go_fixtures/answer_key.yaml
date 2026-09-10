@@ -1,0 +1,197 @@
+# Ground truth for the Go rule pack (ADR-0023).
+#
+# Same contract as testdata/python_fixtures/answer_key.yaml: tests/test_rules_go.py
+# scores RECALL against `expected` and PRECISION against the union of every entry
+# here. Precision is asserted at exactly 1.0, so this key must be EXHAUSTIVE --
+# a real detection missing from here counts as a false positive and fails the
+# build. That forces every new rule to be declared as ground truth before it is
+# allowed to count.
+#
+# Keys are (file, rule_id); `count` is how many distinct findings that pair must
+# produce. Line numbers are absent on purpose so fixtures stay editable.
+
+expected:
+  must_fire/go_rsa_keygen.go:
+    - rule_id: go-rsa-keygen
+      algorithm: RSA
+      primitive: pke
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - key_size: 2048
+
+  must_fire/go_ecdsa_keygen.go:
+    - rule_id: go-ecdsa-keygen
+      algorithm: ECDSA
+      primitive: signature
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - curve: P256
+
+  must_fire/go_ed25519_keygen.go:
+    - rule_id: go-ed25519-keygen
+      algorithm: Ed25519
+      primitive: signature
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+
+  must_fire/go_ecdh_curve.go:
+    - rule_id: go-ecdh-curve
+      algorithm: ECDH
+      primitive: key-agreement
+      usage: key-exchange
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - curve: P384
+
+  must_fire/go_aes_cbc.go:
+    - rule_id: go-aes-cbc
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - mode: CBC
+
+  must_fire/go_aes_gcm.go:
+    - rule_id: go-aes-gcm
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - mode: GCM
+
+  must_fire/go_aes_ecb.go:
+    - rule_id: go-aes-ecb
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - mode: ECB
+
+  must_fire/go_md5.go:
+    - rule_id: go-md5
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/go_sha1.go:
+    - rule_id: go-sha1
+      algorithm: SHA-1
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/go_sha256.go:
+    - rule_id: go-sha256
+      algorithm: SHA-256
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/go_des.go:
+    - rule_id: go-3des
+      algorithm: 3DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/go_rc4.go:
+    - rule_id: go-rc4
+      algorithm: RC4
+      primitive: stream-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/go_tls_config.go:
+    - rule_id: go-tls-minversion
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      count: 1
+      params_any:
+        - version: VersionTLS10
+    - rule_id: go-tls-ciphersuites
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      count: 1
+    - rule_id: go-tls-curvepreferences
+      algorithm: ECDH
+      primitive: key-agreement
+      usage: key-exchange
+      asset_type: algorithm
+      count: 1
+
+  must_fire/go_weak_random.go:
+    - rule_id: go-weak-random
+      algorithm: math/rand
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+
+  must_fire/go_jwt_signing.go:
+    - rule_id: go-jwt-rsa
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - alg: SigningMethodRS256
+
+  must_fire/go_hardcoded_key.go:
+    - rule_id: go-hardcoded-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 2          # the key literal and the IV literal
+    - rule_id: go-aes-cbc
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1          # the cipher rule legitimately matches this file too
+
+  must_fire/go_pem_certificate.go:
+    - rule_id: go-pem-block
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: certificate
+      count: 1
+
+  must_fire/go_pem_private_key.go:
+    - rule_id: go-pem-block
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: certificate
+      count: 1
+
+# Planted inside the fixtures' key material. None may reach any Finding --
+# tests/test_rules_go.py::test_no_planted_secret_reaches_any_go_finding.
+secret_sentinels:
+  - GOSECRETSENTINEL
+  - GONOTAREALKEY
+  - GONOTAREALCERT

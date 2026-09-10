@@ -46,17 +46,18 @@ VIEW_REMEDY = {
 #: ECDAT runs today, and a report that omitted them would overstate the tool.
 KNOWN_GAPS = [
     (
-        "Source scanning is Python only",
-        "Go, JavaScript, Java and C/C++ source are not scanned. QuantumBank "
-        "deliberately contains Go crypto (ECDSA P-256 and an embedded "
-        "certificate in services/gateway/sign.go) so this gap is measured "
-        "rather than hidden.",
+        "Source scanning covers Python, Go and JavaScript/TypeScript",
+        "Java, C/C++, Rust and C# source are not scanned -- four of seven "
+        "planned language families. C/C++ is the hard one: OpenSSL call sites "
+        "are macro-heavy, so that pack needs a different engine rather than "
+        "more rules (ADR-0023).",
     ),
     (
-        "Dependency, binary and network scanners are designed, not built",
-        "Four of a planned seven scanner families exist. A cryptographic "
-        "library reached only through a dependency manifest, a statically "
-        "linked binary, or a packet capture is not inventoried.",
+        "Binary and network scanners are designed, not built",
+        "Five of a planned seven scanner families exist. The dependency "
+        "scanner landed in ADR-0021 (Python, Node and Go manifests), but a "
+        "cryptographic library reached only through a statically linked "
+        "binary, or a packet capture, is still not inventoried.",
     ),
     (
         "Runtime coverage is narrower than 'TLS on this host'",

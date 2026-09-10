@@ -1,13 +1,15 @@
-"""Scanner A -- Python source crypto detection, with Semgrep as the engine.
+"""Scanner A -- source crypto detection, with Semgrep as the engine.
 
 The division of labour is the point of this design (ADR-0004):
 
-* **Semgrep holds the matching.** It has the Python grammar, the pattern
-  language and the performance work already done. ECDAT does not re-implement
-  any of it.
-* **The rule pack holds the knowledge.** ``knowledge/rules/python/*.yaml``
+* **Semgrep holds the matching.** It has the grammars, the pattern language
+  and the performance work already done. ECDAT does not re-implement any of it.
+* **The rule packs hold the knowledge.** ``knowledge/rules/<language>/*.yaml``
   carries the algorithm name, primitive, usage and cited quantum note for every
-  pattern. Adding a detection means adding YAML, not Python.
+  pattern. Adding a detection means adding YAML, not Python -- and since
+  ADR-0023, so does adding a LANGUAGE: semgrep is pointed at
+  ``knowledge/rules/`` and each rule's own ``languages:`` decides which files
+  it reads. Python, Go and JavaScript/TypeScript ship today.
 * **This module holds nothing but the mapping.** Semgrep JSON in,
   :class:`~core.schema.Finding` out.
 
@@ -83,8 +85,14 @@ SEMGREP_BINARY = "semgrep"
 #: to the engine that produced it rather than argued about.
 PINNED_SEMGREP_VERSION = "1.176.1"
 
-#: Where the Python rule pack lives, relative to ``ScanContext.knowledge_dir``.
-RULE_SUBDIR = Path("rules") / "python"
+#: Where the rule packs live, relative to ``ScanContext.knowledge_dir``. The
+#: directory holds one sub-pack per language (``python/``, ``go/``,
+#: ``javascript/``) and semgrep is pointed at the parent, because every rule
+#: already declares its own ``languages:`` and applies only to files of that
+#: language. One config root rather than one per language means adding a
+#: language is adding YAML, which is the promise knowledge/rules/README.md
+#: makes (ADR-0023).
+RULE_SUBDIR = Path("rules")
 
 #: A whole-repo scan is minutes, not hours; past this something is wrong.
 SEMGREP_TIMEOUT_SECONDS = 900
@@ -551,11 +559,12 @@ def _finding(
 
 
 class SourceScanner:
-    """Detects cryptographic use in Python source (ADR-0004).
+    """Detects cryptographic use in source code (ADR-0004, ADR-0023).
 
-    Python only, deliberately: the rule-metadata contract is proved on one
-    language before the pack is widened. Other languages are new rule files
-    against the same contract, not new scanner code.
+    Python, Go and JavaScript/TypeScript today. The rule-metadata contract was
+    proved on one language before the pack was widened, and the widening added
+    no scanner code: Go and JS/TS are rule files against the same contract.
+    Java, C/C++, Rust and C# are still unscanned -- see PUNCHLIST.
     """
 
     # Annotated, not just assigned: the Scanner protocol declares `view: View`,
@@ -583,8 +592,8 @@ class SourceScanner:
         rules_dir = ctx.knowledge_dir / RULE_SUBDIR
         if not rules_dir.is_dir():
             raise RulePackMissingError(
-                f"the Python rule pack is missing: {rules_dir} does not exist. "
-                "Set ECDAT_KNOWLEDGE_DIR or restore knowledge/rules/python/."
+                f"the source rule packs are missing: {rules_dir} does not exist. "
+                "Set ECDAT_KNOWLEDGE_DIR or restore knowledge/rules/."
             )
 
         results = _parse_semgrep_json(_run_semgrep(rules_dir, Path(target.ref)))
