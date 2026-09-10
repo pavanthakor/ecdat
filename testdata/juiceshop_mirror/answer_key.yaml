@@ -1,0 +1,65 @@
+# Ground truth for the Juice Shop SHAPE MIRROR (ADR-0034).
+#
+# OWASP Juice Shop (upstream 1618a61, MIT) was scanned before this slice. The
+# pre-ADR-0034 js-hardcoded-key rule reported five Angular storage, cookie and
+# config strings as hard-coded key material -- the false-positive class this
+# slice closes -- and reported the PEM at lib/insecurity.ts:21 twice, once as
+# js-pem-block and once as js-hardcoded-key. The files under this directory
+# mirror those declarations at the SAME paths and line numbers, with filler in
+# place of Juice Shop's key material.
+#
+# tests/test_hardcoded_key_precision.py
+#   * proves the mirror is FAITHFUL: the pre-ADR-0034 rule, vendored in the
+#     test, fires on exactly `false_positives` plus the PEM line;
+#   * proves the FIX: the shipped pack fires on none of `false_positives`,
+#     keeps `pem_true_positive`, drops the double report, and finds
+#     `inline_key_true_positive`, which the old rule never saw because no
+#     key-ish name holds it;
+#   * scores `expected` at exactly 1.0 recall and precision.
+
+expected:
+  lib/insecurity.ts:
+    - rule_id: js-pem-block
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: certificate
+      count: 1          # line 21: the PEM, kept -- and reported once
+    - rule_id: js-hardcoded-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1          # line 42: an HMAC key literal at the sink -- new
+    - rule_id: js-hash-md5
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1          # line 41, unrelated to this slice
+    - rule_id: js-jwt-rsa
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1          # line 54, unrelated to this slice
+      params_any:
+        - alg: RS256
+
+juice_shop:
+  upstream: https://github.com/juice-shop/juice-shop at 1618a61
+  # What the pre-ADR-0034 js-hardcoded-key rule reported, in the real scan and
+  # in this mirror. Each is a storage key, a cookie name or a config constant.
+  false_positives:
+    - frontend/src/app/Services/basket.service.ts:33
+    - frontend/src/app/Services/conversation-storage.service.ts:9
+    - frontend/src/app/Services/conversation-storage.service.spec.ts:9
+    - frontend/src/app/welcome-banner/welcome-banner.component.ts:33
+    - frontend/src/app/welcome/welcome.component.ts:25
+  pem_true_positive: lib/insecurity.ts:21
+  inline_key_true_positive: lib/insecurity.ts:42
+
+# Planted inside the mirror's key material. None may reach any Finding.
+secret_sentinels:
+  - JUICEMIRRORSENTINEL
+  - JUICEMIRRORHMACSENTINEL

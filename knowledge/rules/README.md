@@ -64,9 +64,11 @@ Every rule must set all four. A missing or non-string value is a hard error.
 | `asset_type` | `algorithm` | One of the `AssetType` vocabulary. Use `protocol` for TLS/SSH versions, `key` for key material, `certificate` for certificates. |
 | `keysize_metavar` | — | Sugar for `capture: {key_size: $X}`. Spelled out separately because key size is the parameter nearly every asymmetric rule needs. |
 | `capture` | `{}` | Ordered map of `param_name -> $METAVAR`. See below. |
-| `flags` | `[]` | Free-form tags. `critical` sets `params.flagged = true`. Conventions in use: `weak`, `control`, `quantum-vulnerable`, `symmetric`, `key-material`, `override`, `critical`. |
+| `flags` | `[]` | Free-form tags. `critical` sets `params.flagged = true`; `candidate` sets `params.candidate = true` and marks every finding as a candidate for analyst review rather than an assertion (ADR-0034). Conventions in use: `weak`, `control`, `quantum-vulnerable`, `symmetric`, `key-material`, `override`, `critical`, `candidate`. |
 | `mode_flags` | `{}` | Map of a captured `mode` value to why it is dangerous (e.g. `ECB`). A match whose mode is a key here also gets `params.flagged = true`. |
 | `redact` | `false` | The rule matches key material. Its snippet becomes `<redacted key material>`. |
+| `confidence` | — | A ceiling on the confidence of every finding the rule produces, as a STRING in (0, 1] (`"0.5"`): semgrep 1.176.1 refuses a YAML float anywhere in a rule. The scanner's own verdict is kept when it is lower. A `candidate` rule must declare one below 1.0. |
+| `holder_metavar` | — | The metavariable bound to the IDENTIFIER that held the matched literal. The message must carry it as `holder=$X`. It goes to `raw["holder"]` and never to `params`, and it links a candidate to its confirmation (see the key-material section). |
 
 ## How `capture` works
 
@@ -259,6 +261,66 @@ PEM banner is dropped entirely, and any byte-string literal of 8 bytes or more
 is replaced. That second layer exists because a rule about a *cipher* routinely
 matches the same line a key literal sits on, and that rule has no idea the key
 is there. Write the `redact` flag anyway; do not rely on the net.
+
+## Key material: corroboration, not a name (ADR-0034)
+
+A key-ish variable NAME is not evidence of key material. On OWASP Juice Shop the
+name-scoped key rules reported five Angular storage, cookie and config strings
+as hard-coded keys. Every pack now reports key material only on corroboration:
+
+| Rule | Fires on | `confidence` |
+|---|---|---|
+| `<lang>-pem-block` (`py-pem-*`) | a PEM block | 1.0 |
+| `<lang>-hardcoded-key-der` | a base64 DER structure: `MII`/`MIG` and 61+ more base64 characters | 1.0 |
+| `<lang>-hardcoded-key` (and `py-hardcoded-cipher-key`) | a literal that REACHES a key, IV, HMAC or signing parameter (taint) | 1.0 |
+| `<lang>-hardcoded-key-candidate` | a key-ish name holding a high-entropy 32+ character literal, and nothing else | 0.5, `candidate` |
+
+Each setting below was measured in ADR-0034 STEP 0 and is pinned by
+`tests/test_hardcoded_key_precision.py`:
+
+* **`taint_assume_safe_functions: true`.** Taint through a call is semgrep's
+  default, so a KDF salt (`scryptSync(pw, "salt", 32)`), or the `"AES"` handed
+  to `KeyGenerator.getInstance`, flowed into the key parameter and was reported
+  as the key. The encoding wrappers (`Buffer.from`, `getBytes`, `encode`) come
+  back as propagators and sink shapes; a Go `[]byte(...)` conversion is not a
+  call and still carries taint.
+* **`constant_propagation: false`** on the sink and DER rules. With it, a
+  constant-backed argument also matched the literal pattern at its USE, and
+  every such key was reported twice.
+* **A concatenation sanitizer.** An assembled key's literal is a part of the
+  key, not the key (Python reports that class through
+  `py-assembled-key-material`). It also stops a PEM split across `+` leaking
+  through its unbannered middle lines.
+* **Shaped literals are not taint sources.** A PEM or DER literal that also
+  reaches a sink is reported once, by its shape rule.
+* **One sink per shape.** Two shapes that match the same call must not share
+  a `pattern-either`. semgrep keeps one binding per range, and the see-through
+  shape loses.
+
+### `holder_metavar`, and folding a candidate into its confirmation
+
+A key that is high-entropy AND reaches a sink matches both the sink rule, at the
+sink, and the candidate rule, at the declaration. Semgrep OSS emits no dataflow
+trace in `--json`, so the two are linked by NAME. Each rule captures the
+identifier the literal was declared under (`holder_metavar`, delivered as
+`holder=` in the message), and the scanner folds a candidate into every
+confirmed finding with the same holder in the same file. The candidate's
+occurrence, which is the line the key sits on, is kept on the confirmed finding.
+
+The holder is kept in `raw["holder"]` and never in `params`: a variable name is
+not a property of the key, and params are identifying. A capture that is not
+identifier-shaped is discarded. A literal with no holder (inline at the sink)
+leaves the metavariable unbound, and the scanner reads that as `None`.
+
+### Two hazards, both measured
+
+* **A YAML float anywhere in a rule crashes semgrep 1.176.1** (exit 2, no
+  JSON). `confidence` is therefore a string: `confidence: "0.5"`.
+* **A bound metavariable is substituted into any longer, UNBOUND name it
+  prefixes.** With `hmac.New($H, ...)` bound and `$HOLDER` unbound, the message
+  read `holder=sha256.NewOLDER`. Had the key argument been `$H`, its bytes would
+  have reached the Finding. No metavariable in a rule may be a proper prefix of
+  one its message interpolates, and a test checks every rule in every pack.
 
 ## Testing a new rule
 

@@ -28,6 +28,17 @@ FIXTURE_ROOT = Path("testdata/go_fixtures")
 KNOWLEDGE_DIR = Path("knowledge")
 ANSWERS = load_answers(FIXTURE_ROOT)
 
+#: Every Go rule that matches key material (ADR-0034's three branches plus the
+#: PEM rule). Each must redact its snippet.
+GO_KEY_MATERIAL_RULES = frozenset(
+    {
+        "go-hardcoded-key",
+        "go-hardcoded-key-der",
+        "go-hardcoded-key-candidate",
+        "go-pem-block",
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # One semgrep run for the module. It is a subprocess; paying per assertion
@@ -193,9 +204,7 @@ def test_no_planted_secret_reaches_any_go_finding(findings: list[Finding]) -> No
 
 
 def test_go_key_material_findings_are_redacted(findings: list[Finding]) -> None:
-    material = [
-        f for f in findings if rule_id_of(f) in {"go-hardcoded-key", "go-pem-block"}
-    ]
+    material = [f for f in findings if rule_id_of(f) in GO_KEY_MATERIAL_RULES]
     assert material, "no Go key-material findings at all"
     for finding in material:
         for occurrence in finding.evidence.occurrences:

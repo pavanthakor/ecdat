@@ -594,6 +594,36 @@ def _read_line(path: Path, number: int, cache: dict[Path, list[str]]) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: A rule that may be wrong says so (ADR-0034). `confidence` in a rule's
+#: metadata is a CEILING on every finding the rule produces: the scanner's own
+#: verdict (1.0, or 0.6 for an unresolved capture) is kept when it is lower. A
+#: rule can admit doubt; it cannot manufacture certainty.
+#:
+#: Spelled as a STRING ("0.5"). semgrep 1.176.1's rule loader rejects a YAML
+#: float anywhere in a rule -- metadata included -- and exits 2 with no JSON
+#: (measured, ADR-0034 STEP 0).
+CONFIDENCE_KEY = "confidence"
+
+#: Marks every finding of a rule as a CANDIDATE: worth an analyst's look, not
+#: an assertion (ADR-0034). The finding carries `params.candidate = True` --
+#: `ecdat:param:candidate` in the CBOM, beside its `ecdat:confidence` -- and the
+#: rule must declare a confidence below 1.0.
+CANDIDATE_FLAG = "candidate"
+
+#: Names the metavariable bound to the IDENTIFIER that held a matched literal;
+#: the message delivers it as `holder=<name>`. Kept in `raw["holder"]` and never
+#: in `params`: a variable name is not a property of the key, and params are
+#: identifying. It links a candidate to the confirmed finding for the same
+#: literal -- see :func:`_fold_superseded_candidates`.
+HOLDER_KEY = "holder_metavar"
+_HOLDER_CAPTURE = "holder"
+
+#: What a holder must look like to be kept: a dotted identifier. Anything else
+#: -- a quote, a space, an operator -- is discarded, never stored. The packs are
+#: tested never to bind anything else there; this is the backstop.
+_IDENTIFIER = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*")
+
+
 def _require(metadata: dict[str, Any], key: str, rule_id: str) -> str:
     value = metadata.get(key)
     if not isinstance(value, str) or not value:
@@ -601,6 +631,59 @@ def _require(metadata: dict[str, Any], key: str, rule_id: str) -> str:
             f"rule {rule_id}: metadata.{key} is required and must be a "
             f"non-empty string; got {value!r}"
         )
+    return value
+
+
+def _declared_confidence(metadata: dict[str, Any], rule_id: str) -> float | None:
+    """The confidence ceiling a rule declares, or ``None`` if it declares none."""
+    declared = metadata.get(CONFIDENCE_KEY)
+    if declared is None:
+        return None
+    if not isinstance(declared, str):
+        raise RulePackContractError(
+            f"rule {rule_id}: metadata.{CONFIDENCE_KEY} must be a string such as "
+            f'"0.5" -- semgrep refuses a YAML float in a rule; got {declared!r}'
+        )
+    try:
+        value = float(declared)
+    except ValueError as exc:
+        raise RulePackContractError(
+            f"rule {rule_id}: metadata.{CONFIDENCE_KEY}={declared!r} is not a number"
+        ) from exc
+    # A positive range test, so NaN -- for which every comparison is False --
+    # is refused rather than sailing through.
+    if not 0.0 < value <= 1.0:
+        raise RulePackContractError(
+            f"rule {rule_id}: metadata.{CONFIDENCE_KEY}={declared!r} is not a "
+            "probability in (0, 1]"
+        )
+    return value
+
+
+def _holder_metavar(metadata: dict[str, Any], rule_id: str) -> str | None:
+    metavar = metadata.get(HOLDER_KEY)
+    if metavar is None:
+        return None
+    if not isinstance(metavar, str) or not metavar.startswith("$"):
+        raise RulePackContractError(
+            f"rule {rule_id}: metadata.{HOLDER_KEY} must name a metavariable such "
+            f"as $HOLDER; got {metavar!r}"
+        )
+    return metavar
+
+
+def _holder(captured: str | None, metavar: str) -> str | None:
+    """The identifier a rule captured as a literal's holder, or ``None``.
+
+    ``None`` when nothing held the literal -- semgrep leaves an unbound
+    metavariable in the message verbatim -- and when the capture is not an
+    identifier at all, which is discarded rather than stored.
+    """
+    if captured is None:
+        return None
+    value = captured.strip()
+    if value == metavar or not _IDENTIFIER.fullmatch(value):
+        return None
     return value
 
 
@@ -636,8 +719,29 @@ def _finding(
     )
     _require(metadata, "quantum_note", rule_id)
 
+    flags = metadata.get("flags") or []
+    candidate = CANDIDATE_FLAG in flags
+    declared = _declared_confidence(metadata, rule_id)
+    if candidate and (declared is None or declared >= 1.0):
+        raise RulePackContractError(
+            f"rule {rule_id}: a '{CANDIDATE_FLAG}' rule must declare "
+            f"metadata.{CONFIDENCE_KEY} below 1.0 -- a candidate is not an assertion"
+        )
+
     captures = _capture_map(metadata, rule_id)
-    raw_values = _parse_captures(str(extra.get("message", "")), list(captures), rule_id)
+    holder_metavar = _holder_metavar(metadata, rule_id)
+    names = list(captures)
+    if holder_metavar is not None:
+        if _HOLDER_CAPTURE in captures:
+            raise RulePackContractError(
+                f"rule {rule_id}: capture name {_HOLDER_CAPTURE!r} is reserved "
+                f"for metadata.{HOLDER_KEY}"
+            )
+        names.append(_HOLDER_CAPTURE)
+    raw_values = _parse_captures(str(extra.get("message", "")), names, rule_id)
+    # Popped before anything is stored: whatever arrived is either kept as an
+    # identifier or discarded, and it never reaches params or the raw captures.
+    holder_text = raw_values.pop(_HOLDER_CAPTURE, None)
 
     params: dict[str, Any] = {}
     resolved = True
@@ -645,9 +749,10 @@ def _finding(
         params[name] = _normalise_param(name, text)
         resolved = resolved and _is_resolved(text.strip())
 
-    flags = metadata.get("flags") or []
     if "critical" in flags:
         params["flagged"] = True
+    if candidate:
+        params["candidate"] = True
 
     # A mode the rule pack singles out (ECB) is flagged the same way, so the
     # policy engine does not have to know mode names to find it.
@@ -660,6 +765,18 @@ def _finding(
     snippet = _redact(
         _read_line(path, line, cache), always=bool(metadata.get("redact"))
     )
+
+    confidence = 1.0 if resolved else _UNRESOLVED_CONFIDENCE
+    if declared is not None:
+        confidence = min(confidence, declared)
+
+    raw: dict[str, Any] = {
+        "rule_id": rule_id,
+        "check_id": check_id,
+        "captures": raw_values,
+    }
+    if holder_metavar is not None:
+        raw["holder"] = _holder(holder_text, holder_metavar)
 
     view: View = "declared"
     return Finding(
@@ -681,9 +798,90 @@ def _finding(
                 )
             ]
         ),
-        confidence=1.0 if resolved else _UNRESOLVED_CONFIDENCE,
-        raw={"rule_id": rule_id, "check_id": check_id, "captures": raw_values},
+        confidence=confidence,
+        raw=raw,
     )
+
+
+# ---------------------------------------------------------------------------
+# Candidate folding -- ADR-0034
+# ---------------------------------------------------------------------------
+
+
+def _file_of(finding: Finding) -> str:
+    return finding.evidence.occurrences[0].locator.rpartition(":")[0]
+
+
+def _occurrence_order(occurrence: Occurrence) -> tuple[str, int, str]:
+    path, _, line = occurrence.locator.rpartition(":")
+    return (path, int(line) if line.isdigit() else 0, occurrence.detail)
+
+
+def _fold_superseded_candidates(findings: Sequence[Finding]) -> list[Finding]:
+    """Fold each candidate into the confirmed finding(s) for the same literal.
+
+    A key-ish name holding a high-entropy literal is a CANDIDATE (ADR-0034) --
+    unless the literal also reaches a key parameter, in which case the sink
+    rule has confirmed it. Both rules then report, on different lines: the
+    candidate at the declaration, the sink rule where the key is used. Keeping
+    both would put one key in the inventory twice, once asserted and once
+    doubted.
+
+    They are linked by the HOLDER each rule captures -- the identifier the
+    literal was declared under -- within one file. Semgrep OSS emits no
+    dataflow trace in its JSON (measured, ADR-0034 STEP 0), so the name is the
+    only link there is. The candidate is not dropped: its occurrence, the line
+    the key actually sits on, is appended to every confirmed finding naming
+    that holder, so the sink finding also says where the key IS.
+
+    A candidate nothing confirms is kept unchanged. Two different literals held
+    under one name in one file, one reaching a sink and one not, fold together
+    -- a recorded limit (PUNCHLIST).
+    """
+    confirmed: dict[tuple[str, str], list[int]] = {}
+    for index, finding in enumerate(findings):
+        holder = finding.raw.get("holder")
+        if holder and not finding.params.get("candidate"):
+            confirmed.setdefault((_file_of(finding), holder), []).append(index)
+
+    folded: dict[int, list[Occurrence]] = {}
+    superseded: set[int] = set()
+    for index, finding in enumerate(findings):
+        holder = finding.raw.get("holder")
+        if not holder or not finding.params.get("candidate"):
+            continue
+        owners = confirmed.get((_file_of(finding), holder))
+        if not owners:
+            continue
+        superseded.add(index)
+        for owner in owners:
+            folded.setdefault(owner, []).extend(finding.evidence.occurrences)
+
+    result: list[Finding] = []
+    for index, finding in enumerate(findings):
+        if index in superseded:
+            continue
+        extra = folded.get(index)
+        if extra:
+            own = list(finding.evidence.occurrences)
+            added = sorted({o for o in extra if o not in own}, key=_occurrence_order)
+            finding = finding.model_copy(
+                update={"evidence": Evidence(occurrences=own + added)}
+            )
+        result.append(finding)
+
+    if superseded:
+        _log.info(
+            "key_candidates_folded",
+            extra={
+                "event": "key_candidates_folded",
+                "folded": len(superseded),
+                "sites": sorted(
+                    findings[i].evidence.occurrences[0].locator for i in superseded
+                )[:20],
+            },
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -900,6 +1098,7 @@ class SourceScanner:
         refined_usage = _usage_annotations(annotations)
 
         cache: dict[Path, list[str]] = {}
+        findings: list[Finding] = []
         for result in detections:
             finding = _finding(result, cache, self.id)
             site = _site(result)
@@ -912,4 +1111,8 @@ class SourceScanner:
                 # that overrode it would let a use site in the same function
                 # rewrite a fact the call itself stated.
                 finding = _refine_usage(finding, usage)
-            yield finding
+            findings.append(finding)
+
+        # A candidate the sink rule confirmed is the same key reported twice
+        # (ADR-0034): it is folded into the confirmation before anything leaves.
+        yield from _fold_superseded_candidates(findings)

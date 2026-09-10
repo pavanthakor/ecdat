@@ -320,15 +320,21 @@ PACKS = ("python", "go", "javascript", "java")
 #: behind a constant is caught by that rule's own `const $NAME = $LITERAL`
 #: branch.
 #:
+#: ADR-0034 moved the `*-hardcoded-key` rules to taint, so they left this list:
+#: they no longer regex a bound value at all. The entropy-only CANDIDATE rules
+#: that replaced their name-scoped half test both kinds at once -- a key-ish
+#: NAME and the SHAPE of the literal declared under it -- and joined it.
+#:
 #: Listed rather than pattern-matched so adding one is a deliberate act.
 EXEMPT_BY_ID = {
     "py-weak-random-secret": "regex tests a variable NAME",
     "go-weak-random": "regex tests a variable NAME",
     "js-math-random": "regex tests a variable NAME",
     "java-weak-random": "regex tests a variable NAME",
-    "go-hardcoded-key": "regex tests the SHAPE of a literal, not an algorithm",
-    "js-hardcoded-key": "regex tests the SHAPE of a literal, not an algorithm",
-    "java-hardcoded-key": "regex tests the SHAPE of a literal, not an algorithm",
+    "py-hardcoded-key-candidate": "regex tests a NAME and the SHAPE of its literal",
+    "go-hardcoded-key-candidate": "regex tests a NAME and the SHAPE of its literal",
+    "js-hardcoded-key-candidate": "regex tests a NAME and the SHAPE of its literal",
+    "java-hardcoded-key-candidate": "regex tests a NAME and the SHAPE of its literal",
     "js-forge-rsa-keygen": "regex tests that $BITS is NUMERIC, not which algorithm",
 }
 

@@ -37,6 +37,17 @@ FIXTURE_ROOT = Path("testdata/java_fixtures")
 KNOWLEDGE_DIR = Path("knowledge")
 ANSWERS = load_answers(FIXTURE_ROOT)
 
+#: Every Java rule that matches key material (ADR-0034's three branches plus
+#: the PEM rule). Each must redact its snippet.
+JAVA_KEY_MATERIAL_RULES = frozenset(
+    {
+        "java-hardcoded-key",
+        "java-hardcoded-key-der",
+        "java-hardcoded-key-candidate",
+        "java-pem-block",
+    }
+)
+
 
 @pytest.fixture(scope="module")
 def context(tmp_path_factory: pytest.TempPathFactory) -> ScanContext:
@@ -269,9 +280,7 @@ def test_no_planted_secret_reaches_any_java_finding(findings: list[Finding]) -> 
 
 
 def test_java_key_material_findings_are_redacted(findings: list[Finding]) -> None:
-    material = [
-        f for f in findings if rule_id_of(f) in {"java-hardcoded-key", "java-pem-block"}
-    ]
+    material = [f for f in findings if rule_id_of(f) in JAVA_KEY_MATERIAL_RULES]
     assert material, "no Java key-material findings at all"
     for finding in material:
         for occurrence in finding.evidence.occurrences:

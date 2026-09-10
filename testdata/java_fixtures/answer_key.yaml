@@ -390,12 +390,53 @@ expected:
       asset_type: certificate
       count: 1
 
+  # ---- HARD-CODED KEY PRECISION (ADR-0034) ------------------------------
+  must_fire/JavaKeyReachesSink.java:
+    - rule_id: java-hardcoded-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 3          # WEBHOOK_KEY -> SecretKeySpec, inline -> HMAC256, keyBytes -> SecretKeySpec
+    - rule_id: java-jwt-auth0-hmac
+      algorithm: HMAC
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - alg: HMAC256
+
+  must_fire/JavaDerKey.java:
+    - rule_id: java-hardcoded-key-der
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1
+
+  must_fire/JavaKeyCandidate.java:
+    - rule_id: java-hardcoded-key-candidate
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 2          # a 32- and a 64-character hex literal, no sink
+      params_any:
+        - candidate: true
+
 # Planted inside the fixtures' key material. None may reach any Finding --
 # tests/test_rules_java.py::test_no_planted_secret_reaches_any_java_finding.
 secret_sentinels:
   - JAVASECRETSENTINEL
   - JAVANOTAREALKEY
   - JAVANOTAREALCERT
+  # ADR-0034
+  - JAVASINKSENTINEL
+  - JAVADERSENTINEL
+  - f7ef507df605238c    # the high-entropy key that reaches SecretKeySpec
+  - f729627e7d795964    # the 32-character candidate
+  - a1c20c2b1b7f5b48    # the 64-character candidate
 
 # What constant propagation does NOT do here. Measured in ADR-0028 STEP 0,
 # listed rather than left as a silent recall gap. NOT decoys: a decoy should

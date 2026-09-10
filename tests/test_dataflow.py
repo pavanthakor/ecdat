@@ -544,8 +544,10 @@ def test_no_python_rule_classifies_a_passed_value_with_metavariable_regex_alone(
     # Rules whose metavariable-regex tests a NAME rather than a value.
     # Propagation is irrelevant to them by construction, and listing them
     # explicitly means adding one is a deliberate act rather than a
-    # pattern that quietly widens.
-    name_scoped = {"py-weak-random-secret"}
+    # pattern that quietly widens. The ADR-0034 candidate tests a key-ish NAME
+    # and the SHAPE of the literal declared under it -- the literal it matched,
+    # never a value passed to a call.
+    name_scoped = {"py-weak-random-secret", "py-hardcoded-key-candidate"}
 
     #: `$VAR` in an argument position: after `(`, `,`, `=` or `[`.
     argument_position = re.compile(r"[(\[,=]\s*\$[A-Z_][A-Z0-9_]*")

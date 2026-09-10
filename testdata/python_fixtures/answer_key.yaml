@@ -276,9 +276,72 @@ expected:
       asset_type: algorithm
       count: 1
 
+  # ---- HARD-CODED KEY PRECISION (ADR-0034) ------------------------------
+  # Python never had a name-scoped key rule: py-hardcoded-cipher-key was
+  # already anchored at AES. ADR-0034 moves it to taint (same id, same AES
+  # facts) and adds the model's other branches -- every other key parameter,
+  # the DER shape, and the entropy-only candidate -- so the four packs agree.
+  must_fire/py_key_reaches_sink.py:
+    - rule_id: py-hardcoded-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 3          # WEBHOOK_KEY -> hmac.new, inline -> jwt.encode, .encode() -> Fernet
+      redacted: true
+    - rule_id: py-jwt-hmac
+      algorithm: HMAC
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - {alg: HS256}
+
+  must_fire/py_der_key.py:
+    - rule_id: py-hardcoded-key-der
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1
+      redacted: true
+
+  must_fire/py_key_candidate.py:
+    - rule_id: py-hardcoded-key-candidate
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 2          # a 32- and a 64-character hex literal, no sink
+      redacted: true
+      params_any:
+        - {candidate: true}
+
+  # The cipher -- and NO hard-coded-key finding: a KDF salt and an assembled
+  # key both reach AES.new without being the key.
+  must_fire/py_key_derived_not_hardcoded.py:
+    - rule_id: py-aes-cipher
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 2
+      params_any:
+        - {mode: CBC}
+    - rule_id: py-assembled-key-material
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1          # the assembled key: ADR-0026's finding, not this slice's
+      redacted: true
+
 # Any finding anywhere under this path is a false positive.
 must_not_fire:
   - must_not_fire/decoys.py
+  - must_not_fire/py_plain_key_strings.py
+  - must_not_fire/py_key_near_misses.py
 
 # Strings that must never appear in any emitted snippet. The fixtures plant
 # them inside key material; the redaction guard must keep them out.
@@ -286,3 +349,9 @@ secret_sentinels:
   - SECRETSENTINEL
   - NOTAREALKEY
   - NOTAREALCERT
+  # ADR-0034
+  - PYSINKSENTINEL
+  - PYDERSENTINEL
+  - 955e9a9751dca0fd    # the high-entropy key that reaches hmac.new
+  - 5311553b827b1eb7    # the 32-character candidate
+  - d1747741165638f9    # the 64-character candidate

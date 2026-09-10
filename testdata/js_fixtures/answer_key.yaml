@@ -263,9 +263,71 @@ expected:
       asset_type: certificate
       count: 1
 
+  # ---- HARD-CODED KEY PRECISION (ADR-0034) ------------------------------
+  must_fire/js_key_reaches_sink.js:
+    - rule_id: js-hardcoded-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 3          # webhookKey -> createHmac, inline -> jwt.sign, rawKey -> Buffer.from -> createCipheriv
+    - rule_id: js-createcipheriv
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - cipher_suite: aes-256-cbc
+
+  must_fire/ts_key_reaches_sink.ts:
+    - rule_id: js-hardcoded-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1          # an Angular class field that DOES reach createHmac
+
+  must_fire/js_der_key.js:
+    - rule_id: js-hardcoded-key-der
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1
+
+  must_fire/js_key_candidate.js:
+    - rule_id: js-hardcoded-key-candidate
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 2          # a 32- and a 64-character hex literal, no sink
+      params_any:
+        - candidate: true
+
+  # The cipher -- and NO hard-coded-key finding: a KDF salt and an assembled
+  # key both reach createCipheriv without being the key.
+  must_fire/js_key_derived_not_hardcoded.js:
+    - rule_id: js-createcipheriv
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 2
+      params_any:
+        - cipher_suite: aes-256-cbc
+
 # Planted inside the fixtures' key material. None may reach any Finding --
 # tests/test_rules_js.py::test_no_planted_secret_reaches_any_js_finding.
 secret_sentinels:
   - JSSECRETSENTINEL
   - JSNOTAREALKEY
   - JSNOTAREALCERT
+  # ADR-0034
+  - JSSINKSENTINEL
+  - TSSINKSENTINEL
+  - JSDERSENTINEL
+  - e624c0021fe5c931    # the high-entropy key that reaches createHmac
+  - e551cb2cae989987    # the 32-character candidate
+  - 6949b268dc2426f5    # the 64-character candidate

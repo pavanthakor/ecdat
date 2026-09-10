@@ -530,6 +530,54 @@
   file is recorded as a coverage gap (`ecdat:coverage:unparsed` /
   `partially_parsed` in the CBOM metadata, plus a log event); anything else
   still fails loud. *Raised and resolved: source-scanner resilience slice.*
+- ~~**The hard-coded-key rules over-fire on plain strings (real-code false
+  positives).**~~ **Resolved** by
+  [ADR-0034](docs/adr/0034-hardcoded-key-precision.md). Found scanning OWASP
+  Juice Shop once ADR-0033 let it scan: `js-hardcoded-key` was NAME-scoped, so
+  five Angular storage, cookie and config strings (`guestBasketKey`,
+  `STORAGE_KEY` twice, `welcomeBannerStatusCookieKey` twice) were reported as
+  hard-coded key material at confidence 1.0, and the PEM at
+  `lib/insecurity.ts:21` was reported twice. Go and Java had the same shape. A
+  key finding now needs corroboration: a PEM/DER shape or a literal that
+  reaches a key parameter (1.0), or a key-ish name holding a high-entropy 32+
+  character literal (0.5, marked `candidate`). A bare key-ish string does not
+  fire. On the real Juice Shop tree, 7 key-material findings became 2: the PEM,
+  once, and an inline HMAC key the old rule never saw.
+  *Raised: Juice Shop scan. Resolved: hard-coded-key precision slice.*
+- **Cross-function and cross-file key flow still needs Semgrep Pro.** OSS
+  taint is intra-procedural (ADR-0026 STEP 0, re-measured in ADR-0034). A key
+  declared in `config.js` and used in `crypto.js`, or returned by a helper and
+  used by its caller, never reaches the sink rule. It is a low-confidence
+  CANDIDATE if its literal is key-ish and high-entropy, and nothing otherwise.
+  *Raised: hard-coded-key precision slice.*
+- **The candidate fold is linked by NAME.** Semgrep OSS puts no dataflow trace
+  in `--json`, so a candidate is folded into a confirmed finding because both
+  name the same holder in the same file. Two different literals held under one
+  name in one file (shadowing), one reaching a sink and one not, fold together,
+  and the second is lost as a separate candidate. A dataflow trace (Pro, or a
+  future OSS JSON field) would make the link exact.
+  *Raised: hard-coded-key precision slice.*
+- **Hard-coded-key blind spots the corroboration model accepts.** Each was
+  measured and left for a stated reason (ADR-0034), and each is a recall gap,
+  never a false positive:
+  - a JS key assigned in a constructor (`this.k = '...'`) reaches neither
+    branch;
+  - a short-form DER key (Ed25519, X25519, P-256 SEC1/SPKI) is not recognised
+    by shape;
+  - an all-literal concatenation (`"a" + "b"`) is sanitized along with the
+    assembled class;
+  - a Go package `var` reassigned at runtime is still read as its literal;
+  - the sink catalogue is finite: no CryptoJS, no WebCrypto `importKey`, no Go
+    `cipher.NewCTR` or AEAD nonces.
+
+  *Raised: hard-coded-key precision slice.*
+- **The console does not show that a finding is a candidate.** The CBOM
+  carries `ecdat:confidence: 0.5` and `ecdat:param:candidate: True`.
+  `web/src/api/parse.ts` collects the param into `params`, but the Inventory
+  has no candidate badge or filter, and no screen reads a component's
+  `ecdat:confidence`. The PDFs are the same. An analyst reading the console
+  sees a low-confidence candidate as a finding like any other.
+  *Raised: hard-coded-key precision slice.*
 - **The console and the coverage PDF do not read `ecdat:coverage:*` yet.** A
   scan whose every file failed to parse is honest in the stored document ("
   nothing could be parsed ... not a clean result") and still LOOKS empty in the

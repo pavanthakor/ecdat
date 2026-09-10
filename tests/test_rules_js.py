@@ -27,6 +27,17 @@ FIXTURE_ROOT = Path("testdata/js_fixtures")
 KNOWLEDGE_DIR = Path("knowledge")
 ANSWERS = load_answers(FIXTURE_ROOT)
 
+#: Every JS rule that matches key material (ADR-0034's three branches plus the
+#: PEM rule). Each must redact its snippet.
+JS_KEY_MATERIAL_RULES = frozenset(
+    {
+        "js-hardcoded-key",
+        "js-hardcoded-key-der",
+        "js-hardcoded-key-candidate",
+        "js-pem-block",
+    }
+)
+
 
 @pytest.fixture(scope="module")
 def context(tmp_path_factory: pytest.TempPathFactory) -> ScanContext:
@@ -196,9 +207,7 @@ def test_no_planted_secret_reaches_any_js_finding(findings: list[Finding]) -> No
 
 
 def test_js_key_material_findings_are_redacted(findings: list[Finding]) -> None:
-    material = [
-        f for f in findings if rule_id_of(f) in {"js-hardcoded-key", "js-pem-block"}
-    ]
+    material = [f for f in findings if rule_id_of(f) in JS_KEY_MATERIAL_RULES]
     assert material, "no JS key-material findings at all"
     for finding in material:
         for occurrence in finding.evidence.occurrences:

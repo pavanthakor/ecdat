@@ -223,12 +223,45 @@ expected:
       asset_type: certificate
       count: 1
 
+  # ---- HARD-CODED KEY PRECISION (ADR-0034) ------------------------------
+  must_fire/go_key_reaches_sink.go:
+    - rule_id: go-hardcoded-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 3          # webhookKey -> hmac.New, inline -> hmac.New, local -> SignedString
+
+  must_fire/go_der_key.go:
+    - rule_id: go-hardcoded-key-der
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 1
+
+  must_fire/go_key_candidate.go:
+    - rule_id: go-hardcoded-key-candidate
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 2          # a 32- and a 64-character hex literal, no sink
+      params_any:
+        - candidate: true
+
 # Planted inside the fixtures' key material. None may reach any Finding --
 # tests/test_rules_go.py::test_no_planted_secret_reaches_any_go_finding.
 secret_sentinels:
   - GOSECRETSENTINEL
   - GONOTAREALKEY
   - GONOTAREALCERT
+  # ADR-0034
+  - GOSINKSENTINEL
+  - GODERSENTINEL
+  - 954649cdbbb849fa    # the high-entropy key that reaches hmac.New
+  - 01ee996b12ef5fc9    # the 32-character candidate
+  - c68f7163878626ee    # the 64-character candidate
 
 # Measured in ADR-0028 STEP 0. Go's crypto API classifies algorithms with
 # ATTRIBUTE and FUNCTION references (elliptic.P256(), tls.VersionTLS10,
