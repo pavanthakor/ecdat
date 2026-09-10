@@ -101,47 +101,22 @@ rules:
       NIST FIPS 203/204/205 (2024-08-13) for the replacement family; the
       security-category-0 anchor is defined in core/cbom.py against NIST's PQC
       category definitions. Confirmed against the published FIPS documents.
-  - id: quantum-grover-weakened-symmetric
-    when:
-      algorithm:
-        in: [AES-128, 3DES, TripleDES, Camellia-128, ARIA-128]
-    effect:
-      score: 20
-      category: quantum
-      quantum_status: weakened
-      labels: [grover-weakened]
-      deadline: 2030-01-01
-      action: >-
-        Move to a 256-bit key (AES-256) so the post-Grover margin stays at
-        128 bits. This is a key-size change, not an algorithm change.
-    citation: >-
-      NIST IR 8547 ipd Sec. 3: Grover's algorithm reduces the effective
-      strength of a symmetric key by half, so a 128-bit key retains roughly
-      64 bits against a quantum adversary. NIST SP 800-131A Rev.2 Table 5
-      separately disallows three-key TDEA for encryption after 2023.
-    verified: true
-    source: >-
-      NIST IR 8547 ipd (initial public draft, 2024-11) Sec. 3: Grover halves
-      the effective key strength of a symmetric cipher; FIPS 197 for AES key
-      sizes. Confirmed against the published draft.
-
-  - id: quantum-grover-weakened-aes-128-by-key-size
-    when:
-      algorithm: AES
-      key_size:
-        max: 128
-    effect:
-      score: 20
-      category: quantum
-      quantum_status: weakened
-      labels: [grover-weakened]
-      deadline: 2030-01-01
-      action: >-
-        Move to a 256-bit key (AES-256) so the post-Grover margin stays at
-        128 bits. This is a key-size change, not an algorithm change.
-    citation: >-
-      FIPS 197 defines AES key sizes; NIST IR 8547 ipd Sec. 3 gives the Grover
-      halving. AES-128 therefore retains roughly 64 bits of quantum strength.
+  # MOVED TO THE SYMMETRIC PACK (ADR-0029).
+  #
+  # `quantum-grover-weakened-symmetric` and
+  # `quantum-grover-weakened-aes-128-by-key-size` used to live here and scored
+  # a flat 20 for AES-128 -- the same number whether the data had to stay
+  # secret for an hour or for fifty years.
+  #
+  # That is the wrong shape for the fact. NIST SP 800-131A Rev.2 Table 5 keeps
+  # AES-128 ACCEPTABLE while NIST IR 8547 Sec. 3 halves it to ~64 bits against
+  # Grover; both are true, and which governs depends on the data lifetime.
+  # `policy/packs/symmetric.yaml` scores it against x_years the way the mosca
+  # pack scores the asymmetric side.
+  #
+  # They are MOVED rather than duplicated: leaving them here would have made
+  # every AES-128 finding score twice, once flat and once by context, and
+  # pushed a key-size item into the same band as a Shor-broken one.
 
   # ------------------------------------------------------------------
   # Adequate under Grover. Detected so the inventory shows what is already

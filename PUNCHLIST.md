@@ -6,13 +6,31 @@
   used verbatim as the CycloneDX `bom-ref`. Determinism is pinned by
   `tests/golden/quantumbank.cbom.json` and gated by `make validate`.
   See [ADR-0002](docs/adr/0002-cbom-normaliser.md).
-- **`params` is an untyped `dict`.** `key_size`, `curve`, `mode`, `padding`,
-  `version`, `valid_to` and friends are unvalidated at the schema layer; a
-  scanner can write `keysize` or `"2048"` and nothing complains. Because params
-  are identifying, `key_size: 2048` and `key_size: "2048"` currently hash to
-  two different artefacts. Per-algorithm parameter schemas belong with the
-  knowledge packs.
-  *Raised: Phase 0, core schema slice.*
+- ~~**`params` is an untyped `dict`.**~~ **Resolved for the hash split** by
+  [ADR-0029](docs/adr/0029-typed-params-symmetric-scoring.md). `core/params.py`
+  is the one place that says what a known param IS -- ten keys, each with its
+  coercion and the REASON it has that type -- and the coercion runs inside
+  `finding_identity`, so `key_size: 2048` and `key_size: "2048"` produce one
+  bom-ref. `prime256v1`, `secp256r1` and `P-256` likewise become one curve.
+  An UNKNOWN param passes through unchanged, and a value that will not coerce
+  is left as written rather than dropped -- `key_size: "unknown"` is a real
+  report.
+  **Still owed:** the table is MANUAL. A param that ought to be typed and is
+  not listed passes through untyped, silently, and nothing detects the
+  omission. Per-algorithm parameter SCHEMAS -- which params an algorithm may
+  carry at all, and validation at the schema layer rather than coercion at the
+  normaliser -- are still the larger unbuilt thing, and still belong with the
+  knowledge packs. The curve alias table is finite too: an unrecognised curve
+  keeps its spelling, so two spellings of a curve nobody listed still split.
+  *Raised: Phase 0, core schema slice. Hash split resolved: typed-params
+  slice.*
+- **Stored scans' component IDs may shift after ADR-0029.** Canonicalising a
+  param changes the bom-ref of any artefact whose params were non-canonical, so
+  re-scoring an old stored scan can produce different ids from the run that
+  stored it. Accepted rather than migrated -- stored-scan continuity is not
+  relied on anywhere -- but nothing rewrites the old ids, and a report that
+  cross-referenced two scans by bom-ref across that boundary would not join.
+  *Raised: typed-params slice.*
 - **"No secret key material in `snippet`" is enforced for Python source only.**
   **Partially resolved** in the Scanner A slice. `scanners/source` scrubs every
   snippet twice: a rule that matches key material declares `redact: true` and
@@ -881,9 +899,29 @@
   anything that must stay confidential past 2035 -- and the POLICY engine
   already scores key size against the data class. A rule flagging it
   unconditionally would assert the conditional half as a fact and duplicate the
-  scorer. If the policy engine turns out not to score symmetric key size
-  against `x_years`, that is the gap to close, in `policy/`, not here.
-  *Raised: Java rule-pack slice.*
+  scorer. **That gap is now closed**: `policy/packs/symmetric.yaml`
+  ([ADR-0029](docs/adr/0029-typed-params-symmetric-scoring.md)) scores
+  symmetric key length against `x_years` the way mosca scores the asymmetric
+  side -- 0 for data with a sub-10-year life, 25 for 25 years or more, and 12
+  where nobody has classified the system. So the Java rule was right to report
+  and not flag.
+  *Raised: Java rule-pack slice. Scorer gap closed: symmetric-scoring slice.*
+- **`x_years` comes from the data class, and most targets do not set one.** In
+  practice `symmetric-grover-weakened-lifetime-unknown` will be the rule that
+  fires most often until systems are classified -- the honest outcome, and not
+  a satisfying one. The same is true of the mosca pack's own unknown-lifetime
+  rule; what would move both is making the data class a required input on a
+  system manifest rather than an optional one.
+  *Raised: symmetric-scoring slice.*
+- **The symmetric lifetime thresholds are ECDAT's judgement, not a standard.**
+  25 years as "long-lived" lines up with the `Personal` data class and with
+  published CRQC estimates; no document says 25. The Grover halving and the
+  SP 800-131A "acceptable" status are cited and verified; where the boundary
+  between them falls is a decision this project made and should say so.
+  Separately, the pack's two rule families -- one selecting on `key_size`, one
+  on algorithm NAMES that carry their size -- must be kept in step by hand, and
+  a verdict added to one and not the other applies to half the estate.
+  *Raised: symmetric-scoring slice.*
 - **The Java pack is 32 rules, not the JCA surface.** Unmatched:
   `SecretKeyFactory` / PBKDF2 iteration counts, `KeyStore` types (JKS vs
   PKCS12), `SSLParameters` cipher-suite lists, explicit JCA provider selection,

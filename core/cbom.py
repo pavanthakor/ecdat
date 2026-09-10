@@ -46,6 +46,7 @@ from cyclonedx.model.crypto import (
 )
 
 from core.identity import finding_identity
+from core.params import canonicalise_params
 from core.scanner import Target
 from core.schema import AssetType, Evidence, Finding, Occurrence, Primitive, Usage
 
@@ -230,9 +231,23 @@ def _merge(identity: str, group: Sequence[Finding]) -> _Group:
     )
 
 
+def _canonical(finding: Finding) -> Finding:
+    """The same finding with its params in canonical form (ADR-0029)."""
+    canonical = canonicalise_params(finding.params)
+    if canonical == finding.params:
+        return finding
+    return finding.model_copy(update={"params": canonical})
+
+
 def _group_findings(findings: Iterable[Finding], target: Target) -> list[_Group]:
     grouped: dict[str, list[Finding]] = {}
-    for finding in findings:
+    for reported in findings:
+        # Canonicalise params BEFORE the identity hash (ADR-0029). params are
+        # identifying, so `key_size: 2048` and `key_size: "2048"` -- the same
+        # RSA-2048 reported by two scanners that disagreed about a type -- would
+        # otherwise hash to two components. `core/params.py` is the one place
+        # that says what a known param is; an unknown one passes through.
+        finding = _canonical(reported)
         grouped.setdefault(finding_identity(finding, target), []).append(finding)
     # Sorting by identity is what makes the output independent of input order.
     return [_merge(identity, grouped[identity]) for identity in sorted(grouped)]

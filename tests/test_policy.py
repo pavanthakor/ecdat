@@ -219,18 +219,52 @@ def test_every_shor_broken_family_is_covered(algorithm: str, packs: list[Pack]) 
 
 
 def test_aes_128_is_grover_weakened(packs: list[Pack]) -> None:
+    """Still weakened -- but scored by the symmetric pack since ADR-0029.
+
+    The verdict moved from a flat 20 in `quantum` to a lifetime-scaled score in
+    `symmetric`. With no data class supplied there is no lifetime to scale by,
+    so the middle of the range is what an unclassified system gets: reported,
+    not assumed either way.
+    """
     verdict = evaluate(
         component("AES-128", params={"key_size": 128}, nist_level=1), packs
     )
 
     assert verdict.quantum_status == "weakened"
-    assert verdict.score == 20
+    assert verdict.categories["symmetric"] == 12
+    assert "data-lifetime-unknown" in verdict.labels
     assert verdict.band == "Low"
 
 
-def test_triple_des_is_grover_weakened(packs: list[Pack]) -> None:
+def test_aes_128_is_weakened_even_without_an_explicit_key_size(
+    packs: list[Pack],
+) -> None:
+    """`AES-128` on its own keeps its NAME and has no key_size fact at all.
+
+    The engine only splits the size out of the name when a key_size param is
+    also present, so a rule written against `key_size` alone would miss every
+    component named this way -- which is how a TLS suite, a package string and
+    a binary symbol all spell it.
+    """
+    verdict = evaluate(component("AES-128"), packs)
+    assert verdict.quantum_status == "weakened"
+    assert verdict.categories["symmetric"] == 12
+
+
+def test_triple_des_is_scored_as_a_legacy_cipher_not_a_grover_case(
+    packs: list[Pack],
+) -> None:
+    """3DES is CLASSICALLY broken, and ADR-0029 stopped calling it Grover.
+
+    Sweet32 exploits the 64-bit block and works today; a shorter data lifetime
+    does not make a 64-bit block bigger. So unlike AES-128 it is not scaled by
+    lifetime, and its label says `classically-broken` rather than
+    `grover-weakened`.
+    """
     verdict = evaluate(component("3DES"), packs)
-    assert verdict.score == 20
+    assert verdict.categories["symmetric"] == 25
+    assert "classically-broken" in verdict.labels
+    assert "grover-weakened" not in verdict.labels
 
 
 def test_aes_256_is_adequate(packs: list[Pack]) -> None:
@@ -533,6 +567,7 @@ def test_the_shipped_packs_are_signed_and_load_in_production_mode() -> None:
         "mosca",
         "nist_ir8547",
         "quantum",
+        "symmetric",
     ]
 
 
@@ -655,4 +690,5 @@ def test_default_packs_loads_every_shipped_pack() -> None:
         "mosca",
         "nist_ir8547",
         "quantum",
+        "symmetric",
     ]

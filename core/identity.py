@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 from hashlib import blake2b
 
+from core.params import canonicalise_params
 from core.scanner import Target
 from core.schema import Finding, View
 
@@ -100,13 +101,22 @@ def artefact_locus(finding: Finding, target: Target) -> str:
 
 
 def finding_identity(finding: Finding, target: Target) -> str:
-    """A stable content hash of what this finding claims to have found."""
+    """A stable content hash of what this finding claims to have found.
+
+    Params are canonicalised first (ADR-0029). They are identifying, so two
+    scanners that disagree about a TYPE disagree about the artefact:
+    ``key_size: 2048`` and ``key_size: "2048"`` are one RSA-2048 and must hash
+    to one bom-ref. The coercion lives here rather than in the CBOM builder
+    because this function is the single chokepoint -- the fix-it engine
+    fingerprints findings through it too, and a split there would make a
+    verified fix fail to match itself across the sandbox boundary.
+    """
     canonical = json.dumps(
         {
             "algorithm": finding.algorithm,
             "asset_type": finding.asset_type,
             "locus": artefact_locus(finding, target),
-            "params": finding.params,
+            "params": canonicalise_params(finding.params),
             "primitive": finding.primitive,
             "usage": finding.usage,
         },

@@ -46,8 +46,16 @@ from policy.engine import (
 PACK_DIR = Path("policy/packs")
 DEV_PRIVATE_KEY = Path("policy/keys/dev/pack-signing.key")
 
-EXPECTED_PACKS = ["india_dst", "mosca", "nist_ir8547", "quantum"]
-EXPECTED_CAPS = {"quantum": 40, "mosca": 30, "criticality": 20, "exposure": 10}
+EXPECTED_PACKS = ["india_dst", "mosca", "nist_ir8547", "quantum", "symmetric"]
+#: `symmetric` joined in ADR-0029: a 25 cap, below quantum and mosca, because
+#: a key that is merely SHORT is not a key that is BROKEN.
+EXPECTED_CAPS = {
+    "quantum": 40,
+    "mosca": 30,
+    "symmetric": 25,
+    "criticality": 20,
+    "exposure": 10,
+}
 
 
 @pytest.fixture(scope="module")
@@ -82,6 +90,25 @@ def rsa_component(*, configurable: bool = False) -> dict[str, Any]:
             },
             {"name": "ecdat:param:key_size", "value": "2048"},
             {"name": "ecdat:usage", "value": "unknown"},
+            {"name": "ecdat:view", "value": "declared"},
+        ],
+    }
+
+
+def aes_component(key_size: int) -> dict[str, Any]:
+    """An AES component exactly as the normaliser emits one."""
+    return {
+        "bom-ref": f"ref-aes-{key_size}",
+        "name": f"AES-{key_size}",
+        "type": "cryptographic-asset",
+        "cryptoProperties": {
+            "assetType": "algorithm",
+            "algorithmProperties": {"primitive": "block-cipher"},
+        },
+        "properties": [
+            {"name": "ecdat:asset_type", "value": "algorithm"},
+            {"name": "ecdat:param:key_size", "value": str(key_size)},
+            {"name": "ecdat:usage", "value": "encrypt"},
             {"name": "ecdat:view", "value": "declared"},
         ],
     }
@@ -179,7 +206,13 @@ def test_the_same_algorithm_is_critical_or_medium_by_context(
     assert one(sheltered, "ecdat:quantum_status") == "broken"
 
 
-def test_the_critical_case_fires_rules_from_all_four_packs(
+#: The packs that have something to say about an ASYMMETRIC finding. The
+#: symmetric pack is absent by design: it scores key length for block and
+#: stream ciphers, and an RSA key is neither.
+PACKS_APPLYING_TO_RSA = ["india_dst", "mosca", "nist_ir8547", "quantum"]
+
+
+def test_the_critical_case_fires_rules_from_every_applicable_pack(
     packs: list[Pack],
 ) -> None:
     exposed = score(
@@ -192,8 +225,13 @@ def test_the_critical_case_fires_rules_from_all_four_packs(
     fired = one(exposed, "ecdat:fired_rules").split(",")
 
     by_pack = {pack.name: [r.id for r in pack.rules if r.id in fired] for pack in packs}
-    for name in EXPECTED_PACKS:
+    for name in PACKS_APPLYING_TO_RSA:
         assert by_pack[name], f"no rule from pack {name!r} fired; got {fired}"
+    fired_symmetric = by_pack["symmetric"]
+    assert not fired_symmetric, (
+        "the symmetric pack fired on an RSA component; it scores block and "
+        f"stream cipher key length and has nothing to say: {fired_symmetric}"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -516,9 +554,16 @@ def test_exposure_contribution(packs: list[Pack], exposure: str, expected: int) 
 # --------------------------------------------------------------------------
 
 
-def test_all_four_categories_appear_in_the_category_score(
+def test_every_category_that_fires_is_reported_and_capped(
     packs: list[Pack],
 ) -> None:
+    """A category appears when one of its rules fires, and never exceeds its cap.
+
+    `symmetric` is deliberately ABSENT here and that is the point: this is an
+    RSA component, and a pack about symmetric key length has nothing to say
+    about it. A category that appeared with a zero on every component would
+    make "assessed and fine" indistinguishable from "not applicable".
+    """
     properties = score(
         packs,
         rsa_component(),
@@ -528,9 +573,25 @@ def test_all_four_categories_appear_in_the_category_score(
     )
     subtotals = dict(entry.split("=") for entry in properties["ecdat:category_score"])
 
-    assert set(subtotals) == set(EXPECTED_CAPS)
+    assert set(subtotals) == {"quantum", "mosca", "criticality", "exposure"}
+    assert "symmetric" not in subtotals
     for category, value in subtotals.items():
         assert int(value) <= EXPECTED_CAPS[category], f"{category} exceeded its cap"
+
+
+def test_the_symmetric_category_appears_for_a_symmetric_component(
+    packs: list[Pack],
+) -> None:
+    """The counterpart: it DOES appear where it has something to say."""
+    properties = score(
+        packs,
+        aes_component(128),
+        data_class="Sovereign",
+        sector="bfsi",
+        exposure="internet",
+    )
+    subtotals = dict(entry.split("=") for entry in properties["ecdat:category_score"])
+    assert int(subtotals["symmetric"]) > 0
 
 
 def test_each_pack_declares_the_expected_cap(packs: list[Pack]) -> None:
@@ -666,7 +727,7 @@ def test_a_pack_cannot_widen_another_packs_cap(packs: list[Pack]) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_all_four_packs_load_signed(packs: list[Pack]) -> None:
+def test_every_shipped_pack_loads_signed(packs: list[Pack]) -> None:
     assert sorted(p.name for p in packs) == EXPECTED_PACKS
 
 

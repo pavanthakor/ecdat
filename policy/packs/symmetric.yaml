@@ -1,0 +1,366 @@
+# ECDAT symmetric-strength pack.
+#
+# The asymmetric family has always been scored properly: RSA and ECC are
+# Shor-broken at any key size (the quantum pack), and Mosca's inequality turns
+# "broken eventually" into "urgent here" (the mosca pack). Symmetric ciphers
+# got a flat number -- AES-128 scored the same whether it protected a session
+# cookie for an hour or a citizen's health record for fifty years.
+#
+# That is the wrong SHAPE for the fact. Two published statements are both true:
+#
+#   NIST SP 800-131A Rev.2 Table 5  -- AES-128 is ACCEPTABLE. Not deprecated,
+#                                      not disallowed.
+#   NIST IR 8547 ipd Sec. 3         -- Grover halves the effective key
+#                                      strength, so AES-128 retains roughly
+#                                      64 bits against a quantum adversary.
+#
+# Which one governs depends entirely on how long the data must stay secret --
+# the same `x` Mosca's inequality already uses for the asymmetric case. A
+# secret that is worthless in three years is not threatened by a machine that
+# does not exist yet; a secret that must hold for fifty is.
+#
+# So this pack scores symmetric strength the way the asymmetric side is scored:
+# SAME ALGORITHM, DIFFERENT CONTEXT, DIFFERENT NUMBER. It is the second pack
+# (after mosca) whose contribution depends on the organisation rather than on
+# the cryptography, and it is deliberately separate from `quantum` so the
+# physics and the context can be reviewed apart.
+#
+# IT READS THE TYPED key_size. `key_size: {max: 128}` is a numeric comparison
+# and cannot work against the string "128" -- which is why ADR-0029's Part A
+# (canonical param types, applied before the identity hash) comes first. The
+# connection is asserted in tests/test_symmetric_scoring.py rather than left as
+# a claim here.
+#
+# CAP 25. Below quantum's 40 and mosca's 30: a key that is merely SHORT is not
+# a key that is BROKEN, and an AES-128 finding must never reach the same band
+# as a Shor-broken one. An operator who saw "use a longer key" scored as
+# Critical would stop believing the bands.
+pack: symmetric
+version: 1
+citation: >-
+  NIST SP 800-131A Rev.2, "Transitioning the Use of Cryptographic Algorithms
+  and Key Lengths" (March 2019), Table 5; NIST IR 8547 ipd, "Transition to
+  Post-Quantum Cryptography Standards" (November 2024), Sec. 3; FIPS 197 (AES);
+  NSA CNSA 2.0 (2022) for the AES-256 requirement on national security systems;
+  CVE-2016-2183 (Sweet32) for the 64-bit block attack.
+
+caps:
+  symmetric: 25
+
+rules:
+  # ------------------------------------------------------------------
+  # AES-128 and friends: the CONDITIONAL case. Scored by data lifetime.
+  #
+  # The thresholds are the data-class boundaries from
+  # knowledge/data_classes.yaml, so the bands a reader already knows
+  # (Internal 3, Confidential 10, Personal 25, Sovereign 50) line up with the
+  # verdicts here rather than introducing a second, invisible scale.
+  # ------------------------------------------------------------------
+  - id: symmetric-grover-weakened-long-lived
+    when:
+      key_size:
+        max: 128
+      algorithm:
+        in: [AES, Camellia, ARIA, SEED, CAST, CAST5, RC5, IDEA]
+      x_years:
+        min: 25
+    effect:
+      score: 25
+      category: symmetric
+      quantum_status: weakened
+      labels: [grover-weakened, long-lived-data]
+      deadline: 2030-01-01
+      action: >-
+        Move to a 256-bit key (AES-256). This data must stay secret for 25
+        years or more, which is inside the window where Grover's halving
+        matters: a 128-bit key retains roughly 64 bits against a quantum
+        adversary, and harvest-now-decrypt-later means the ciphertext can be
+        collected today and attacked later. This is a key-size change, not an
+        algorithm change -- the cipher itself is fine.
+    citation: >-
+      NIST IR 8547 ipd Sec. 3: Grover reduces symmetric effective strength by
+      half, leaving AES-128 at roughly 64 bits. NSA CNSA 2.0 requires AES-256
+      for national security systems precisely because of the long confidentiality
+      horizon.
+    verified: true
+    source: >-
+      NIST IR 8547 ipd (initial public draft, November 2024) Sec. 3 for the
+      Grover halving; NSA CNSA 2.0 (September 2022) for the AES-256
+      requirement; FIPS 197 for the AES key sizes. Confirmed against the
+      published documents.
+
+  - id: symmetric-grover-weakened-medium-lived
+    when:
+      key_size:
+        max: 128
+      algorithm:
+        in: [AES, Camellia, ARIA, SEED, CAST, CAST5, RC5, IDEA]
+      x_years:
+        min: 10
+        max: 24
+    effect:
+      score: 12
+      category: symmetric
+      quantum_status: weakened
+      labels: [grover-weakened]
+      deadline: 2035-01-01
+      action: >-
+        Plan a move to AES-256 at the next scheduled change. This data has a
+        10-to-25-year life, which straddles the CRQC estimates rather than
+        sitting clearly inside or outside them -- so this is a planning item,
+        not an emergency.
+    citation: >-
+      NIST IR 8547 ipd Sec. 3 (Grover halving) read against NIST SP 800-131A
+      Rev.2 Table 5, which keeps AES-128 ACCEPTABLE: the standard does not
+      prohibit it, so the urgency comes from the data lifetime rather than from
+      the algorithm's status.
+    verified: true
+    source: >-
+      NIST SP 800-131A Rev.2 (March 2019) Table 5 for the acceptable status;
+      NIST IR 8547 ipd Sec. 3 for the halving. Confirmed against the published
+      documents.
+
+  - id: symmetric-adequate-for-short-lived-data
+    when:
+      key_size:
+        max: 128
+      algorithm:
+        in: [AES, Camellia, ARIA, SEED, CAST, CAST5, RC5, IDEA]
+      x_years:
+        max: 9
+    effect:
+      score: 0
+      category: symmetric
+      labels: [acceptable-for-lifetime]
+      action: >-
+        No action. AES-128 is an ACCEPTABLE key length (NIST SP 800-131A Rev.2
+        Table 5), and this data's confidentiality horizon is under ten years --
+        shorter than any published CRQC estimate. Recorded so the inventory
+        shows the key size was assessed rather than overlooked.
+    citation: >-
+      NIST SP 800-131A Rev.2 Table 5: AES-128 is acceptable. Scoring it as a
+      defect regardless of context would make every short-lived secret look
+      like a migration item and bury the ones that are.
+    verified: true
+    source: >-
+      NIST SP 800-131A Rev.2 (March 2019) Table 5. Confirmed against the
+      published document.
+
+  # ------------------------------------------------------------------
+  # THE SAME FOUR VERDICTS, selected by ALGORITHM NAME.
+  #
+  # A key size reaches this engine two ways. Some scanners report
+  # `algorithm: AES, key_size: 128` -- the source scanner, from
+  # `AES.new(key, ...)` with a captured size. Others report the size IN the
+  # name: `algorithm: AES-128`, which is how a TLS cipher suite, a container
+  # package string and a binary symbol all spell it.
+  #
+  # Both shapes genuinely occur, and the engine's own normalisation decides
+  # which: `AES-128` carrying an explicit key_size param normalises to
+  # `algorithm: AES, key_size: 128` and is matched above, while `AES-128` on
+  # its own keeps its name and has no key_size at all. Measured, not assumed --
+  # see the note in ADR-0029.
+  #
+  # So each verdict is stated once more against the names that carry their size
+  # in the name. The pair must be kept in step; where both match, the category
+  # cap makes the double contribution harmless.
+  # ------------------------------------------------------------------
+  - id: symmetric-grover-weakened-long-lived-by-name
+    when:
+      algorithm:
+        in: [AES-128, Camellia-128, ARIA-128, SEED, CAST-128]
+      x_years:
+        min: 25
+    effect:
+      score: 25
+      category: symmetric
+      quantum_status: weakened
+      labels: [grover-weakened, long-lived-data]
+      deadline: 2030-01-01
+      action: >-
+        Move to a 256-bit key (AES-256). This data must stay secret for 25
+        years or more, which is inside the window where Grover's halving
+        matters. A key-size change, not an algorithm change.
+    citation: >-
+      NIST IR 8547 ipd Sec. 3 (Grover halving); NSA CNSA 2.0 requires AES-256
+      where the confidentiality horizon is long.
+    verified: true
+    source: >-
+      NIST IR 8547 ipd (November 2024) Sec. 3; NSA CNSA 2.0 (September 2022).
+      Confirmed against the published documents.
+
+  - id: symmetric-grover-weakened-medium-lived-by-name
+    when:
+      algorithm:
+        in: [AES-128, Camellia-128, ARIA-128, SEED, CAST-128]
+      x_years:
+        min: 10
+        max: 24
+    effect:
+      score: 12
+      category: symmetric
+      quantum_status: weakened
+      labels: [grover-weakened]
+      deadline: 2035-01-01
+      action: >-
+        Plan a move to a 256-bit key at the next scheduled change. This data's
+        10-to-25-year life straddles the CRQC estimates rather than sitting
+        clearly inside or outside them.
+    citation: >-
+      NIST IR 8547 ipd Sec. 3 read against NIST SP 800-131A Rev.2 Table 5,
+      which keeps 128-bit keys ACCEPTABLE.
+    verified: true
+    source: >-
+      NIST SP 800-131A Rev.2 (March 2019) Table 5; NIST IR 8547 ipd (November
+      2024) Sec. 3. Confirmed against the published documents.
+
+  - id: symmetric-adequate-for-short-lived-data-by-name
+    when:
+      algorithm:
+        in: [AES-128, Camellia-128, ARIA-128, SEED, CAST-128]
+      x_years:
+        max: 9
+    effect:
+      score: 0
+      category: symmetric
+      labels: [acceptable-for-lifetime]
+      action: >-
+        No action. A 128-bit key is an ACCEPTABLE length (NIST SP 800-131A
+        Rev.2 Table 5) and this data's horizon is under ten years. Recorded so
+        the inventory shows the key size was assessed rather than overlooked.
+    citation: >-
+      NIST SP 800-131A Rev.2 Table 5: 128-bit keys are acceptable. Scoring one
+      as a defect regardless of context would bury the findings that matter.
+    verified: true
+    source: >-
+      NIST SP 800-131A Rev.2 (March 2019) Table 5. Confirmed against the
+      published document.
+
+  - id: symmetric-grover-weakened-lifetime-unknown-by-name
+    when:
+      algorithm:
+        in: [AES-128, Camellia-128, ARIA-128, SEED, CAST-128]
+      x_years:
+        present: false
+    effect:
+      score: 12
+      category: symmetric
+      quantum_status: weakened
+      labels: [grover-weakened, data-lifetime-unknown]
+      deadline: 2035-01-01
+      action: >-
+        Classify this system's data, then re-score. A 128-bit key retains
+        roughly 64 bits against Grover, and whether that matters depends on a
+        data lifetime nobody has recorded here.
+    citation: >-
+      NIST IR 8547 ipd Sec. 3; NIST SP 800-131A Rev.2 Table 5. With no lifetime
+      recorded neither statement can be preferred, so the verdict says so.
+    verified: true
+    source: >-
+      NIST IR 8547 ipd (November 2024) Sec. 3; NIST SP 800-131A Rev.2 (March
+      2019) Table 5. Confirmed against the published documents.
+
+  # ------------------------------------------------------------------
+  # UNKNOWN IS NOT ZERO.
+  #
+  # Every rule above is gated on x_years, so a system nobody has classified
+  # would fall through all of them and get no symmetric verdict at all -- which
+  # is worse than the flat rule this pack replaced, because it looks like a
+  # clean result. A system nobody has assessed is a system nobody has assessed;
+  # the weakening is reported, the urgency is not claimed, and the label says
+  # which is which. Same principle as the mosca pack's own honesty rule.
+  # ------------------------------------------------------------------
+  - id: symmetric-grover-weakened-lifetime-unknown
+    when:
+      key_size:
+        max: 128
+      algorithm:
+        in: [AES, Camellia, ARIA, SEED, CAST, CAST5, RC5, IDEA]
+      x_years:
+        present: false
+    effect:
+      score: 12
+      category: symmetric
+      quantum_status: weakened
+      labels: [grover-weakened, data-lifetime-unknown]
+      deadline: 2035-01-01
+      action: >-
+        Classify this system's data, then re-score. A 128-bit key retains
+        roughly 64 bits against Grover, and whether that matters depends
+        entirely on how long the data must stay secret -- which nobody has
+        recorded here. Scored at the middle of the range rather than at either
+        end: assuming a short life would hide a real exposure, and assuming a
+        long one would manufacture urgency the organisation has not claimed.
+    citation: >-
+      NIST IR 8547 ipd Sec. 3 for the Grover halving; NIST SP 800-131A Rev.2
+      Table 5 keeps AES-128 acceptable. With no data lifetime recorded, neither
+      statement can be preferred, so the verdict says so rather than picking.
+    verified: true
+    source: >-
+      NIST IR 8547 ipd (November 2024) Sec. 3; NIST SP 800-131A Rev.2 (March
+      2019) Table 5. Confirmed against the published documents.
+
+  # ------------------------------------------------------------------
+  # 3DES: NOT a Grover question, and NOT conditional.
+  #
+  # A short data lifetime does not make a 64-bit block bigger. Sweet32 is a
+  # birthday attack on the block size and works today, so these score the same
+  # in every context -- which is what makes the AES-128 rules above meaningful
+  # rather than a general discount on symmetric findings.
+  # ------------------------------------------------------------------
+  # DES, RC4, RC2 and Blowfish are DELIBERATELY ABSENT: the quantum pack's
+  # `quantum-classically-broken` already scores them 40 as live defects, and
+  # listing them here would score one fact twice and push a single broken
+  # cipher to 65. Only the 3DES family is here, because that is what left the
+  # quantum pack when the flat Grover rule did.
+  - id: symmetric-legacy-block-cipher
+    when:
+      algorithm:
+        in: [3DES, TripleDES, DESede]
+    effect:
+      score: 25
+      category: symmetric
+      labels: [legacy-cipher, classically-broken]
+      deadline: 2023-01-01
+      action: >-
+        Replace with AES-256-GCM. This is not a quantum item and does not wait
+        for a migration deadline: the 64-bit block makes Sweet32
+        (CVE-2016-2183) practical on any long-lived connection regardless of
+        key length, and three-key TDEA has been disallowed for encryption since
+        2023.
+    citation: >-
+      NIST SP 800-131A Rev.2 Table 5 disallows three-key TDEA for encryption
+      after 2023; CVE-2016-2183 (Sweet32) exploits the 64-bit block of 3DES and
+      Blowfish; RFC 7465 prohibits RC4 in TLS.
+    verified: true
+    source: >-
+      NIST SP 800-131A Rev.2 (March 2019) Table 5; Bhargavan and Leurent,
+      "On the Practical (In-)Security of 64-bit Block Ciphers" (CCS 2016) for
+      Sweet32; RFC 7465 (February 2015). Confirmed against the published
+      documents.
+
+  # ------------------------------------------------------------------
+  # Adequate. Inventoried so coverage is visible, scored at zero so a correct
+  # choice never adds to a risk total.
+  # ------------------------------------------------------------------
+  - id: symmetric-adequate-key-size
+    when:
+      key_size:
+        min: 256
+      algorithm:
+        in: [AES, Camellia, ARIA, SEED, CAST, CAST5, RC5, IDEA]
+    effect:
+      score: 0
+      category: symmetric
+      labels: [quantum-adequate]
+      action: >-
+        No action. A 256-bit key retains roughly 128 bits after Grover, which
+        is the target margin, and is what CNSA 2.0 requires for data that must
+        stay confidential past 2035.
+    citation: >-
+      NIST IR 8547 ipd Sec. 3 and Table 2; NSA CNSA 2.0 requires AES-256.
+      Grover's halving leaves a 256-bit key at roughly 128 bits.
+    verified: true
+    source: >-
+      NIST IR 8547 ipd (November 2024) Sec. 3; NSA CNSA 2.0 (September 2022).
+      Confirmed against the published documents.
