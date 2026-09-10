@@ -37,6 +37,11 @@ class PackAnswers:
         self.root = root
         with (root / "answer_key.yaml").open(encoding="utf-8") as handle:
             document: dict[str, Any] = yaml.safe_load(handle)
+        #: The whole document, for the sections only some packs carry --
+        #: `known_limits` records behaviour a pack MEASURED and cannot do, and
+        #: is read directly rather than through a typed field because not every
+        #: pack has one.
+        self.raw: dict[str, Any] = document
         self.expected: dict[str, list[dict[str, Any]]] = document["expected"]
         self.sentinels: list[str] = document["secret_sentinels"]
 

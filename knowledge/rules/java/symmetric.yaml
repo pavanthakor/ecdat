@@ -48,12 +48,34 @@ rules:
         AES-256 retains ~128-bit security; CNSA 2.0 requires AES-256 for data
         that must stay confidential past 2035. Recorded as a CONTROL.
       flags: [symmetric, control]
-    patterns:
-      - pattern: Cipher.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"AES(_\d+)?/GCM/
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "AES/GCM/NoPadding"` followed by `Cipher.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"AES/GCM/NoPadding"'
+                - pattern: '"AES/GCM/PKCS5Padding"'
+                - pattern: '"AES_128/GCM/NoPadding"'
+                - pattern: '"AES_256/GCM/NoPadding"'
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"AES(_\d+)?/GCM/
   - id: java-cipher-aes-cbc
     languages: [java]
     severity: WARNING
@@ -74,12 +96,35 @@ rules:
         2002), and `PKCS5Padding` with no MAC is the exact shape that attack
         needs. Prefer AES-256-GCM (NIST SP 800-38D).
       flags: [symmetric]
-    patterns:
-      - pattern: Cipher.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"AES(_\d+)?/CBC/
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "AES/CBC/PKCS5Padding"` followed by `Cipher.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"AES/CBC/PKCS5Padding"'
+                - pattern: '"AES/CBC/NoPadding"'
+                - pattern: '"AES/CBC/PKCS7Padding"'
+                - pattern: '"AES_128/CBC/NoPadding"'
+                - pattern: '"AES_256/CBC/NoPadding"'
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"AES(_\d+)?/CBC/
   - id: java-cipher-aes-ecb
     languages: [java]
     severity: ERROR
@@ -103,12 +148,34 @@ rules:
       flags: [symmetric, weak]
       mode_flags:
         ECB: "identical plaintext blocks leak as identical ciphertext blocks"
-    patterns:
-      - pattern: Cipher.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"AES(_\d+)?(/ECB/|")
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "AES/ECB/PKCS5Padding"` followed by `Cipher.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"AES"'
+                - pattern: '"AES/ECB/PKCS5Padding"'
+                - pattern: '"AES/ECB/NoPadding"'
+                - pattern: '"AES/ECB/PKCS7Padding"'
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"AES(_\d+)?(/ECB/|")
   - id: java-cipher-des
     languages: [java]
     severity: ERROR
@@ -126,12 +193,34 @@ rules:
         irrelevant -- this is already broken. Replace with AES-256-GCM
         (FIPS 197 with NIST SP 800-38D).
       flags: [weak, symmetric, critical]
-    patterns:
-      - pattern: Cipher.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"DES(/|")
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "DES/CBC/PKCS5Padding"` followed by `Cipher.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"DES"'
+                - pattern: '"DES/CBC/PKCS5Padding"'
+                - pattern: '"DES/ECB/PKCS5Padding"'
+                - pattern: '"DES/CBC/NoPadding"'
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"DES(/|")
   - id: java-cipher-3des
     languages: [java]
     severity: WARNING
@@ -149,12 +238,34 @@ rules:
         long-lived connections regardless of key length. Already retired;
         quantum is not the argument. Replace with AES-256-GCM (FIPS 197).
       flags: [weak, symmetric]
-    patterns:
-      - pattern: Cipher.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"DESede(/|")
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "DESede/CBC/PKCS5Padding"` followed by `Cipher.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"DESede"'
+                - pattern: '"DESede/CBC/PKCS5Padding"'
+                - pattern: '"DESede/ECB/PKCS5Padding"'
+                - pattern: '"DESede/CBC/NoPadding"'
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"DESede(/|")
   - id: java-cipher-rc4
     languages: [java]
     severity: ERROR
@@ -172,12 +283,33 @@ rules:
         quantum irrelevant. Replace with AES-256-GCM (FIPS 197) or
         ChaCha20-Poly1305 (RFC 8439).
       flags: [weak, critical]
-    patterns:
-      - pattern: Cipher.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"(RC4|ARCFOUR)(/|")
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "RC4"` followed by `Cipher.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"RC4"'
+                - pattern: '"ARCFOUR"'
+                - pattern: '"RC4/ECB/NoPadding"'
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"(RC4|ARCFOUR)(/|")
   - id: java-cipher-blowfish
     languages: [java]
     severity: WARNING
@@ -196,12 +328,33 @@ rules:
         it is outside SP 800-131A entirely rather than merely deprecated.
         Replace with AES-256-GCM (FIPS 197).
       flags: [weak, symmetric]
-    patterns:
-      - pattern: Cipher.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"Blowfish(/|")
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "Blowfish/CBC/PKCS5Padding"` followed by `Cipher.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"Blowfish"'
+                - pattern: '"Blowfish/CBC/PKCS5Padding"'
+                - pattern: '"Blowfish/ECB/PKCS5Padding"'
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"Blowfish(/|")
   - id: java-keygenerator-aes
     languages: [java]
     severity: WARNING

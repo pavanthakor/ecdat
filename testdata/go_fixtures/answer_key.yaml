@@ -173,6 +173,27 @@ expected:
       asset_type: algorithm
       count: 1          # the cipher rule legitimately matches this file too
 
+  # The propagated-parameter case: the finding IS produced, the parameter is
+  # the variable's name, and confidence drops to 0.6 to say so. See
+  # `known_limits` below -- this is the honest degradation, not a miss.
+  must_fire/go_propagated_params.go:
+    - rule_id: go-ecdsa-keygen
+      algorithm: ECDSA
+      primitive: signature
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - curve: curve
+    - rule_id: go-tls-minversion
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      count: 1
+      params_any:
+        - version: version
+
   must_fire/go_pem_certificate.go:
     - rule_id: go-pem-block
       algorithm: unknown
@@ -195,3 +216,20 @@ secret_sentinels:
   - GOSECRETSENTINEL
   - GONOTAREALKEY
   - GONOTAREALCERT
+
+# Measured in ADR-0028 STEP 0. Go's crypto API classifies algorithms with
+# ATTRIBUTE and FUNCTION references (elliptic.P256(), tls.VersionTLS10,
+# jwt.SigningMethodRS256), never strings -- and OSS const-prop follows strings
+# only. So Go gets no const-prop conversion: there is no string to propagate.
+# NOT a decoy; a decoy should stay silent and this should not.
+known_limits:
+  - fixture: must_fire/go_propagated_params.go
+    missed: the curve and version PARAMETER values, not the findings
+    why: >-
+      `curve := elliptic.P384()` and `version := uint16(tls.VersionTLS10)` are
+      attribute/function references held in variables, and OSS const-prop
+      follows strings only. The rules still FIRE -- they capture without a
+      regex constraint -- so what is lost is the parameter: `curve: "curve"`
+      rather than `curve: "P384"`. The scanner marks that honestly on its own,
+      at confidence 0.6 and configurable=true, because the shape heuristic
+      reads a lower-case bare name as unresolved. Resolving it needs Pro.

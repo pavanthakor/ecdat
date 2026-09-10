@@ -37,12 +37,35 @@ rules:
         Fix the digest first (SHA-256, FIPS 180-4), then migrate the signature
         itself to ML-DSA (FIPS 204) before 2035 (NIST IR 8547).
       flags: [weak, quantum-vulnerable, critical]
-    patterns:
-      - pattern: Signature.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"(SHA1|SHA-1|MD5|MD2)with
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "SHA1withRSA"` followed by `Signature.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Signature.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"SHA1withRSA"'
+                - pattern: '"SHA-1withRSA"'
+                - pattern: '"MD5withRSA"'
+                - pattern: '"MD2withRSA"'
+                - pattern: '"SHA1withRSAandMGF1"'
+      - patterns:
+          - pattern: Signature.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"(SHA1|SHA-1|MD5|MD2)with
   - id: java-signature-rsa
     languages: [java]
     severity: WARNING
@@ -61,12 +84,37 @@ rules:
         (NIST IR 8547). Replace with ML-DSA (FIPS 204), or a composite
         RSA+ML-DSA signature during transition.
       flags: [quantum-vulnerable]
-    patterns:
-      - pattern: Signature.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"SHA-?(224|256|384|512)with(RSA|RSAandMGF1)
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "SHA256withRSA"` followed by `Signature.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Signature.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"SHA256withRSA"'
+                - pattern: '"SHA384withRSA"'
+                - pattern: '"SHA512withRSA"'
+                - pattern: '"SHA224withRSA"'
+                - pattern: '"SHA256withRSAandMGF1"'
+                - pattern: '"SHA384withRSAandMGF1"'
+                - pattern: '"SHA512withRSAandMGF1"'
+      - patterns:
+          - pattern: Signature.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"SHA-?(224|256|384|512)with(RSA|RSAandMGF1)
   - id: java-signature-ecdsa
     languages: [java]
     severity: WARNING
@@ -84,12 +132,36 @@ rules:
         deprecated after 2030 and disallowed after 2035 (NIST IR 8547).
         Replace with ML-DSA (FIPS 204) or SLH-DSA (FIPS 205).
       flags: [quantum-vulnerable]
-    patterns:
-      - pattern: Signature.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"SHA-?(224|256|384|512)with(ECDSA|DSA)
-
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "SHA256withECDSA"` followed by `Signature.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Signature.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"SHA256withECDSA"'
+                - pattern: '"SHA384withECDSA"'
+                - pattern: '"SHA512withECDSA"'
+                - pattern: '"SHA224withECDSA"'
+                - pattern: '"SHA256withDSA"'
+                - pattern: '"SHA224withDSA"'
+      - patterns:
+          - pattern: Signature.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"SHA-?(224|256|384|512)with(ECDSA|DSA)
   - id: java-cipher-rsa
     languages: [java]
     severity: WARNING
@@ -110,8 +182,32 @@ rules:
         after 2035 (NIST IR 8547). Replace with ML-KEM (FIPS 203). Note that
         usage here is key-transport, NOT signature -- the replacement differs.
       flags: [quantum-vulnerable]
-    patterns:
-      - pattern: Cipher.getInstance($T, ...)
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^"RSA(/|")
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String transform = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"` followed by `Cipher.getInstance(transform)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-pattern:
+              metavariable: $T
+              pattern-either:
+                - pattern: '"RSA"'
+                - pattern: '"RSA/ECB/PKCS1Padding"'
+                - pattern: '"RSA/ECB/OAEPWithSHA-1AndMGF1Padding"'
+                - pattern: '"RSA/ECB/OAEPWithSHA-256AndMGF1Padding"'
+                - pattern: '"RSA/None/OAEPWithSHA-256AndMGF1Padding"'
+      - patterns:
+          - pattern: Cipher.getInstance($T, ...)
+          - metavariable-regex:
+              metavariable: $T
+              regex: ^"RSA(/|")

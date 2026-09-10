@@ -37,3 +37,20 @@ module.exports = {
   backoffJitter,
   shuffleForDisplay,
 };
+
+// A variable named like an algorithm, holding a non-crypto string. The
+// propagation-aware classification must not start matching on the NAME.
+const aes = "advanced-editing-surface";
+const md5 = "migration-doc-5";
+const signingAlgorithmLabel = "shown in the admin UI";
+
+// A JOSE algorithm no rule in this pack claims. Propagation-aware matching
+// must not become a catch-all: a rule firing here would report an algorithm
+// it has no note for.
+function signUnlisted(claims, key) {
+  const jwt = require("jsonwebtoken");
+  const alg = "EdDSA";
+  return jwt.sign(claims, key, { algorithm: alg });
+}
+
+module.exports.decoyStrings = { aes, md5, signingAlgorithmLabel, signUnlisted };

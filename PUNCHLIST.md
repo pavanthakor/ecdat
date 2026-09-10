@@ -386,13 +386,42 @@
   `True` -- a correction emitted as its own finding would have been silently
   overruled by the finding it was meant to correct.
   *Raised: Scanner A slice. Resolved (Python): dataflow slice.*
-- **Dataflow is PYTHON-ONLY.** Go, JS/TS and Java have exactly the same
-  call-site-only blind spots, and semgrep supports taint in all of them, so
-  each is an additive rule file against the shape ADR-0026 established -- a
-  configurability annotation scoped to that language's crypto sinks, an
-  assembled-key rule, and a weak-RNG-by-flow rule. Nothing was written for them
-  in this slice.
-  *Raised: dataflow slice, see [ADR-0026](docs/adr/0026-dataflow.md).*
+- ~~**Dataflow is PYTHON-ONLY.**~~ **Partly resolved** by
+  [ADR-0028](docs/adr/0028-dataflow-all-languages.md): CONST-PROP reach is now
+  general. Eleven Java rules and seven JS/TS rules carry a propagation-aware
+  `metavariable-pattern` branch, and **the `alg: none` authentication bypass
+  behind a variable is closed for JavaScript and TypeScript** (RFC 8725 s3.1) --
+  it produced no finding at all before. Go needed no conversion: its crypto API
+  classifies with attribute references throughout, so there is no string to
+  propagate.
+  *Raised: dataflow slice. Const-prop half resolved: all-languages slice.*
+- **TAINT rules are still PYTHON-ONLY.** ADR-0028 generalised constant
+  propagation and not taint. `mode: taint` works in Go, JS and Java, so the
+  three Python taint rules -- the configurability annotation, the assembled-key
+  rule and weak-RNG-by-flow -- have no counterpart in those packs. The JS one is
+  the most wanted (`Math.random()` reaching a key sink) and is more than a
+  translation: the identity-merge argument ADR-0026 made for the two Python RNG
+  rules has to be re-made for JS sinks, or the name-scoped and flow-based rules
+  double-report.
+  *Raised: all-languages slice, see
+  [ADR-0028](docs/adr/0028-dataflow-all-languages.md).*
+- **A propagated path reports the VARIABLE NAME as the captured parameter, in
+  every language.** `metavariable-pattern` constrains a binding without
+  rewriting it, so `String t = "AES/ECB/PKCS5Padding"` yields
+  `transformation: "transform"`. The CLASSIFICATION is right -- and for Java's
+  cipher rules the mode survives intact, because the mode is a rule-stated
+  constant rather than a capture -- so this costs a display detail rather than a
+  decision, and the confidence penalty makes it visible. Resolving the value
+  needs Semgrep Pro.
+  *Raised: all-languages slice.*
+- **Java's JWT auth-bypass close is NOT achievable on this build.** jjwt and
+  auth0 java-jwt both spell their algorithms as ENUM members
+  (`SignatureAlgorithm.RS256`), and OSS const-prop follows strings only --
+  measured, not assumed. So the JavaScript fix has no Java counterpart, and a
+  Java service selecting its JWT algorithm through a variable is still
+  invisible. Pinned by `testdata/java_fixtures/must_not_fire/EnumRefLimit.java`
+  with a test that FAILS if a semgrep upgrade starts catching it.
+  *Raised: all-languages slice.*
 - **Taint is INTRA-PROCEDURAL in the OSS build, so a flow through a function
   call is missed.** Measured, not assumed (ADR-0026 STEP 0): a key assembled in
   a helper and used by its caller is invisible to every taint rule here. That
@@ -423,15 +452,18 @@
   A CONTRACT TEST now fails any Python rule that classifies a value passed to a
   call using `metavariable-regex` alone, so the class of bug cannot come back.
   *Raised: dataflow slice. Resolved (Python): const-prop-reach slice.*
-- **The const-prop contract test covers PYTHON only.** Go, JS/TS and Java use
-  the same `metavariable-regex` style in several rules -- the Java pack alone
-  has it in every `Cipher.getInstance($T)` and `Signature.getInstance($T)`
-  rule -- and have the same hole: a transformation string assigned to a
-  variable and then passed is missed. The test is one glob away from covering
-  them, but those packs were not audited or rewritten in that slice, so the
-  gap is real and unmeasured outside Python.
-  *Raised: const-prop-reach slice, see
-  [ADR-0027](docs/adr/0027-const-prop-reach.md).*
+- ~~**The const-prop contract test covers PYTHON only.**~~ **Resolved** by
+  [ADR-0028](docs/adr/0028-dataflow-all-languages.md). It globs all four packs
+  and is proved to BITE in three languages by a deliberately-broken rule per
+  language. Extending it exposed a hole in the guard itself: its
+  argument-position regex omitted `:`, so it walked straight past every
+  `{algorithm: $ALG}` object-literal argument -- meaning the test written to
+  make this class of bug unrepeatable could not see its worst instance, the JS
+  `alg: none` auth bypass. With `:` added it also caught `js-tls-minversion`,
+  which nobody had listed.
+  **Still owed:** the pack list is manual, so a Rust or C# pack inherits the
+  contract only when its directory is added to `PACKS`.
+  *Raised: const-prop-reach slice. Resolved: all-languages slice.*
 - **`params` carries the VARIABLE NAME on a propagated path, not the resolved
   value.** `metavariable-pattern` constrains a binding without rewriting it, so
   a JWT algorithm selected through `SIGNING_ALG = "ES256"` reports

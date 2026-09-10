@@ -498,6 +498,7 @@ consequences:
 | [0025](docs/adr/0025-binary-scanner.md) | Scanner D: binaries, heuristic and confidence-scored |
 | [0026](docs/adr/0026-dataflow.md) | Source dataflow: constant propagation and taint |
 | [0027](docs/adr/0027-const-prop-reach.md) | Const-prop reach for every value-classifying rule |
+| [0028](docs/adr/0028-dataflow-all-languages.md) | Const-prop in every pack; cross-language contract test |
 
 ---
 

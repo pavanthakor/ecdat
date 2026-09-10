@@ -45,6 +45,15 @@ func Normalise(name string) (string, error) {
 	return precis.UsernameCaseMapped.String(name)
 }
 
+// Variables named like algorithms, holding non-crypto strings. Nothing may
+// start matching on the NAME.
+var (
+	aes       = "advanced-editing-surface"
+	transform = "uppercase-then-trim"
+)
+
+func Labels() string { return aes + transform }
+
 func Describe() string {
 	return fmt.Sprintf("%s / %s / %s / %s / %s",
 		documentation, md5Column, cipherName, sha1Migration,

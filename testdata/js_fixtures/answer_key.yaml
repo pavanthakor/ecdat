@@ -161,6 +161,51 @@ expected:
       asset_type: algorithm
       count: 1          # the cipher rule legitimately matches this file too
 
+  # ---- CONST-PROP REACH (ADR-0028) --------------------------------------
+  # The algorithm behind a VARIABLE. Every one of these was invisible before
+  # ADR-0028: `metavariable-regex` sees the source text `alg`, not "none".
+  must_fire/js_jwt_propagated.js:
+    - rule_id: js-jwt-none
+      algorithm: none
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+    - rule_id: js-jwt-rsa
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+    - rule_id: js-jwt-ecdsa
+      algorithm: ECDSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+    - rule_id: js-jwt-hmac
+      algorithm: HMAC
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/ts_jwt_propagated.ts:
+    - rule_id: js-jwt-none
+      algorithm: none
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/ts_cipher_propagated.ts:
+    - rule_id: js-createcipheriv
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 2
+
   must_fire/js_pem_private_key.js:
     - rule_id: js-pem-block
       algorithm: unknown

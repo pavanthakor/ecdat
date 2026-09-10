@@ -46,6 +46,16 @@ public class Decoys {
         return index;
     }
 
+    // Variables named like algorithms, holding non-crypto strings. The
+    // propagation-aware classification must not start matching on the NAME.
+    private String aes = "advanced-editing-surface";
+    private String transform = "uppercase-then-trim";
+    private String signatureAlgorithm = "shown in the admin UI";
+
+    public String labels() {
+        return aes + transform + signatureAlgorithm;
+    }
+
     public String describe() {
         return DOCUMENTATION + md5Column + cipherName + sha1Migration;
     }

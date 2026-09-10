@@ -32,14 +32,42 @@ rules:
         use -- a client pinned below 1.3 cannot negotiate a post-quantum key
         exchange at all, however capable its runtime becomes.
       flags: [override]
-    patterns:
-      - pattern-either:
+    # PROPAGATION-AWARE MATCHING (ADR-0028). Caught by the cross-language
+    # contract test rather than by review: `metavariable-regex` tests the
+    # SOURCE TEXT, so `const min = "TLSv1"` then `{minVersion: min}` was
+    # silently missed. Both branches ship; see tokens.yaml for the union
+    # argument.
+    pattern-either:
+      - patterns:
           - pattern: '{..., minVersion: $VERSION, ...}'
+          - metavariable-pattern:
+              metavariable: $VERSION
+              pattern-either:
+                - pattern: '"TLSv1"'
+                - pattern: '"TLSv1.1"'
+                - pattern: '"TLSv1_method"'
+                - pattern: '"TLSv1_1_method"'
+                - pattern: '"SSLv3"'
+      - patterns:
           - pattern: '{..., secureProtocol: $VERSION, ...}'
-      - metavariable-regex:
-          metavariable: $VERSION
-          regex: ^["'](TLSv1|TLSv1\.1|TLSv1_method|TLSv1_1_method|SSLv3)["']$
-
+          - metavariable-pattern:
+              metavariable: $VERSION
+              pattern-either:
+                - pattern: '"TLSv1"'
+                - pattern: '"TLSv1.1"'
+                - pattern: '"TLSv1_method"'
+                - pattern: '"TLSv1_1_method"'
+                - pattern: '"SSLv3"'
+      - patterns:
+          - pattern: '{..., minVersion: $VERSION, ...}'
+          - metavariable-regex:
+              metavariable: $VERSION
+              regex: ^["'](TLSv1|TLSv1\.1|TLSv1_method|TLSv1_1_method|SSLv3)["']$
+      - patterns:
+          - pattern: '{..., secureProtocol: $VERSION, ...}'
+          - metavariable-regex:
+              metavariable: $VERSION
+              regex: ^["'](TLSv1|TLSv1\.1|TLSv1_method|TLSv1_1_method|SSLv3)["']$
   - id: js-tls-ciphers
     languages: [javascript, typescript]
     severity: WARNING

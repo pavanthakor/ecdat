@@ -38,15 +38,35 @@ rules:
         service pinned here cannot negotiate a post-quantum key exchange at all
         however capable its JDK becomes.
       flags: [override, weak, critical]
-    patterns:
-      - pattern-either:
-          - pattern: SSLContext.getInstance($VERSION)
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String protocol = "TLSv1"` followed by `SSLContext.getInstance(protocol)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
           - pattern: SSLContext.getInstance($VERSION, ...)
-          - pattern: SSLContext.getInstance($VERSION)
-      - metavariable-regex:
-          metavariable: $VERSION
-          regex: ^"(SSLv2|SSLv3|SSL|TLSv1|TLSv1\.1)"$
-
+          - metavariable-pattern:
+              metavariable: $VERSION
+              pattern-either:
+                - pattern: '"SSLv2"'
+                - pattern: '"SSLv3"'
+                - pattern: '"SSL"'
+                - pattern: '"TLSv1"'
+                - pattern: '"TLSv1.1"'
+      - patterns:
+          - pattern: SSLContext.getInstance($VERSION, ...)
+          - metavariable-regex:
+              metavariable: $VERSION
+              regex: ^"(SSLv2|SSLv3|SSL|TLSv1|TLSv1\.1)"$
   - id: java-sslcontext-provider-default
     languages: [java]
     severity: INFO
@@ -67,10 +87,30 @@ rules:
         `java.security` question rather than a source-code one, which is where
         the drift view should look.
       flags: [control]
-    patterns:
-      - pattern-either:
-          - pattern: SSLContext.getInstance($VERSION)
+    # PROPAGATION-AWARE MATCHING (ADR-0028).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `String protocol = "TLS"` followed by `SSLContext.getInstance(protocol)` is caught.
+    # `metavariable-regex` cannot: it tests the SOURCE TEXT bound to the
+    # metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site was silently missed while the
+    # literal-at-call-site form was reported normally.
+    #
+    # Both branches ship. This one enumerates transformations; the regex branch
+    # is a prefix match and covers spellings this list does not. The union is
+    # wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
+    pattern-either:
+      - patterns:
           - pattern: SSLContext.getInstance($VERSION, ...)
-      - metavariable-regex:
-          metavariable: $VERSION
-          regex: ^"(TLS|TLSv1\.2|TLSv1\.3)"$
+          - metavariable-pattern:
+              metavariable: $VERSION
+              pattern-either:
+                - pattern: '"TLS"'
+                - pattern: '"TLSv1.2"'
+                - pattern: '"TLSv1.3"'
+      - patterns:
+          - pattern: SSLContext.getInstance($VERSION, ...)
+          - metavariable-regex:
+              metavariable: $VERSION
+              regex: ^"(TLS|TLSv1\.2|TLSv1\.3)"$

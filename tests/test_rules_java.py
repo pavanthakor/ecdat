@@ -191,7 +191,15 @@ def test_sha1withrsa_is_flagged_and_sha256withrsa_is_not(
     assert weak, "java-signature-weak-hash did not fire on SHA1withRSA"
     assert strong, "java-signature-rsa did not fire on SHA256withRSA"
 
-    assert all(f.params.get("transformation") == "SHA1withRSA" for f in weak)
+    # Two sites since ADR-0028: the literal, and the same transformation behind
+    # a variable. Both must carry the flag -- the propagated one reports the
+    # variable's NAME as its transformation, because metavariable-pattern
+    # constrains a binding without rewriting it, and losing the flag there
+    # would be the expensive half of the finding.
+    assert {f.params.get("transformation") for f in weak} == {
+        "SHA1withRSA",
+        "transform",
+    }
     assert all(f.params.get("flagged") is True for f in weak), [f.params for f in weak]
     assert all(f.params.get("flagged") is not True for f in strong)
 
