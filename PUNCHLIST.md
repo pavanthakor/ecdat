@@ -138,6 +138,58 @@
   mismatch path kept non-fatal — but it is a real cost for anyone who shares an
   environment with another semgrep user.
   *Raised: verified-fact slice.*
+- **Dashboard slice 2 is owed.** Slice 1 shipped the core console (ADR-0018):
+  app shell + scan selector, the risk summary strip off the denormalised row,
+  the sortable/filterable inventory table, the Mosca slider driving the real
+  rescore endpoint, and the drill-down drawer with evidence, fired rules, drift
+  and the verified/provisional distinction. **Still owed:** the India roadmap
+  timeline, the crypto-agility gauge, a fixes view that can trigger a fix pass
+  and show its verified diffs as a review queue, and a drift graph. The fix
+  data is already parsed and the drawer renders a verified diff when a
+  `kind: "fix"` row is selected -- there is just no dedicated view and no way
+  to start a fix pass from the console.
+  *Raised: dashboard slice 1.*
+- **The console has no authentication, and it widens the API gap.** It is a
+  static SPA served by the same FastAPI process, so it inherits the API's
+  existing authn hole exactly -- and it now puts an estate's full inventory AND
+  its verified fix diffs one URL away on an unauthenticated port. No new hole,
+  a bigger blast radius. Tracked with the API entry below, which remains the
+  largest open item on this list.
+  *Raised: dashboard slice 1.*
+- **No stored scan carries drift, so the console's drift features show nothing
+  on real data.** Drift needs all three views in ONE document and `run_scan`
+  takes one target; the KPI harness merges three scans by hand (ADR-0014). The
+  drift column, drift-only filter and drift drawer section are built and tested
+  against a real merged fixture and will be empty against any scan the console
+  can currently load. Needs a "scan a system" entry point that runs several
+  targets into one correlated document -- which is also what the drift demo
+  needs.
+  *Raised: dashboard slice 1. See [ADR-0018](docs/adr/0018-dashboard.md).*
+- **The Mosca slider re-colours in one direction only, on this fixture.**
+  Pulling Z in from 11 to 5 moves 15 of 17 components across a band boundary;
+  pushing it out to 20 lowers every score by the same 13 points and crosses no
+  threshold, because every QuantumBank component shares one data class and
+  their Mosca terms move together. Relative ORDER is stable for the same
+  reason. Both are asserted in `web/src/api/parse.test.ts` so the limit is
+  recorded rather than discovered on stage; a fixture with mixed data classes
+  would exercise re-ordering.
+  *Raised: dashboard slice 1.*
+- **`web/dist/` is git-ignored, so a fresh clone must run `make web` once.**
+  The API returns a 503 naming the exact command rather than a bare 404, but it
+  is still a step that can be forgotten before a demo. Decide whether to commit
+  the build output (fast, ugly) or add it to `scripts/setup.sh` (clean, one
+  more thing that must succeed on a fresh machine).
+  *Raised: dashboard slice 1.*
+- **The console bundle is 619KB (183KB gzipped) in one chunk**, most of it
+  Recharts. Fine over localhost, and it is loaded once; wants a manual chunk
+  split before it is served over anything slower than a LAN.
+  *Raised: dashboard slice 1.*
+- **The `frontend-design` skill was not available when the console was built.**
+  `/mnt/skills/public/frontend-design/SKILL.md` does not exist on this machine,
+  so the visual decisions in ADR-0018 follow the slice brief's constraints and
+  the stated SOC-console reference rather than that guidance. Worth a review by
+  someone who has it before the console is treated as final.
+  *Raised: dashboard slice 1.*
 - **The API has no authentication and `GET /scans` is unpaginated.** It serves
   an estate's complete cryptographic inventory over plain localhost CORS. Needs
   authn/authz and pagination before it is exposed anywhere but a developer

@@ -21,10 +21,13 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import APIRouter, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from core import registry, store
@@ -44,6 +47,21 @@ from policy.apply import DEFAULT_Z_YEARS
 __all__ = ["app"]
 
 _log = get_logger("api")
+
+#: The built console. `make web` produces it; FastAPI serves it as static
+#: files so the demo machine runs no Node at all (ADR-0018).
+WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
+
+#: Path prefixes that belong to the API. The SPA catch-all must 404 inside
+#: these rather than hand back index.html -- an HTML 200 for a mistyped
+#: endpoint is the bug where a fetch "succeeds" and JSON.parse explodes three
+#: frames away.
+API_PREFIXES = ("api", "scans", "scanners", "health", "docs", "redoc", "openapi.json")
+
+#: Every route is defined once here and mounted twice: bare (the documented
+#: surface) and under `/api` (what the console fetches, matching the Vite dev
+#: proxy). Neither is a redirect, so both work offline and without rewriting.
+router = APIRouter()
 
 #: The dashboard runs on a Vite dev server; nothing else needs cross-origin
 #: access. Kept to explicit localhost origins rather than "*" -- the API will
@@ -157,18 +175,18 @@ app.add_middleware(
 )
 
 
-@app.get("/health")
+@router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/scanners")
+@router.get("/scanners")
 def list_scanners() -> list[str]:
     """Every scanner the server can run, for the dashboard to offer."""
     return registry.available_ids()
 
 
-@app.post("/scans", status_code=status.HTTP_201_CREATED)
+@router.post("/scans", status_code=status.HTTP_201_CREATED)
 def create_scan(body: TargetIn) -> ScanCreated:
     try:
         scanners = registry.get_scanners(body.scanners)
@@ -236,7 +254,7 @@ def _summarise(scan: store.Scan) -> ScanSummary:
     )
 
 
-@app.get("/scans")
+@router.get("/scans")
 def list_scans(kind: str | None = None) -> list[ScanSummary]:
     """Every row, newest first. Derived rows are listed, not hidden.
 
@@ -247,7 +265,21 @@ def list_scans(kind: str | None = None) -> list[ScanSummary]:
     return [_summarise(scan) for scan in store.list_scans(kind=kind)]
 
 
-@app.get("/scans/{scan_id}/cbom")
+@router.get("/scans/{scan_id}")
+def get_scan(scan_id: str) -> ScanSummary:
+    """One row's summary, off the denormalised columns (ADR-0016).
+
+    The console calls this after a rescore rather than re-listing the estate:
+    a derived row is new, and listing every scan to find one id gets slower
+    with every pass a user runs.
+    """
+    scan = store.get_scan(scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail=f"no scan with id {scan_id!r}")
+    return _summarise(scan)
+
+
+@router.get("/scans/{scan_id}/cbom")
 def get_cbom(scan_id: str) -> Response:
     scan = store.get_scan(scan_id)
     if scan is None:
@@ -319,7 +351,7 @@ class FixesOut(BaseModel):
     fixes: list[FixOut]
 
 
-@app.post("/scans/{scan_id}/fix", status_code=status.HTTP_201_CREATED)
+@router.post("/scans/{scan_id}/fix", status_code=status.HTTP_201_CREATED)
 def create_fix(scan_id: str, body: FixIn) -> DerivedCreated:
     """Propose verified fixes for a stored scan and persist them as a new row.
 
@@ -353,7 +385,7 @@ def create_fix(scan_id: str, body: FixIn) -> DerivedCreated:
     )
 
 
-@app.get("/scans/{scan_id}/fixes")
+@router.get("/scans/{scan_id}/fixes")
 def get_fixes(scan_id: str) -> FixesOut:
     """The fix results for a scan, read off its most recent fix row."""
     if store.get_scan(scan_id) is None:
@@ -393,7 +425,7 @@ def get_fixes(scan_id: str) -> FixesOut:
     )
 
 
-@app.post("/scans/{scan_id}/rescore", status_code=status.HTTP_201_CREATED)
+@router.post("/scans/{scan_id}/rescore", status_code=status.HTTP_201_CREATED)
 def create_rescore(scan_id: str, z_years: int | None = None) -> DerivedCreated:
     """Re-score a stored CBOM under a new CRQC horizon. Runs no scanner.
 
@@ -414,3 +446,60 @@ def create_rescore(scan_id: str, z_years: int | None = None) -> DerivedCreated:
     return DerivedCreated(
         scan_id=new_id, parent_scan_id=scan_id, kind=store.KIND_RESCORE
     )
+
+
+# ---------------------------------------------------------------------------
+# Mounting: the API twice, then the console (ADR-0018)
+#
+# ORDER MATTERS. The API routers are included before the SPA catch-all, so a
+# real endpoint always wins; the catch-all only sees paths nothing else
+# claimed.
+# ---------------------------------------------------------------------------
+
+app.include_router(router)
+# The console fetches `/api/...` -- the same path the Vite dev proxy forwards,
+# so one client works both in `npm run dev` and against the built bundle.
+# Hidden from the schema: it is the same surface, not a second one.
+app.include_router(router, prefix="/api", include_in_schema=False)
+
+
+if WEB_DIST.is_dir():
+    # Hashed bundles and self-hosted fonts. Everything the page needs is here;
+    # nothing is fetched from a CDN (ADR-0018).
+    app.mount(
+        "/assets",
+        StaticFiles(directory=WEB_DIST / "assets"),
+        name="assets",
+    )
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_console(full_path: str) -> Response:
+    """Serve the single-page console, or say plainly that it is not built.
+
+    A SPA catch-all that returns index.html for EVERY unmatched path turns a
+    mistyped API call into an HTML 200, and the resulting `JSON.parse` failure
+    surfaces three frames from the mistake. So anything under an API prefix
+    404s here instead.
+    """
+    head = full_path.split("/", 1)[0]
+    if head in API_PREFIXES:
+        raise HTTPException(status_code=404, detail=f"no route for /{full_path}")
+
+    index = WEB_DIST / "index.html"
+    if not index.is_file():
+        # A missing build is an operator error with an exact remedy, so say it
+        # rather than 404ing into silence.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "the console has not been built. Run `make web` (or "
+                "`npm --prefix web ci && npm --prefix web run build`) to "
+                f"produce {WEB_DIST}."
+            ),
+        )
+
+    static = WEB_DIST / full_path
+    if full_path and static.is_file():
+        return FileResponse(static)
+    return FileResponse(index)

@@ -194,6 +194,31 @@ cannot be pip-installed into a venv. `make verify` checks both.
 
 `make help` lists every target.
 
+## The console
+
+```bash
+make web      # build the dashboard into web/dist (needs npm; run once, ahead of time)
+make serve    # uvicorn on :8000, serving the API *and* the built console
+```
+
+Then open <http://127.0.0.1:8000/>. A dark, data-dense SOC-style console over
+the CBOM: a risk summary strip read off the denormalised scan row, a sortable
+and filterable inventory table, a drill-down drawer with evidence, fired rules
+and drift — and the **Mosca slider**, which re-scores the stored document
+against a different CRQC horizon through the real rescore endpoint. Pulling the
+horizon from 11 years to 5 moves 15 of QuantumBank's 17 components across a
+band boundary, without re-scanning anything.
+
+Verified and provisional facts are visually distinct: a rule nobody has
+confirmed renders dashed and greyed, states `provisional · scored 0`, and its
+deadline is struck through — so a fact that could not move the score cannot
+look like one that did ([ADR-0017](docs/adr/0017-verified-facts.md),
+[ADR-0018](docs/adr/0018-dashboard.md)).
+
+Everything is bundled locally — fonts included — so the console works
+air-gapped. The demo machine runs no Node: `make web` produces static files and
+FastAPI serves them. See [`web/README.md`](web/README.md).
+
 ---
 
 ## Usage

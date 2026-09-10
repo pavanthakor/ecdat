@@ -4,7 +4,8 @@
 PY ?= .venv/bin/python
 SHELLCHECK ?= .venv/bin/shellcheck
 
-.PHONY: help install lint format typecheck test validate golden serve check
+.PHONY: help install lint format typecheck test validate golden serve check \
+        web web-dev web-test
 
 help:
 	@echo "ECDAT -- make targets"
@@ -29,8 +30,13 @@ help:
 	@echo "    golden      regenerate tests/golden/*.cbom.json (review the diff!)"
 	@echo "    sign-packs  re-sign policy packs with the committed DEV key"
 	@echo ""
+	@echo "  CONSOLE (web/)"
+	@echo "    web         build the dashboard into web/dist (run before a demo)"
+	@echo "    web-dev     vite dev server on :5173, proxying /api to :8000"
+	@echo "    web-test    vitest data-logic suite"
+	@echo ""
 	@echo "  RUN"
-	@echo "    serve       run the API on http://127.0.0.1:8000"
+	@echo "    serve       run the API + built console on http://127.0.0.1:8000"
 	@echo ""
 
 install:
@@ -64,6 +70,23 @@ golden:
 
 serve:
 	$(PY) -m uvicorn api.app:app --reload --host 127.0.0.1 --port 8000
+
+# ---------------------------------------------------------------------------
+# The console. `make web` is the only step that needs Node; once it has run,
+# `make serve` hands out pre-built static files and the demo machine needs no
+# npm at all (ADR-0018).
+# ---------------------------------------------------------------------------
+NPM ?= npm
+
+web:
+	$(NPM) --prefix web install --no-audit --no-fund
+	$(NPM) --prefix web run build
+
+web-dev:
+	$(NPM) --prefix web run dev
+
+web-test:
+	$(NPM) --prefix web run test
 
 check: lint typecheck test validate
 

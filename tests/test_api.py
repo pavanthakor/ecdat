@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from cyclonedx.schema import SchemaVersion
@@ -420,3 +421,60 @@ def test_scan_summaries_carry_their_kind_and_parent(client: TestClient) -> None:
     assert kinds == {"scan", "rescore"}
     scans_only = client.get("/scans", params={"kind": "scan"}).json()
     assert [s["id"] for s in scans_only] == [scan_id]
+
+
+# ---------------------------------------------------------------------------
+# The console mount (ADR-0018)
+# ---------------------------------------------------------------------------
+
+
+def test_the_api_is_served_under_api_as_well_as_bare(client: TestClient) -> None:
+    """One router, two mounts -- the SPA fetches `/api`, the docs say `/scans`."""
+    scan_id = post_scan_id(client)
+
+    bare = client.get("/scans").json()
+    prefixed = client.get("/api/scans").json()
+
+    assert bare == prefixed
+    assert client.get(f"/api/scans/{scan_id}/cbom").text == (
+        client.get(f"/scans/{scan_id}/cbom").text
+    )
+
+
+def test_get_one_scan_returns_its_denormalised_summary(client: TestClient) -> None:
+    scan_id = post_scan_id(client)
+
+    body = client.get(f"/scans/{scan_id}").json()
+
+    assert body["id"] == scan_id
+    assert body["component_count"] == MINIMAL_COMPONENTS
+    assert set(body["band_counts"]) == {"Critical", "High", "Medium", "Low"}
+
+
+def test_get_one_unknown_scan_is_404(client: TestClient) -> None:
+    assert client.get("/scans/no-such-scan").status_code == 404
+
+
+def test_an_unknown_api_path_404s_instead_of_returning_html(
+    client: TestClient,
+) -> None:
+    """The catch-all must not turn a mistyped endpoint into an HTML 200.
+
+    That failure surfaces as a JSON.parse error three frames from the mistake,
+    which is a bad afternoon.
+    """
+    for path in ("/api/nope", "/scans/x/nope", "/scanners/nope"):
+        assert client.get(path).status_code == 404, path
+
+
+def test_the_spa_route_reports_a_missing_build_rather_than_404ing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import api.app as api_app
+
+    monkeypatch.setattr(api_app, "WEB_DIST", Path("/nonexistent/web/dist"))
+
+    response = client.get("/")
+
+    assert response.status_code == 503
+    assert "make web" in response.json()["detail"]
