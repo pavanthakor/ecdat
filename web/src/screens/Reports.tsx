@@ -1,41 +1,52 @@
 /**
- * REPORTS -- the three PDFs (ADR-0020) and the offline export formats.
+ * REPORTS -- the three PDFs (ADR-0020) and the offline export formats, laid out
+ * as web/design/ has it (ADR-0032): three report cards, then a tile per format.
  *
  * Every report is rendered ON REQUEST from the stored CBOM by
  * `GET /scans/{id}/report/{kind}`: nothing is re-scanned, so a report cannot
- * disagree with this console for the same scan. Formats with no renderer say
- * so; CSV is a browser-side projection of the stored values, labelled as such.
+ * disagree with this console for the same scan. The design tags the technical
+ * report "PDF / HTML" and the coverage report "CSV"; both are PDF only, so the
+ * tags here say PDF, and the HTML tile says it is not available.
  */
-import { Download, ExternalLink } from "lucide-react";
+import { Download, ExternalLink, FileText } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { cbomUrl, reportUrl } from "@/api/client";
 import type { Artefact, ReportKind, ScanSummary } from "@/api/types";
 import { EmptyPanel, NotComputed } from "@/components/Honest";
-import { Button, LinkButton, Panel, ScreenHeader, Tag } from "@/components/Panel";
-import { downloadText } from "@/screens/Inventory";
+import { LinkButton, Panel, ScreenHeader, Tag } from "@/components/Panel";
+import { downloadText } from "@/lib/download";
 import { inventoryCsv, sortByRisk } from "@/state/metrics";
 
-/** Summaries of reports/executive.py, technical.py and coverage.py. */
-const REPORTS: { kind: ReportKind; title: string; audience: string; body: string }[] = [
+/** One-line summaries of reports/executive.py, technical.py and coverage.py. */
+const REPORTS: { kind: ReportKind; title: string; sub: string }[] = [
   {
     kind: "executive",
-    title: "Executive summary",
-    audience: "Decision-makers",
-    body: "Two pages a decision-maker can act on: the estate's shape, the five artefacts that decide the migration plan, and the deadline the organisation is measured against. Provisional facts are labelled in the text.",
+    title: "Executive Report",
+    sub: "Two pages: the estate's shape, the five artefacts that decide the plan, the binding deadline.",
   },
   {
     kind: "technical",
-    title: "Technical detail",
-    audience: "Engineers and reviewers",
-    body: "Every artefact with its receipts: what was found, where it was seen, why it scored what it did, whether the views disagree, and what a verified fix would change. Grouped by band, each section with its own count.",
+    title: "Technical Report",
+    sub: "Every artefact with its evidence, fired rules, score breakdown and verified fix.",
   },
   {
     kind: "coverage",
-    title: "Coverage statement",
-    audience: "Auditors — and anyone reading the other two",
-    body: "What this scan did not look at: which scanners ran, which views were and were not collected, components with an incomplete cross-view group, and the limits that hold for every scan.",
+    title: "Coverage Report",
+    sub: "What this scan did not look at: views, scanners, and the limits that hold for every scan.",
   },
 ];
+
+function Tile({ glyph, name, sub, action }: { glyph: string; name: string; sub: string; action: ReactNode }) {
+  return (
+    <div className="flex min-h-[8.5rem] flex-col rounded-lg border border-line p-4">
+      <span className="font-mono text-[14px] text-ink-dim">{glyph}</span>
+      <span className="mt-3 text-[13px] font-semibold text-ink">{name}</span>
+      <span className="mt-1 text-[11.5px] leading-snug text-ink-faint">{sub}</span>
+      <div className="mt-auto pt-3">{action}</div>
+    </div>
+  );
+}
 
 export function ReportsScreen({ scan, artefacts }: { scan: ScanSummary | null; artefacts: Artefact[] }) {
   const short = scan?.id.slice(0, 8) ?? "";
@@ -43,74 +54,107 @@ export function ReportsScreen({ scan, artefacts }: { scan: ScanSummary | null; a
     <div>
       <ScreenHeader
         title="Reports"
-        subtitle="Rendered on request from the stored CBOM — nothing is re-scanned, so a report cannot disagree with this console for the same scan. Every format is produced locally; nothing leaves the machine."
+        subtitle="Prepare analyst-ready exports without masking coverage gaps. Rendered on request from the stored CBOM — nothing is re-scanned, and nothing leaves this machine."
       />
       {!scan ? (
-        <div className="p-4">
+        <div className="px-6 pb-6">
           <EmptyPanel title="No scan selected" />
         </div>
       ) : (
-        <div className="space-y-3 p-4">
-          <div className="grid gap-3 lg:grid-cols-3">
+        <div className="space-y-4 px-6 pb-6">
+          <div className="grid gap-4 md:grid-cols-3">
             {REPORTS.map((report) => (
-              <Panel key={report.kind} title={report.title} meta={<Tag>PDF</Tag>} testId={`report-${report.kind}`}>
-                <div className="eyebrow">{report.audience}</div>
-                <p className="mt-1.5 min-h-[5.5rem] text-2xs leading-relaxed text-ink-dim">{report.body}</p>
-                <div className="mt-3 flex gap-2">
+              <section
+                key={report.kind}
+                data-testid={`report-${report.kind}`}
+                className="rounded-lg border border-line bg-panel p-5"
+              >
+                <div className="flex items-start justify-between">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-md border border-line text-ink-dim">
+                    <FileText className="h-4 w-4" aria-hidden />
+                  </span>
+                  <Tag>PDF</Tag>
+                </div>
+                <h2 className="mt-4 text-[16px] font-semibold text-ink">{report.title}</h2>
+                <p className="mt-1.5 min-h-[2.5rem] text-[12px] leading-relaxed text-ink-faint">{report.sub}</p>
+                <div className="mt-4 flex items-center gap-2">
                   <LinkButton href={reportUrl(scan.id, report.kind)} target="_blank" rel="noopener">
-                    <ExternalLink className="h-3 w-3" aria-hidden /> View
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden /> View
                   </LinkButton>
                   <LinkButton
+                    variant="quiet"
                     href={reportUrl(scan.id, report.kind)}
                     download={`qorbit-${report.kind}-${short}.pdf`}
                   >
-                    <Download className="h-3 w-3" aria-hidden /> Generate PDF
+                    Generate
                   </LinkButton>
                 </div>
-              </Panel>
+              </section>
             ))}
           </div>
 
-          <Panel title="Offline export formats" bodyClassName="p-0">
-            <ul className="divide-y divide-line-soft">
-              <li className="grid grid-cols-[10rem_1fr_auto] items-center gap-3 px-3 py-2">
-                <span className="text-xs font-medium text-ink">CBOM · JSON</span>
-                <span className="text-2xs text-ink-faint">
-                  CycloneDX 1.6, the stored document byte for byte (ADR-0002).
-                </span>
-                <LinkButton href={cbomUrl(scan.id)} download={`qorbit-cbom-${short}.json`}>
-                  <Download className="h-3 w-3" aria-hidden /> Download
-                </LinkButton>
-              </li>
-              <li className="grid grid-cols-[10rem_1fr_auto] items-center gap-3 px-3 py-2">
-                <span className="text-xs font-medium text-ink">PDF</span>
-                <span className="text-2xs text-ink-faint">The three reports above, rendered by the server.</span>
-                <span className="text-2xs text-ink-faint">above</span>
-              </li>
-              <li className="grid grid-cols-[10rem_1fr_auto] items-center gap-3 px-3 py-2">
-                <span className="text-xs font-medium text-ink">CSV</span>
-                <span className="text-2xs text-ink-faint">
-                  The Inventory's stored values, one row per artefact — generated in the browser
-                  from the loaded CBOM, not by a server renderer.
-                </span>
-                <Button
-                  disabled={artefacts.length === 0}
-                  onClick={() =>
-                    downloadText(`qorbit-inventory-${short}.csv`, inventoryCsv(sortByRisk(artefacts)), "text/csv")
-                  }
-                >
-                  <Download className="h-3 w-3" aria-hidden /> Download
-                </Button>
-              </li>
-              <li
+          <Panel
+            eyebrow="Offline export formats"
+            title="Available artifacts"
+            meta={
+              <span className="font-mono text-[10px] uppercase tracking-wider">
+                Generated locally · nothing leaves this machine
+              </span>
+            }
+          >
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Tile
+                glyph="{ }"
+                name="CBOM JSON"
+                sub="Machine-readable CycloneDX 1.6 — the stored document, byte for byte"
+                action={
+                  <a
+                    href={cbomUrl(scan.id)}
+                    download={`qorbit-cbom-${short}.json`}
+                    aria-label="Download CBOM JSON"
+                    className="inline-flex text-ink-dim transition-colors hover:text-ink"
+                  >
+                    <Download className="h-4 w-4" aria-hidden />
+                  </a>
+                }
+              />
+              <Tile
+                glyph="PDF"
+                name="PDF"
+                sub="Executive / technical / coverage — rendered by the server, above"
+                action={<span className="text-[11px] text-ink-faint">see the report cards</span>}
+              />
+              <div
                 data-testid="export-html"
                 data-state="not-computed"
-                className="grid grid-cols-[10rem_1fr] items-center gap-3 px-3 py-2"
+                className="flex min-h-[8.5rem] flex-col rounded-lg border border-dashed border-line p-4"
               >
-                <span className="text-xs font-medium text-ink-dim">HTML</span>
-                <NotComputed reason="not available — ECDAT renders its reports as PDF only, and no HTML renderer exists yet" />
-              </li>
-            </ul>
+                <span className="font-mono text-[14px] text-ink-faint">&lt;/&gt;</span>
+                <span className="mt-3 text-[13px] font-semibold text-ink-dim">HTML</span>
+                <NotComputed
+                  reason="not available — ECDAT renders its reports as PDF only, and no HTML renderer exists yet"
+                  className="mt-1"
+                />
+              </div>
+              <Tile
+                glyph="CSV"
+                name="CSV"
+                sub="Inventory extract — generated in the browser from the stored CBOM"
+                action={
+                  <button
+                    type="button"
+                    aria-label="Download inventory CSV"
+                    disabled={artefacts.length === 0}
+                    onClick={() =>
+                      downloadText(`qorbit-inventory-${short}.csv`, inventoryCsv(sortByRisk(artefacts)), "text/csv")
+                    }
+                    className="inline-flex text-ink-dim transition-colors hover:text-ink disabled:opacity-40"
+                  >
+                    <Download className="h-4 w-4" aria-hidden />
+                  </button>
+                }
+              />
+            </div>
           </Panel>
         </div>
       )}

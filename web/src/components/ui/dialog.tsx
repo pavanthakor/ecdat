@@ -20,7 +20,7 @@ export function Modal({
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60" />
-        <DialogPrimitive.Content className="fixed left-1/2 top-[12vh] z-50 w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 border border-line bg-panel shadow-2xl outline-none">
+        <DialogPrimitive.Content className="fixed left-1/2 top-[12vh] z-50 w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 rounded-lg border border-line bg-panel shadow-2xl outline-none">
           <div className="flex items-start justify-between gap-4 border-b border-line px-4 py-3">
             <div className="min-w-0">
               <DialogPrimitive.Title className="text-sm font-semibold text-ink">{title}</DialogPrimitive.Title>

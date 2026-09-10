@@ -6,6 +6,7 @@
  * that renders the generic message are both silent failures.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import z11Doc from "@/test/fixtures/cbom_z11.json";
@@ -118,19 +119,36 @@ describe("the three empty states", () => {
 });
 
 describe("severity accent on the row", () => {
-  it("puts a left border on Critical and High rows only", () => {
+  it("marks EVERY row with an inset bar in its band colour, never a row fill", () => {
+    // ADR-0032: the design puts the bar on every row, Medium and Low included
+    // (ADR-0018 had it on Critical and High only).
     const rows = parseCbom(z11Doc as unknown as Cbom);
     const { container } = table({ rows, total: rows.length });
+    const bar = (band: string) =>
+      container.querySelector(`tr[data-band="${band}"] [data-testid="severity-bar"]`)!;
 
-    const critical = container.querySelector('tr[data-band="Critical"]')!;
-    const high = container.querySelector('tr[data-band="High"]')!;
-    const low = container.querySelector('tr[data-band="Low"]')!;
-
-    expect(critical.className).toContain("border-l-critical");
-    expect(high.className).toContain("border-l-high");
-    expect(low.className).toContain("border-l-transparent");
+    expect(bar("Critical").className).toContain("bg-critical");
+    expect(bar("High").className).toContain("bg-high");
+    expect(bar("Low").className).toContain("bg-low");
     // An edge marker, not a fill: the row keeps its own background.
+    const critical = container.querySelector('tr[data-band="Critical"]')!;
     expect(critical.className).not.toContain("bg-critical");
+  });
+});
+
+describe("the filter bar (ADR-0032: band and view are selects)", () => {
+  it("choosing a band narrows to that band", async () => {
+    const onFilters = vi.fn();
+    table({ onFilters });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Band" }), "Critical");
+    expect(onFilters).toHaveBeenLastCalledWith({ ...NO_FILTERS, bands: ["Critical"] });
+  });
+
+  it("'All bands' clears the band constraint rather than matching nothing", async () => {
+    const onFilters = vi.fn();
+    table({ filters: { ...NO_FILTERS, bands: ["Critical"] }, onFilters });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Band" }), "All bands");
+    expect(onFilters).toHaveBeenLastCalledWith({ ...NO_FILTERS, bands: [] });
   });
 });
 

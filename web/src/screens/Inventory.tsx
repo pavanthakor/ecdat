@@ -7,13 +7,14 @@
  * `GET /scans/{id}/fixes`; a failure there is reported in the drawer, never
  * rendered as "no fix".
  */
-import { Download } from "lucide-react";
+import { Download, Filter } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { getFixes } from "@/api/client";
 import { ArtefactDrawer, type FixLookup } from "@/components/ArtefactDrawer";
 import { InventoryTable } from "@/components/InventoryTable";
 import { Button, ScreenHeader } from "@/components/Panel";
+import { downloadText } from "@/lib/download";
 import { navigate } from "@/lib/router";
 import {
   applyFilters,
@@ -24,18 +25,9 @@ import {
   type Sort,
   type SortColumn,
 } from "@/state/inventory";
-import { inventoryCsv } from "@/state/metrics";
+import { collectedViews, inventoryCsv } from "@/state/metrics";
 import { emptyStateOf } from "@/state/presentation";
 import { useRemote } from "@/state/remote";
-
-export function downloadText(filename: string, text: string, type: string) {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
 
 export function InventoryScreen({
   view,
@@ -49,6 +41,7 @@ export function InventoryScreen({
   selectedRef: string | null;
 }) {
   const [sort, setSort] = useState<Sort>({ column: "score", direction: "desc" });
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const scanId = view.scan?.id ?? null;
 
   const rows = useMemo(
@@ -63,6 +56,8 @@ export function InventoryScreen({
     () => (selectedRef ? (view.artefacts.find((a) => a.bomRef === selectedRef) ?? null) : null),
     [selectedRef, view.artefacts],
   );
+  const driftCount = useMemo(() => view.artefacts.filter((a) => a.drift.length > 0).length, [view.artefacts]);
+  const collected = useMemo(() => collectedViews(view.artefacts), [view.artefacts]);
 
   const fixes = useRemote(scanId && selected ? `fixes:${scanId}` : null, () =>
     getFixes(scanId as string),
@@ -91,40 +86,52 @@ export function InventoryScreen({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ScreenHeader
-        title="Inventory"
-        subtitle="Every cryptographic artefact in this scan, exactly as the policy engine stored it. Select a row for its evidence, fired rules, drift and fix."
+        title="Cryptographic Inventory"
+        subtitle="Artefacts discovered across the declared, shipped and observed layers, exactly as the policy engine stored them."
         actions={
-          <Button
-            disabled={!view.scan || view.artefacts.length === 0}
-            onClick={() =>
-              view.scan &&
-              downloadText(
-                `qorbit-inventory-${view.scan.id.slice(0, 8)}.csv`,
-                inventoryCsv(sortArtefacts(view.artefacts, sort)),
-                "text/csv",
-              )
-            }
-          >
-            <Download className="h-3 w-3" aria-hidden /> CSV
-          </Button>
+          <>
+            <Button aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>
+              <Filter className="h-3.5 w-3.5" aria-hidden /> Filters
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!view.scan || view.artefacts.length === 0}
+              title="CSV of the stored values, generated in the browser"
+              onClick={() =>
+                view.scan &&
+                downloadText(
+                  `qorbit-inventory-${view.scan.id.slice(0, 8)}.csv`,
+                  inventoryCsv(sortArtefacts(view.artefacts, sort)),
+                  "text/csv",
+                )
+              }
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden /> Export
+            </Button>
+          </>
         }
       />
-      <InventoryTable
-        rows={rows}
-        total={view.artefacts.length}
-        sort={sort}
-        filters={filters}
-        selected={selected?.bomRef ?? null}
-        loading={view.loading}
-        emptyState={emptyState}
-        onSort={onSort}
-        onFilters={onFilters}
-        onSelect={(artefact) => navigate("inventory", params(artefact.bomRef))}
-        onClearFilters={() => {
-          onFilters(NO_FILTERS);
-          navigate("inventory");
-        }}
-      />
+      <div className="flex min-h-0 flex-1 flex-col px-6 pb-6">
+        <InventoryTable
+          rows={rows}
+          total={view.artefacts.length}
+          sort={sort}
+          filters={filters}
+          selected={selected?.bomRef ?? null}
+          loading={view.loading}
+          emptyState={emptyState}
+          onSort={onSort}
+          onFilters={onFilters}
+          onSelect={(artefact) => navigate("inventory", params(artefact.bomRef))}
+          onClearFilters={() => {
+            onFilters(NO_FILTERS);
+            navigate("inventory");
+          }}
+          filtersOpen={filtersOpen}
+          driftCount={driftCount}
+          caption={collected.length > 0 ? `${collected.join(", ")} collected` : undefined}
+        />
+      </div>
       <ArtefactDrawer
         artefact={selected}
         onClose={() => navigate("inventory", params())}

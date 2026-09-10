@@ -667,6 +667,42 @@ export function inventoryCsv(artefacts: Artefact[]): string {
   return `${[header.join(","), ...rows].join("\n")}\n`;
 }
 
+/**
+ * The Roadmap's dated rows as CSV -- the design's "Export roadmap". Stored
+ * values only; the target is the pack's label, empty where there is none.
+ */
+export function roadmapCsv(rows: RoadmapRow[]): string {
+  const header = [
+    "bom_ref",
+    "name",
+    "usage",
+    "band",
+    "score",
+    "deadline",
+    "overdue",
+    "deadline_provisional",
+    "target",
+    "hybrid",
+  ];
+  const lines = rows.map((row) =>
+    [
+      row.artefact.bomRef,
+      row.artefact.name,
+      row.artefact.usage,
+      row.artefact.band,
+      row.artefact.score,
+      row.deadline,
+      row.overdue,
+      row.provisional,
+      row.target,
+      row.hybrid,
+    ]
+      .map(csvCell)
+      .join(","),
+  );
+  return `${[header.join(","), ...lines].join("\n")}\n`;
+}
+
 // ---------------------------------------------------------------------------
 // Compare
 // ---------------------------------------------------------------------------

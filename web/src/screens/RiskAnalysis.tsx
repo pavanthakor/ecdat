@@ -1,59 +1,51 @@
 /**
- * RISK ANALYSIS -- an honest placeholder (ADR-0031).
+ * RISK ANALYSIS -- an honest placeholder (ADR-0031), in the design's centred
+ * empty-state card (ADR-0032).
  *
  * Portfolio risk -- trend across scans, business-impact weighting, blast
  * radius -- is not computed by the backend. A chart here would have to be
- * drawn from numbers nobody measured, so the screen says what IS scoped to
- * the current scan and sends the reader to the screens that answer today.
+ * drawn from numbers nobody measured, so the card says what IS scoped to the
+ * current scan and sends the reader to the screens that answer today.
  */
-import type { ScanSummary } from "@/api/types";
-import { ScreenHeader } from "@/components/Panel";
-import { hrefFor } from "@/lib/router";
+import { ArrowRight, Lock } from "lucide-react";
 
-const STEPS = [
-  { href: hrefFor("inventory"), label: "Inventory", text: "review what this scan found, worst first" },
-  { href: hrefFor("drift"), label: "Cryptographic Drift", text: "check where declared, shipped and observed disagree" },
-  { href: hrefFor("roadmap"), label: "Migration Roadmap", text: "then prioritise: sequence the work against its deadlines" },
-];
+import type { ScanSummary } from "@/api/types";
+import { LinkButton, Panel, Pill, ScreenHeader } from "@/components/Panel";
+import { hrefFor } from "@/lib/router";
 
 export function RiskAnalysisScreen({ scan }: { scan: ScanSummary | null }) {
   return (
     <div>
       <ScreenHeader
         title="Risk Analysis"
-        subtitle="Portfolio-level risk analysis is not built. This screen says so rather than drawing a chart it has no data for."
+        subtitle="Prioritise quantum exposure by business and network context. Not computed yet — this screen says so rather than drawing a chart it has no data for."
       />
-      <div className="p-4">
-        <div
-          data-testid="risk-placeholder"
-          className="max-w-3xl border border-dashed border-line bg-panel px-5 py-5"
-        >
-          <div className="eyebrow">Prototype · not computed</div>
-          <p className="mt-2 text-sm font-medium text-ink">
-            Risk analysis is scoped to the current scan
-          </p>
-          <p className="mt-1.5 text-2xs leading-relaxed text-ink-faint">
-            ECDAT scores each artefact in the scan you are looking at
-            {scan ? ` (${scan.target.system ?? scan.target.ref})` : ""} — its band, its
-            Mosca terms and its deadline — and that is what it computes today. Trends
-            across scans, business-impact weighting and blast-radius graphs are not
-            built, so nothing here pretends to show them.
-          </p>
-          <ol className="mt-4 space-y-1.5">
-            {STEPS.map((step, index) => (
-              <li key={step.href} className="flex items-baseline gap-3 text-xs">
-                <span className="w-4 font-mono text-2xs text-ink-faint">{index + 1}</span>
-                <a href={step.href} className="font-medium text-ink underline-offset-2 hover:underline">
-                  {step.label}
-                </a>
-                <span className="text-2xs text-ink-faint">{step.text}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-        <p className="mt-3 max-w-3xl text-[10px] leading-relaxed text-ink-faint">
-          Owed in PUNCHLIST: cross-scan risk trend, business-impact weighting, and a
-          blast-radius view built on the correlator's peer data.
+      <div className="px-6 pb-6">
+        <Panel eyebrow="Analyst workspace" title="Risk analysis queue" meta={<Pill>Prototype · not computed</Pill>}>
+          <div data-testid="risk-placeholder" className="flex flex-col items-center px-6 py-14 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full border border-line text-ink-dim">
+              <Lock className="h-5 w-5" aria-hidden />
+            </span>
+            <p className="mt-4 text-[14px] font-semibold text-ink">Risk analysis is scoped to the current scan</p>
+            <p className="mt-2 max-w-xl text-[12.5px] leading-relaxed text-ink-faint">
+              ECDAT scores each artefact in the scan you are looking at
+              {scan ? ` (${scan.target.system ?? scan.target.ref})` : ""} — its band, its Mosca
+              terms and its deadline — and that is all it computes today. Trend across scans,
+              business-impact weighting and blast radius are not built, so nothing here pretends
+              to show them. Use Inventory and{" "}
+              <a href={hrefFor("drift")} className="text-ink-dim underline underline-offset-2 hover:text-ink">
+                Cryptographic Drift
+              </a>{" "}
+              to inspect the evidence chain, then sequence the work in the Migration Roadmap.
+            </p>
+            <LinkButton href={hrefFor("inventory")} className="mt-6">
+              Open inventory <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+            </LinkButton>
+          </div>
+        </Panel>
+        <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
+          Owed in PUNCHLIST: cross-scan risk trend, business-impact weighting, and a blast-radius
+          view built on the correlator's peer data.
         </p>
       </div>
     </div>

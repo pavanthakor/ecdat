@@ -1,114 +1,131 @@
 /**
- * COMPARE SCANS -- what changed between two stored scans (ADR-0031).
+ * COMPARE SCANS -- what changed between two stored scans (ADR-0031), laid out
+ * as web/design/ has it (ADR-0032): A-vs-B selectors in the header, four count
+ * cards, and one "changed evidence" list with a NEW / CHANGED / RESOLVED tag
+ * per row.
  *
- * Read from `GET /scans/{base}/compare/{head}`, which joins on the content-
- * addressed bom-ref; the console computes no diff of its own. The default pair
- * comes from the store's links -- a derived row against its parent, a scan
- * against the previous scan of its system -- and with no such pair the screen
- * asks for two scans instead of inventing a baseline.
+ * Read from `GET /scans/{base}/compare/{head}`, joined on the content-addressed
+ * bom-ref; the console computes no diff of its own. The default pair comes from
+ * the store's links, and with no such pair the screen asks for two scans
+ * instead of inventing a baseline. Counts are neutral ink: the design paints
+ * them red and orange, and colour here means a band (ADR-0031).
  */
-import { ArrowLeftRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { compareScans } from "@/api/client";
-import type { CompareChange, CompareDrift, CompareEntry, ScanSummary } from "@/api/types";
+import type { CompareChange, CompareResponse, ScanSummary } from "@/api/types";
 import { EmptyPanel } from "@/components/Honest";
 import { Button, Panel, ScreenHeader, SkeletonBlock, Tag } from "@/components/Panel";
-import { cn, formatDateTime, shortRef } from "@/lib/format";
+import { downloadText } from "@/lib/download";
+import { formatDate } from "@/lib/format";
 import { hrefFor } from "@/lib/router";
 import { defaultComparison } from "@/state/metrics";
 import { useRemote } from "@/state/remote";
 
-const select =
-  "h-7 min-w-0 max-w-[22rem] border border-line bg-ground px-1.5 font-mono text-2xs text-ink-dim focus:border-ink-faint focus:outline-none";
-
-function label(scan: ScanSummary): string {
-  return `${scan.id.slice(0, 8)} · ${scan.kind} · ${scan.target.system ?? scan.target.ref} · ${formatDateTime(scan.created_at)}`;
+interface DiffRow {
+  key: string;
+  name: string;
+  what: string;
+  value: string;
+  detail?: string;
+  tag: "New" | "Changed" | "Resolved";
+  ref: string | null;
 }
 
-function EntryList({ entries, empty }: { entries: CompareEntry[]; empty: string }) {
-  if (entries.length === 0) return <p className="text-2xs text-ink-faint">{empty}</p>;
-  return (
-    <ul className="divide-y divide-line-soft">
-      {entries.map((entry) => (
-        <li key={entry.bom_ref} className="flex items-baseline gap-2 py-1">
-          <span className="text-xs text-ink">{entry.name}</span>
-          <span className="font-mono text-[10px] text-ink-faint">{shortRef(entry.bom_ref)}</span>
-          <span className="ml-auto font-mono text-[10px] text-ink-dim">
-            {entry.band ?? "—"} · {entry.score ?? "—"}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
+function changeRow(change: CompareChange): DiffRow {
+  const verdict = change.fields.filter((field) => field !== "evidence");
+  const moved = verdict
+    .map((field) => {
+      const key = field as keyof CompareChange["before"];
+      return `${field} ${String(change.before[key] ?? "—")} → ${String(change.after[key] ?? "—")}`;
+    })
+    .join(" · ");
+  const evidence = change.fields.includes("evidence")
+    ? `+${change.evidence_added.length} / −${change.evidence_removed.length} sightings`
+    : "";
+  return {
+    key: `changed:${change.bom_ref}`,
+    name: change.name,
+    what: verdict.length > 0 ? `${verdict.join(", ")} changed` : "Evidence changed",
+    value: [moved, evidence].filter(Boolean).join(" · "),
+    detail: [...change.evidence_removed.map((e) => `− ${e}`), ...change.evidence_added.map((e) => `+ ${e}`)].join("\n"),
+    tag: "Changed",
+    ref: change.bom_ref,
+  };
 }
 
-function ChangeList({ changes }: { changes: CompareChange[] }) {
-  if (changes.length === 0) return <p className="text-2xs text-ink-faint">No artefact on both sides changed.</p>;
-  return (
-    <ul className="divide-y divide-line-soft">
-      {changes.map((change) => (
-        <li key={change.bom_ref} className="py-1.5">
-          <div className="flex items-baseline gap-2">
-            <a href={hrefFor("inventory", { ref: change.bom_ref })} className="text-xs text-ink hover:underline">
-              {change.name}
-            </a>
-            <span className="font-mono text-[10px] text-ink-faint">{shortRef(change.bom_ref)}</span>
-            <span className="ml-auto flex gap-1">
-              {change.fields.map((field) => (
-                <Tag key={field}>{field}</Tag>
-              ))}
-            </span>
-          </div>
-          <div className="mt-0.5 flex flex-wrap gap-x-4 font-mono text-[10px] text-ink-dim">
-            {change.fields
-              .filter((field) => field !== "evidence")
-              .map((field) => {
-                const key = field as keyof CompareChange["before"];
-                return (
-                  <span key={field}>
-                    {field} {String(change.before[key] ?? "—")} → {String(change.after[key] ?? "—")}
-                  </span>
-                );
-              })}
-          </div>
-          {change.evidence_added.length + change.evidence_removed.length > 0 ? (
-            <ul className="mt-1 space-y-0.5 font-mono text-[10px]">
-              {change.evidence_removed.map((entry) => (
-                <li key={`-${entry}`} className="text-ink-faint">
-                  − {entry}
-                </li>
-              ))}
-              {change.evidence_added.map((entry) => (
-                <li key={`+${entry}`} className="text-ink-dim">
-                  + {entry}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </li>
-      ))}
-    </ul>
-  );
+function diffRows(data: CompareResponse): DiffRow[] {
+  return [
+    ...data.new.map((entry) => ({
+      key: `new:${entry.bom_ref}`,
+      name: entry.name,
+      what: "New artefact",
+      value: `${entry.band ?? "—"} · score ${entry.score ?? "—"}`,
+      tag: "New" as const,
+      ref: entry.bom_ref,
+    })),
+    ...data.changed.map(changeRow),
+    ...data.drift_introduced.map((drift) => ({
+      key: `drift+:${drift.bom_ref}:${drift.kind}:${drift.declared}`,
+      name: drift.name,
+      what: `Drift introduced · ${drift.kind}`,
+      value: `${drift.declared} ≠ ${drift.observed}`,
+      detail: drift.cause,
+      tag: "New" as const,
+      ref: drift.bom_ref,
+    })),
+    ...data.resolved.map((entry) => ({
+      key: `resolved:${entry.bom_ref}`,
+      name: entry.name,
+      what: "No longer found",
+      value: `${entry.band ?? "—"} · score ${entry.score ?? "—"}`,
+      tag: "Resolved" as const,
+      ref: null,
+    })),
+    ...data.drift_resolved.map((drift) => ({
+      key: `drift-:${drift.bom_ref}:${drift.kind}:${drift.declared}`,
+      name: drift.name,
+      what: `Drift resolved · ${drift.kind}`,
+      value: `${drift.declared} ≠ ${drift.observed}`,
+      tag: "Resolved" as const,
+      ref: null,
+    })),
+  ];
 }
 
-function DriftList({ drifts, empty }: { drifts: CompareDrift[]; empty: string }) {
-  if (drifts.length === 0) return <p className="text-2xs text-ink-faint">{empty}</p>;
+function ScanPicker({
+  label,
+  value,
+  scans,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  scans: ScanSummary[];
+  onChange: (id: string) => void;
+}) {
   return (
-    <ul className="divide-y divide-line-soft">
-      {drifts.map((drift) => (
-        <li key={`${drift.bom_ref}:${drift.kind}:${drift.declared}`} className="py-1.5">
-          <div className="flex items-baseline gap-2">
-            <span className="text-xs text-ink">{drift.name}</span>
-            <Tag>{drift.kind}</Tag>
-          </div>
-          <div className="mt-0.5 font-mono text-[10px] text-ink-dim">
-            declared {drift.declared} · compared {drift.observed}
-          </div>
-          <p className="mt-0.5 text-[10px] text-ink-faint">{drift.cause}</p>
-        </li>
-      ))}
-    </ul>
+    <label className="relative flex items-center rounded-md border border-line bg-panel py-1.5 pl-3 pr-7 text-[13px]">
+      <span className="mr-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">{label}</span>
+      <select
+        aria-label={`${label} scan`}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="max-w-[13rem] cursor-pointer appearance-none truncate bg-transparent text-ink focus:outline-none"
+      >
+        <option value="" className="bg-panel">
+          choose a scan
+        </option>
+        {scans.map((scan) => (
+          <option key={scan.id} value={scan.id} className="bg-panel">
+            {scan.id.slice(0, 8)} · {formatDate(scan.created_at)}
+            {scan.kind === "scan" ? "" : ` · ${scan.kind}`}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2 h-3.5 w-3.5 text-ink-faint" aria-hidden />
+    </label>
   );
 }
 
@@ -133,14 +150,20 @@ export function CompareScreen({
   const ready = baseId !== "" && headId !== "" && baseId !== headId;
   const result = useRemote(ready ? `compare:${baseId}:${headId}` : null, () => compareScans(baseId, headId));
   const data = result.data;
+  const rows = useMemo(() => (data ? diffRows(data) : []), [data]);
+  // A row links into the Inventory only when the head IS the loaded scan.
+  const linkable = data !== null && data.head.id === current?.id;
 
   const counts = data
     ? [
-        ["New", data.new.length],
-        ["Resolved", data.resolved.length],
-        ["Changed", data.changed.length],
-        ["Drift introduced", data.drift_introduced.length],
-        ["Drift resolved", data.drift_resolved.length],
+        { name: "New", value: `+${data.new.length}`, sub: "New artefacts" },
+        { name: "Resolved", value: `−${data.resolved.length}`, sub: "Resolved findings" },
+        { name: "Changed", value: `${data.changed.length}`, sub: "Changed verdict or evidence" },
+        {
+          name: "Drift introduced",
+          value: `${data.drift_introduced.length}`,
+          sub: `New disagreement · ${data.drift_resolved.length} resolved`,
+        },
       ]
     : [];
 
@@ -148,92 +171,96 @@ export function CompareScreen({
     <div>
       <ScreenHeader
         title="Compare Scans"
-        subtitle="New, resolved and changed artefacts between two stored scans, joined on the content-addressed bom-ref. A moved line is changed evidence; an artefact seen in a new place reports as resolved + new."
+        subtitle="Diff a baseline against another stored scan, joined on the content-addressed bom-ref. A moved line is changed evidence; an artefact seen in a new place reports as resolved + new."
+        actions={
+          <>
+            <ScanPicker label="Base" value={baseId} scans={scans} onChange={setBaseId} />
+            <span className="font-mono text-[11px] uppercase text-ink-faint">vs</span>
+            <ScanPicker label="Head" value={headId} scans={scans} onChange={setHeadId} />
+          </>
+        }
       />
-      <div className="flex flex-wrap items-center gap-3 border-b border-line bg-panel px-5 py-2 text-2xs">
-        <label className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-ink-faint">Base</span>
-          <select aria-label="Base scan" className={select} value={baseId} onChange={(e) => setBaseId(e.target.value)}>
-            <option value="">choose a scan</option>
-            {scans.map((scan) => (
-              <option key={scan.id} value={scan.id}>
-                {label(scan)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Button
-          variant="quiet"
-          aria-label="Swap base and head"
-          onClick={() => {
-            setBaseId(headId);
-            setHeadId(baseId);
-          }}
-        >
-          <ArrowLeftRight className="h-3 w-3" aria-hidden />
-        </Button>
-        <label className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-ink-faint">Head</span>
-          <select aria-label="Head scan" className={select} value={headId} onChange={(e) => setHeadId(e.target.value)}>
-            <option value="">choose a scan</option>
-            {scans.map((scan) => (
-              <option key={scan.id} value={scan.id}>
-                {label(scan)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
 
-      <div className="space-y-3 p-4">
+      <div className="space-y-4 px-6 pb-6">
         {!ready ? (
           <EmptyPanel testId="compare-empty" title="Select two scans to compare">
             {current && !initial.base
               ? `Scan ${current.id.slice(0, 8)} has no parent row and no earlier scan of the same system, so there is no default baseline. `
               : ""}
-            Pick a base and a different head above. The diff is computed by the server from
-            the two stored documents; the console never guesses one.
+            Pick a base and a different head above. The diff is computed by the server from the two
+            stored documents; the console never guesses one.
           </EmptyPanel>
         ) : result.loading ? (
-          <SkeletonBlock className="h-32 w-full" />
+          <SkeletonBlock className="h-40 w-full" />
         ) : result.error ? (
           <EmptyPanel title="The comparison could not be loaded">{result.error}</EmptyPanel>
         ) : data ? (
           <>
-            <div className="grid grid-cols-2 gap-px border border-line bg-line sm:grid-cols-6">
-              {counts.map(([name, value]) => (
-                <div key={name} data-testid="compare-count" className="bg-panel px-3 py-2">
-                  <div className="eyebrow">{name}</div>
-                  <div className="font-mono text-xl tabular-nums text-ink">{value}</div>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {counts.map((count) => (
+                <div key={count.name} data-testid="compare-count" className="rounded-lg border border-line bg-panel p-5">
+                  <div className="eyebrow">{count.name}</div>
+                  <div className="mt-3 text-[30px] font-light leading-none tabular-nums text-ink">{count.value}</div>
+                  <div className="mt-2 text-[12px] text-ink-faint">{count.sub}</div>
                 </div>
               ))}
-              <div className="bg-panel px-3 py-2">
-                <div className="eyebrow">Unchanged</div>
-                <div className="font-mono text-xl tabular-nums text-ink-faint">{data.unchanged}</div>
-              </div>
             </div>
-            <div className="grid gap-3 lg:grid-cols-2">
-              <Panel title={`New (${data.new.length})`}>
-                <EntryList entries={data.new} empty="Nothing appeared." />
-              </Panel>
-              <Panel title={`Resolved (${data.resolved.length})`}>
-                <EntryList entries={data.resolved} empty="Nothing disappeared." />
-              </Panel>
-            </div>
-            <Panel title={`Changed · verdicts and evidence (${data.changed.length})`}>
-              <ChangeList changes={data.changed} />
+
+            <Panel
+              eyebrow={`Scan diff / ${rows.length} finding${rows.length === 1 ? "" : "s"} · ${data.unchanged} unchanged`}
+              title="Changed evidence"
+              meta={
+                <Button
+                  onClick={() =>
+                    downloadText(
+                      `qorbit-compare-${data.base.id.slice(0, 8)}-${data.head.id.slice(0, 8)}.json`,
+                      `${JSON.stringify(data, null, 2)}\n`,
+                      "application/json",
+                    )
+                  }
+                >
+                  <Download className="h-3.5 w-3.5" aria-hidden /> Export diff
+                </Button>
+              }
+              bodyClassName="pt-1"
+            >
+              {rows.length === 0 ? (
+                <EmptyPanel title="No differences">
+                  {data.unchanged} artefact{data.unchanged === 1 ? "" : "s"} unchanged between the two scans.
+                </EmptyPanel>
+              ) : (
+                <ul>
+                  {rows.map((row) => (
+                    <li
+                      key={row.key}
+                      title={row.detail || undefined}
+                      className="grid grid-cols-[minmax(8rem,1fr)_minmax(0,2.2fr)_auto_1rem] items-center gap-4 border-t border-line py-3 first:border-t-0"
+                    >
+                      <span className="truncate font-mono text-[13px] text-ink">{row.name}</span>
+                      <span className="min-w-0">
+                        <span className="block text-[12px] text-ink-faint">{row.what}</span>
+                        <span className="block truncate font-mono text-[12px] text-ink">{row.value}</span>
+                      </span>
+                      <Tag variant={row.tag === "Resolved" ? "plain" : "strong"}>{row.tag}</Tag>
+                      {row.ref && linkable ? (
+                        <a
+                          href={hrefFor("inventory", { ref: row.ref })}
+                          aria-label={`Open ${row.name} in the Inventory`}
+                          className="text-ink-faint hover:text-ink"
+                        >
+                          <ChevronRight className="h-4 w-4" aria-hidden />
+                        </a>
+                      ) : (
+                        <span />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="mt-3 text-[11px] text-ink-faint">
+                Base {data.base.id.slice(0, 8)} ({data.base.kind}) → head {data.head.id.slice(0, 8)} ({data.head.kind}).
+              </p>
             </Panel>
-            <div className="grid gap-3 lg:grid-cols-2">
-              <Panel title={`Drift introduced (${data.drift_introduced.length})`}>
-                <DriftList drifts={data.drift_introduced} empty="No new disagreement between views." />
-              </Panel>
-              <Panel title={`Drift resolved (${data.drift_resolved.length})`}>
-                <DriftList drifts={data.drift_resolved} empty="No disagreement went away." />
-              </Panel>
-            </div>
-            <p className={cn("text-[10px] text-ink-faint")}>
-              Base {data.base.id.slice(0, 8)} ({data.base.kind}) → head {data.head.id.slice(0, 8)} ({data.head.kind}).
-            </p>
           </>
         ) : null}
       </div>

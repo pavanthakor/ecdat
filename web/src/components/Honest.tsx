@@ -1,15 +1,16 @@
 /**
- * The honesty rule's components (ADR-0031).
+ * The honesty rule's components (ADR-0031), in the design's card shape
+ * (ADR-0032).
  *
  * A metric is `computed` -- and then it shows its value AND its basis -- or it
  * is `not-computed`, and then it says so and why. There is no third rendering:
  * no zero standing in for "we did not measure", no skeleton that never
- * resolves, no bar drawn to fill a card. Every screen goes through these, so
- * the rule is enforced in one place and tested in one place.
+ * resolves, no bar drawn to fill a card. The design's sample figures are a
+ * mockup; where the backend computes nothing, this is what renders instead.
  */
 import type { ReactNode } from "react";
 
-import { cn } from "@/lib/format";
+import { cn, pad2 } from "@/lib/format";
 import type { Measured } from "@/state/metrics";
 
 export function NotComputed({
@@ -21,10 +22,10 @@ export function NotComputed({
 }) {
   return (
     <div className={cn("min-w-0", className)}>
-      <div className="text-2xs font-medium uppercase tracking-widest text-ink-faint">
+      <div className="font-mono text-[10.5px] font-medium uppercase tracking-wider text-ink-faint">
         Not computed
       </div>
-      <div className="mt-0.5 text-2xs leading-snug text-ink-faint">{reason}</div>
+      <div className="mt-0.5 text-[11.5px] leading-snug text-ink-faint">{reason}</div>
     </div>
   );
 }
@@ -34,50 +35,43 @@ export function MetricCard({
   label,
   measured,
   unit,
-  sub,
-  tone,
+  pad = false,
 }: {
   id: string;
   label: string;
   measured: Measured<number>;
   unit?: string;
-  /** Shown under a computed value in place of the basis. */
-  sub?: ReactNode;
-  tone?: string;
+  /** Two-digit counts, as the design shows them ("08"). */
+  pad?: boolean;
 }) {
   return (
     <div
       data-testid={`metric-${id}`}
       data-state={measured.status}
-      className="min-w-0 bg-panel px-3 py-2.5"
+      className="min-w-0 rounded-lg border border-line bg-panel px-4 pb-3.5 pt-3"
     >
-      <div className="truncate text-2xs uppercase tracking-widest text-ink-faint">
-        {label}
-      </div>
+      <div className="eyebrow truncate">{label}</div>
       {measured.status === "computed" ? (
         <>
           <div
             data-testid="metric-value"
-            className={cn("mt-0.5 font-mono text-xl leading-tight tabular-nums text-ink", tone)}
+            className="mt-2.5 text-[26px] font-semibold leading-none tabular-nums text-ink"
           >
-            {measured.value}
-            {unit ? <span className="ml-0.5 text-sm text-ink-dim">{unit}</span> : null}
+            {pad ? pad2(measured.value) : measured.value}
+            {unit ? <span className="text-[22px]">{unit}</span> : null}
           </div>
-          <div
-            className="mt-0.5 truncate text-2xs text-ink-faint"
-            title={typeof sub === "string" ? sub : measured.basis}
-          >
-            {sub ?? measured.basis}
+          <div className="mt-2.5 truncate text-[11.5px] text-ink-faint" title={measured.basis}>
+            {measured.basis}
           </div>
         </>
       ) : (
-        <NotComputed reason={measured.reason} className="mt-1" />
+        <NotComputed reason={measured.reason} className="mt-2.5" />
       )}
     </div>
   );
 }
 
-/** A screen-level "nothing to show", with the reason and (maybe) a way on. */
+/** A "nothing to show", with the reason and (maybe) a way on. */
 export function EmptyPanel({
   testId,
   kind,
@@ -95,13 +89,11 @@ export function EmptyPanel({
     <div
       data-testid={testId}
       data-kind={kind}
-      className={cn("border border-dashed border-line px-4 py-6", className)}
+      className={cn("rounded-lg border border-dashed border-line px-5 py-6", className)}
     >
-      <p className="text-xs font-medium text-ink-dim">{title}</p>
+      <p className="text-[13px] font-medium text-ink-dim">{title}</p>
       {children ? (
-        <div className="mt-1.5 max-w-2xl text-2xs leading-relaxed text-ink-faint">
-          {children}
-        </div>
+        <div className="mt-1.5 max-w-2xl text-[12px] leading-relaxed text-ink-faint">{children}</div>
       ) : null}
     </div>
   );

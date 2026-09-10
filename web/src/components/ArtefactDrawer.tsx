@@ -51,10 +51,13 @@ function Section({
   );
 }
 
-/** A rendered unified diff. `+`/`-` colour is git's convention, not severity. */
+/**
+ * A rendered unified diff, as the design has it: removed lines red, added lines
+ * full-contrast, context faint. The red is git's convention, not a band.
+ */
 export function DiffBlock({ diff }: { diff: string }) {
   return (
-    <pre className="mt-2 overflow-x-auto border border-line bg-ground p-2 font-mono text-2xs leading-relaxed">
+    <pre className="mt-3 overflow-x-auto rounded-md border border-line bg-ground p-3 font-mono text-[11.5px] leading-relaxed">
       {diff.split("\n").map((line, index) => (
         <div
           key={index}
@@ -62,7 +65,7 @@ export function DiffBlock({ diff }: { diff: string }) {
             line.startsWith("+++") || line.startsWith("---")
               ? "text-ink-dim"
               : line.startsWith("+")
-                ? "text-emerald-400"
+                ? "text-ink"
                 : line.startsWith("-")
                   ? "text-critical"
                   : "text-ink-faint"

@@ -4,6 +4,10 @@
  * FastAPI mounts the API at the root as well as under `/api`, so a console
  * path of `/scans` would be answered by the API's JSON on reload. Hash routes
  * never reach the server, work offline, and need no catch-all changes.
+ *
+ * ADR-0032: each screen's H1 is the design's title ("Scan History",
+ * "Scanner Coverage", ...), which is not always the nav label -- so the table
+ * below pins both.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -35,24 +39,26 @@ afterEach(() => {
   window.location.hash = "";
 });
 
-const TITLES: Record<string, string> = {
-  overview: "Overview",
-  scans: "Scans",
-  inventory: "Inventory",
-  risk: "Risk Analysis",
-  drift: "Cryptographic Drift",
-  roadmap: "Migration Roadmap",
-  fixes: "Verified Fixes",
-  agility: "Crypto Agility",
-  coverage: "Coverage",
-  reports: "Reports",
-  compare: "Compare Scans",
-  settings: "Settings",
+/** route id -> [nav label, the screen's H1 as the design titles it]. */
+const SCREENS: Record<string, [string, string]> = {
+  overview: ["Overview", "Cryptographic Security Overview"],
+  scans: ["Scans", "Scan History"],
+  inventory: ["Inventory", "Cryptographic Inventory"],
+  risk: ["Risk Analysis", "Risk Analysis"],
+  drift: ["Cryptographic Drift", "Cryptographic Drift"],
+  roadmap: ["Migration Roadmap", "Migration Roadmap"],
+  fixes: ["Verified Fixes", "Verified Fixes"],
+  agility: ["Crypto Agility", "Crypto Agility"],
+  coverage: ["Coverage", "Scanner Coverage"],
+  reports: ["Reports", "Reports"],
+  compare: ["Compare Scans", "Compare Scans"],
+  settings: ["Settings", "Settings"],
 };
 
 describe("the route table", () => {
   it("has every screen in the brief, grouped ANALYZE / PLAN / REPORT", () => {
-    expect(ROUTES.map((r) => r.id)).toEqual(Object.keys(TITLES));
+    expect(ROUTES.map((r) => r.id)).toEqual(Object.keys(SCREENS));
+    expect(ROUTES.map((r) => r.title)).toEqual(Object.values(SCREENS).map(([nav]) => nav));
     const groups = (group: string) =>
       ROUTES.filter((r) => r.group === group).map((r) => r.title);
     expect(groups("analyze")).toEqual([
@@ -82,24 +88,23 @@ describe("navigating the console", () => {
   it("every nav entry renders its screen and marks itself current", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByRole("heading", { level: 1, name: "Overview" });
+    await screen.findByRole("heading", { level: 1, name: "Cryptographic Security Overview" });
     const nav = screen.getByRole("navigation", { name: /primary/i });
 
-    for (const [id, title] of Object.entries(TITLES)) {
-      await user.click(within(nav).getByRole("link", { name: title }));
-      await screen.findByRole("heading", { level: 1, name: title });
+    for (const [id, [label, heading]] of Object.entries(SCREENS)) {
+      await user.click(within(nav).getByRole("link", { name: label }));
+      await screen.findByRole("heading", { level: 1, name: heading });
       expect(window.location.hash).toBe(`#/${ROUTES.find((r) => r.id === id)!.path}`);
-      expect(within(nav).getByRole("link", { name: title })).toHaveAttribute(
-        "aria-current",
-        "page",
-      );
+      expect(within(nav).getByRole("link", { name: label })).toHaveAttribute("aria-current", "page");
     }
   });
 
   it("a deep link opens its screen directly", async () => {
     window.location.hash = "#/coverage";
     render(<App />);
-    expect(await screen.findByRole("heading", { level: 1, name: "Coverage" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Scanner Coverage" }),
+    ).toBeInTheDocument();
   });
 
   it("an unknown route says so and offers the way back — it does not guess", async () => {
@@ -126,12 +131,12 @@ describe("navigating the console", () => {
   it("the top-bar search lands on a filtered Inventory", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByRole("heading", { level: 1, name: "Overview" });
+    await screen.findByRole("heading", { level: 1, name: "Cryptographic Security Overview" });
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent(/complete/i));
 
     await user.type(screen.getByRole("searchbox", { name: /search artefacts/i }), "MD5{Enter}");
 
-    await screen.findByRole("heading", { level: 1, name: "Inventory" });
+    await screen.findByRole("heading", { level: 1, name: "Cryptographic Inventory" });
     expect(window.location.hash).toBe("#/inventory?q=MD5");
     const rows = screen.getAllByRole("row").slice(1);
     expect(rows).toHaveLength(1);

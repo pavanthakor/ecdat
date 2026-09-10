@@ -1,36 +1,45 @@
 /**
- * The top bar: WHICH estate and scan, in what context, and is it ready.
+ * The top bar, as the design has it: SYSTEM / SCAN breadcrumb, the scoring
+ * context as bordered chips, search, a status pill and the operator menu.
  *
- * The breadcrumb names the system and the scan; the chips are the scoring
- * context the row recorded (quiet label + value, not alerts); the status says
- * what the console is doing right now; search lands on a filtered Inventory.
- * The user menu is cosmetic -- see UserMenu.
+ * The SCAN crumb is a real `<select>` styled as text, so switching scans stays
+ * one click from anywhere. Search lands on a filtered Inventory. There is no
+ * bell: nothing in ECDAT raises notifications, and a bell that never rings is
+ * a control that lies (ADR-0032).
  */
-import { ChevronRight, Search } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { useState } from "react";
 
 import { cn, formatDate } from "@/lib/format";
 import type { ScanView } from "@/state/inventory";
-import { QOrbitLogo } from "./Logo";
+import { statusOf } from "./status";
 import { UserMenu } from "./UserMenu";
 
-function MetaChip({ label, value }: { label: string; value: string | null }) {
+const SECTOR_LABEL: Record<string, string> = {
+  bfsi: "Financial services",
+  government: "Government",
+  strategic: "Strategic",
+  defence: "Defence",
+  power: "Power",
+  telecom: "Telecom",
+  transport: "Transport",
+  other: "Other",
+};
+
+const EXPOSURE_LABEL: Record<string, string> = {
+  internet: "Internet-facing",
+  internal: "Internal",
+  build: "Build-time",
+  unknown: "Unknown",
+};
+
+function Chip({ label, value }: { label: string; value: string | null }) {
   return (
-    <span className="flex items-baseline gap-1.5 whitespace-nowrap">
-      <span className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</span>
-      <span className="font-mono text-2xs text-ink-dim">{value ?? "—"}</span>
+    <span className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-line px-2 py-1 text-[10px]">
+      <span className="font-semibold uppercase tracking-wider text-ink-faint">{label}</span>
+      <span className="font-medium text-ink">{value ?? "not recorded"}</span>
     </span>
   );
-}
-
-type StatusKind = "loading" | "rescoring" | "error" | "no-scan" | "complete";
-
-function statusOf(view: ScanView): { kind: StatusKind; label: string } {
-  if (view.loading) return { kind: "loading", label: "Loading" };
-  if (view.rescoring) return { kind: "rescoring", label: "Re-scoring" };
-  if (view.error) return { kind: "error", label: "Error" };
-  if (!view.scan) return { kind: "no-scan", label: "No scan" };
-  return { kind: "complete", label: "Analysis complete" };
 }
 
 export function TopBar({
@@ -45,102 +54,91 @@ export function TopBar({
   const scan = view.scan;
 
   return (
-    <header className="flex h-12 shrink-0 items-center border-b border-line bg-panel">
-      <div className="flex h-full w-52 shrink-0 items-center border-r border-line px-4">
-        <QOrbitLogo tone={status.kind === "complete" || status.kind === "rescoring" ? "brand" : "muted"} />
-      </div>
-
-      <div className="flex min-w-0 flex-1 items-center gap-5 px-4">
-        <div className="flex min-w-0 items-center gap-2 text-2xs">
-          <span className="text-[10px] uppercase tracking-wider text-ink-faint">System</span>
-          <span className="max-w-[10rem] truncate font-medium text-ink">
-            {scan?.target.system ?? scan?.target.ref ?? "—"}
-          </span>
-          <ChevronRight className="h-3 w-3 shrink-0 text-ink-faint" aria-hidden />
-          <label
-            htmlFor="scan-select"
-            className="text-[10px] uppercase tracking-wider text-ink-faint"
-          >
-            Scan
-          </label>
+    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-line bg-ground px-6">
+      <div className="flex min-w-0 items-center gap-2 text-[13px]">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-faint">System</span>
+        <span className="max-w-[10rem] truncate text-ink">
+          {scan?.target.system ?? scan?.target.ref ?? "—"}
+        </span>
+        <span className="text-ink-faint">/</span>
+        <label
+          htmlFor="scan-select"
+          className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-faint"
+        >
+          Scan
+        </label>
+        <span className="relative flex min-w-0 items-center">
           <select
             id="scan-select"
             value={scan?.id ?? ""}
             onChange={(event) => view.selectScan(event.target.value)}
-            className={cn(
-              "h-7 max-w-[17rem] border border-line bg-ground px-1.5 font-mono text-2xs text-ink-dim",
-              "focus:border-ink-faint focus:outline-none",
-            )}
+            className="max-w-[15rem] cursor-pointer appearance-none truncate bg-transparent pr-5 text-[13px] text-ink focus:outline-none"
           >
             {view.scans.length === 0 ? <option value="">no scans</option> : null}
             {view.scans.map((row) => (
-              <option key={row.id} value={row.id}>
+              <option key={row.id} value={row.id} className="bg-panel">
                 {row.kind === "scan" ? "" : "↳ "}
-                {row.id.slice(0, 8)} · {row.kind} · {formatDate(row.created_at)}
+                {formatDate(row.created_at)} · {row.id.slice(0, 8)}
+                {row.kind === "scan" ? "" : ` · ${row.kind}`}
               </option>
             ))}
           </select>
-        </div>
-
-        <div className="hidden items-center gap-4 xl:flex">
-          <MetaChip label="Sector" value={scan?.sector ?? null} />
-          <MetaChip label="Exposure" value={scan?.exposure ?? null} />
-          <MetaChip label="Data" value={scan?.target.data_class ?? null} />
-        </div>
-
-        <form
-          role="search"
-          className="ml-auto"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSearch(query.trim());
-          }}
-        >
-          <label className="relative flex items-center">
-            <Search className="pointer-events-none absolute left-2 h-3 w-3 text-ink-faint" aria-hidden />
-            <input
-              type="search"
-              aria-label="Search artefacts"
-              placeholder="Search artefacts, bom-refs, paths"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className={cn(
-                "h-7 w-60 border border-line bg-ground pl-7 pr-2 text-xs text-ink",
-                "placeholder:text-ink-faint focus:border-ink-faint focus:outline-none",
-              )}
-            />
-          </label>
-        </form>
-
-        <span
-          data-testid="status"
-          data-status={status.kind}
-          title={status.kind === "error" ? (view.error ?? undefined) : undefined}
-          className={cn(
-            "flex items-center gap-1.5 whitespace-nowrap border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
-            status.kind === "error"
-              ? "border-critical/50 text-critical"
-              : status.kind === "complete"
-                ? "border-line text-ink-dim"
-                : "border-dashed border-line text-ink-faint",
-          )}
-        >
-          <span
-            className={cn(
-              "h-1.5 w-1.5",
-              status.kind === "complete"
-                ? "bg-ink-dim"
-                : status.kind === "error"
-                  ? "bg-critical"
-                  : "animate-pulse bg-ink-faint",
-            )}
-            aria-hidden
-          />
-          {status.label}
+          <ChevronDown className="pointer-events-none absolute right-0 h-3.5 w-3.5 text-ink-faint" aria-hidden />
         </span>
-
-        <UserMenu />
       </div>
+
+      <div className="hidden items-center gap-2 lg:flex">
+        <Chip label="Sector" value={scan?.sector ? (SECTOR_LABEL[scan.sector] ?? scan.sector) : null} />
+        <Chip label="Exposure" value={scan?.exposure ? (EXPOSURE_LABEL[scan.exposure] ?? scan.exposure) : null} />
+        <Chip label="Data class" value={scan?.target.data_class ?? null} />
+      </div>
+
+      <form
+        role="search"
+        className="ml-auto"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSearch(query.trim());
+        }}
+      >
+        <label className="relative flex items-center">
+          <Search className="pointer-events-none absolute left-3 h-4 w-4 text-ink-faint" aria-hidden />
+          <input
+            type="search"
+            aria-label="Search artefacts"
+            placeholder="Search artefacts"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className={cn(
+              "h-9 w-52 rounded-md border border-line bg-panel pl-9 pr-3 text-[13px] text-ink xl:w-64",
+              "placeholder:text-ink-faint focus:border-ink-faint focus:outline-none",
+            )}
+          />
+        </label>
+      </form>
+
+      <span
+        data-testid="status"
+        data-status={status.kind}
+        title={status.kind === "error" ? (view.error ?? undefined) : undefined}
+        className={cn(
+          "flex h-7 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold uppercase tracking-wider",
+          status.kind === "error" ? "border-critical/50 text-critical" : "border-tint-line bg-tint text-ink",
+        )}
+      >
+        <span
+          className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            status.kind === "complete" && "bg-ink",
+            status.kind === "error" && "bg-critical",
+            status.kind !== "complete" && status.kind !== "error" && "animate-pulse bg-ink-faint",
+          )}
+          aria-hidden
+        />
+        {status.label}
+      </span>
+
+      <UserMenu />
     </header>
   );
 }

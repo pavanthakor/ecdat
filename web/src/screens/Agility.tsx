@@ -1,143 +1,188 @@
 /**
- * CRYPTO AGILITY -- how much of the estate can change algorithm without a
- * code change.
+ * CRYPTO AGILITY -- laid out as web/design/ has it (ADR-0032): a large gauge
+ * beside the agility breakdown, then "where to improve next".
  *
- * REAL today: configurable, hard-coded and not-assessed counts, off
- * `ecdat:configurable` (ADR-0026), and the configurable share of the assessed
- * components. NOT COMPUTED: key-store custody and protocol renegotiation --
- * nothing in the backend measures either, so those rows say so and draw no
- * bar. The share excludes the not-assessed from its denominator: "no scanner
- * could tell" is not "hard-coded".
+ * REAL today: the configurable share, the configurable / hard-coded split and
+ * the not-assessed count, all off `ecdat:configurable` (ADR-0026). NOT
+ * COMPUTED: key-store flexibility and protocol negotiation -- the design shows
+ * sample percentages for both, and nothing in the backend measures either, so
+ * those rows say so and draw no bar. The design's "target 80%" and
+ * per-component agility percentages are not reproduced for the same reason.
  */
-import { useMemo } from "react";
+import { FileText } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import type { Artefact } from "@/api/types";
 import { EmptyPanel, NotComputed } from "@/components/Honest";
-import { Panel, ScreenHeader, SkeletonBlock } from "@/components/Panel";
-import { BAND_STYLE, cn, shortLocator, shortRef } from "@/lib/format";
+import { BandBadge, Button, Panel, ScreenHeader, SkeletonBlock } from "@/components/Panel";
+import { shortLocator } from "@/lib/format";
 import { hrefFor } from "@/lib/router";
 import { agility, type Measured } from "@/state/metrics";
 
 function Gauge({ measured }: { measured: Measured<number> }) {
-  // A half-ring, drawn with pathLength=100 so the dash IS the percentage.
-  const arc = "M 10 60 A 50 50 0 0 1 110 60";
+  // A half-ring drawn with pathLength=100, so the dash IS the percentage.
+  const arc = "M 20 100 A 80 80 0 0 1 180 100";
+  const done = measured.status === "computed";
   return (
     <div data-testid="agility-gauge" data-state={measured.status} className="flex flex-col items-center">
-      <svg viewBox="0 0 120 66" className="w-full max-w-[15rem]" aria-hidden>
-        <path
-          d={arc}
-          fill="none"
-          strokeWidth="9"
-          className={measured.status === "computed" ? "stroke-line" : "stroke-line/60"}
-          strokeDasharray={measured.status === "computed" ? undefined : "2 3"}
-        />
-        {measured.status === "computed" ? (
+      <div className="relative w-full max-w-[22rem]">
+        <svg viewBox="0 0 200 108" className="w-full" aria-hidden>
           <path
             d={arc}
             fill="none"
-            strokeWidth="9"
-            pathLength={100}
-            strokeDasharray={`${measured.value} 100`}
-            className="stroke-ink-dim"
+            strokeWidth="22"
+            className={done ? "stroke-tint-line" : "stroke-line"}
+            strokeDasharray={done ? undefined : "3 4"}
           />
+          {done ? (
+            <path
+              d={arc}
+              fill="none"
+              strokeWidth="22"
+              pathLength={100}
+              strokeDasharray={`${measured.value} 100`}
+              className="stroke-ink-dim"
+            />
+          ) : null}
+        </svg>
+        {done ? (
+          <div className="absolute inset-x-0 top-[42%] text-center">
+            <span className="text-[52px] font-semibold leading-none tabular-nums text-ink">{measured.value}</span>
+            <span className="text-[20px] text-ink-dim">%</span>
+          </div>
         ) : null}
-      </svg>
-      {measured.status === "computed" ? (
-        <div className="-mt-7 text-center">
-          <div className="font-mono text-3xl leading-none tabular-nums text-ink">{measured.value}%</div>
-          <div className="mt-2 text-2xs text-ink-faint">{measured.basis}</div>
-        </div>
+      </div>
+      {done ? (
+        <div className="mt-3 text-center text-[12px] text-ink-faint">{measured.basis}</div>
       ) : (
-        <NotComputed reason={measured.reason} className="-mt-4 text-center" />
+        <NotComputed reason={measured.reason} className="mt-3 text-center" />
       )}
     </div>
   );
 }
 
-function CountRow({
+function SignalRow({
   testId,
   label,
-  note,
-  count,
-  total,
+  value,
+  share,
+  sub,
 }: {
   testId: string;
   label: string;
-  note: string;
-  count: number;
-  total: number;
+  value: string;
+  /** Bar width in percent, or null for no bar. */
+  share: number | null;
+  sub: string;
 }) {
   return (
-    <div data-testid={testId} data-state="computed" className="grid grid-cols-[9rem_1fr_3rem] items-center gap-3 py-2">
-      <div>
-        <div className="text-xs text-ink">{label}</div>
-        <div className="text-[10px] leading-snug text-ink-faint">{note}</div>
+    <div data-testid={testId} data-state="computed" className="py-3.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[13px] text-ink">{label}</span>
+        <span className="font-mono text-[13px] tabular-nums text-ink">{value}</span>
       </div>
-      <div className="h-1.5 bg-line">
-        <div className="h-full bg-ink-dim" style={{ width: `${total === 0 ? 0 : (count / total) * 100}%` }} />
-      </div>
-      <div className="text-right font-mono text-sm tabular-nums text-ink">{count}</div>
+      {share !== null ? (
+        <div className="mt-2 h-1.5 rounded-full bg-line">
+          <div className="h-full rounded-full bg-ink/80" style={{ width: `${share}%` }} />
+        </div>
+      ) : null}
+      <div className="mt-1.5 text-[11.5px] text-ink-faint">{sub}</div>
     </div>
   );
 }
 
 function NotComputedRow({ testId, label, reason }: { testId: string; label: string; reason: string }) {
   return (
-    <div data-testid={testId} data-state="not-computed" className="grid grid-cols-[9rem_1fr] items-center gap-3 py-2">
-      <div className="text-xs text-ink-dim">{label}</div>
-      <div className="border border-dashed border-line px-2 py-1">
-        <NotComputed reason={reason} />
+    <div data-testid={testId} data-state="not-computed" className="py-3.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[13px] text-ink-dim">{label}</span>
+        <span className="font-mono text-[10.5px] uppercase tracking-wider text-ink-faint">Not computed</span>
       </div>
+      <div className="mt-1.5 text-[11.5px] text-ink-faint">{reason}</div>
     </div>
   );
 }
 
 export function AgilityScreen({ artefacts, loading }: { artefacts: Artefact[]; loading: boolean }) {
   const result = useMemo(() => agility(artefacts), [artefacts]);
+  const [method, setMethod] = useState(false);
+  const assessed = result.configurable + result.hardCoded;
+  const pct = (n: number) => Math.round((n / assessed) * 100);
 
   return (
     <div>
       <ScreenHeader
         title="Crypto Agility"
-        subtitle="How much of this estate can change algorithm by configuration rather than a code change, review and redeploy. Only what the CBOM records is shown; everything else says it is not computed."
+        subtitle="Measure how readily this estate can adopt new cryptography: how much of it changes algorithm by configuration rather than a code change, review and redeploy."
+        actions={
+          <Button aria-pressed={method} onClick={() => setMethod((open) => !open)}>
+            <FileText className="h-3.5 w-3.5" aria-hidden /> Methodology
+          </Button>
+        }
       />
       {loading && artefacts.length === 0 ? (
-        <div className="p-4">
-          <SkeletonBlock className="h-40 w-full" />
+        <div className="px-6 pb-6">
+          <SkeletonBlock className="h-72 w-full" />
         </div>
       ) : (
-        <div className="space-y-3 p-4">
-          <div className="grid gap-3 lg:grid-cols-[19rem_1fr]">
-            <Panel title="Configurable share">
+        <div className="space-y-4 px-6 pb-6">
+          {method ? (
+            <Panel eyebrow="Methodology" title="What this screen computes">
+              <ul className="list-disc space-y-1 pl-5 text-[12.5px] leading-relaxed text-ink-dim">
+                <li>
+                  <strong className="text-ink">Configurable share</strong> = configurable ÷ (configurable +
+                  hard-coded), from each component's <code className="font-mono">ecdat:configurable</code>{" "}
+                  (ADR-0026). Components no scanner could judge are left out of the denominator.
+                </li>
+                <li>
+                  <strong className="text-ink">Key-store flexibility</strong> and{" "}
+                  <strong className="text-ink">protocol negotiation</strong> are not computed: nothing in the
+                  backend detects key custody or runtime renegotiation yet (PUNCHLIST).
+                </li>
+                <li>No target percentage is shown: no policy pack defines one.</li>
+              </ul>
+            </Panel>
+          ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-[1fr_1.45fr]">
+            <Panel eyebrow="Current score" title="Configurable share">
               <Gauge measured={result.share} />
             </Panel>
-            <Panel
-              title="Agility breakdown"
-              meta="real: configurable · hard-coded · not assessed — not computed: key store · protocol"
-              bodyClassName="divide-y divide-line-soft px-3 py-1"
-            >
-              <CountRow
+            <Panel eyebrow="Implementation signals" title="Agility breakdown" bodyClassName="divide-y divide-line pt-1">
+              <SignalRow
                 testId="agility-configurable"
-                label="Configurable"
-                note="algorithm chosen by configuration"
-                count={result.configurable}
-                total={artefacts.length}
+                label="Configurable crypto"
+                value={assessed === 0 ? "—" : `${pct(result.configurable)}%`}
+                share={assessed === 0 ? null : pct(result.configurable)}
+                sub={
+                  assessed === 0
+                    ? "no component carries a configurability finding"
+                    : `${result.configurable} of ${assessed} assessed · algorithm chosen by configuration`
+                }
               />
-              <CountRow
+              <SignalRow
                 testId="agility-hard-coded"
-                label="Hard-coded"
-                note="fixed in code: a change is an edit, a review and a redeploy"
-                count={result.hardCoded}
-                total={artefacts.length}
+                label="Hard-coded crypto"
+                value={assessed === 0 ? "—" : `${pct(result.hardCoded)}%`}
+                share={assessed === 0 ? null : pct(result.hardCoded)}
+                sub={
+                  assessed === 0
+                    ? "no component carries a configurability finding"
+                    : `${result.hardCoded} of ${assessed} assessed · fixed in code: a change is an edit, a review and a redeploy`
+                }
               />
-              <CountRow
+              <SignalRow
                 testId="agility-unassessed"
                 label="Not assessed"
-                note="no scanner could tell; counted neither way"
-                count={result.unassessed}
-                total={artefacts.length}
+                value={`${result.unassessed}`}
+                share={null}
+                sub="components no scanner could judge — counted neither way"
               />
-              <NotComputedRow testId="agility-key-store" label="Key store" reason={result.keyStore.status === "not-computed" ? result.keyStore.reason : ""} />
+              <NotComputedRow
+                testId="agility-key-store"
+                label="Key store flexibility"
+                reason={result.keyStore.status === "not-computed" ? result.keyStore.reason : ""}
+              />
               <NotComputedRow
                 testId="agility-protocol"
                 label="Protocol negotiation"
@@ -146,44 +191,38 @@ export function AgilityScreen({ artefacts, loading }: { artefacts: Artefact[]; l
             </Panel>
           </div>
 
-          <Panel title={`Where to improve · hard-coded (${result.improve.length})`} bodyClassName="p-0">
+          <Panel eyebrow="System components" title="Where to improve next" bodyClassName="pt-1">
             {result.improve.length === 0 ? (
               <EmptyPanel
-                className="m-3"
-                title={result.hardCoded === 0 && result.configurable > 0 ? "Nothing is hard-coded" : "No component was assessed as hard-coded"}
+                title={
+                  result.hardCoded === 0 && result.configurable > 0
+                    ? "Nothing is hard-coded"
+                    : "No component was assessed as hard-coded"
+                }
               />
             ) : (
-              <table className="w-full border-collapse text-xs">
-                <thead>
-                  <tr className="bg-raised text-left text-2xs uppercase tracking-widest text-ink-faint">
-                    <th className="border-b border-line px-3 py-1.5 font-medium">Artefact</th>
-                    <th className="border-b border-line px-3 py-1.5 text-right font-medium">Score</th>
-                    <th className="border-b border-line px-3 py-1.5 font-medium">Fixed at</th>
-                    <th className="border-b border-line px-3 py-1.5 font-medium">To improve</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.improve.map((artefact) => (
-                    <tr key={artefact.bomRef} className="border-b border-line-soft">
-                      <td className="px-3 py-1">
-                        <a href={hrefFor("inventory", { ref: artefact.bomRef })} className="font-medium text-ink hover:underline">
-                          {artefact.name}
-                        </a>
-                        <span className="ml-2 font-mono text-[10px] text-ink-faint">{shortRef(artefact.bomRef)}</span>
-                      </td>
-                      <td className={cn("px-3 py-1 text-right font-mono tabular-nums", BAND_STYLE[artefact.band].text)}>
-                        {artefact.score}
-                      </td>
-                      <td className="px-3 py-1 font-mono text-[10px] text-ink-dim">
-                        {artefact.occurrences[0] ? shortLocator(artefact.occurrences[0].locator) : "—"}
-                      </td>
-                      <td className="px-3 py-1 text-2xs text-ink-faint">
-                        read the algorithm from configuration so a migration is a restart, not a release
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <ul>
+                {result.improve.map((artefact) => (
+                  <li
+                    key={artefact.bomRef}
+                    className="grid grid-cols-[minmax(9rem,1fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_auto] items-center gap-4 border-t border-line py-3 first:border-t-0"
+                  >
+                    <a
+                      href={hrefFor("inventory", { ref: artefact.bomRef })}
+                      className="truncate text-[13px] font-medium text-ink hover:underline"
+                    >
+                      {artefact.name}
+                    </a>
+                    <span className="truncate font-mono text-[11px] text-ink-dim">
+                      {artefact.occurrences[0] ? shortLocator(artefact.occurrences[0].locator) : "—"}
+                    </span>
+                    <span className="truncate text-[12px] text-ink-faint">
+                      fixed in code — read the algorithm from configuration
+                    </span>
+                    <BandBadge band={artefact.band} />
+                  </li>
+                ))}
+              </ul>
             )}
           </Panel>
         </div>

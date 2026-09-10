@@ -502,6 +502,7 @@ consequences:
 | [0029](docs/adr/0029-typed-params-symmetric-scoring.md) | Typed params before identity; symmetric key size vs data lifetime |
 | [0030](docs/adr/0030-usage-classification.md) | Usage classification drives the PQC target; JS weak-RNG taint |
 | [0031](docs/adr/0031-qorbit-dashboard.md) | The Q-orbit console: every screen real or "not computed"; compare endpoint |
+| [0032](docs/adr/0032-qorbit-design-match.md) | Console matched to the design screenshots; dead frontend code removed |
 
 ---
 

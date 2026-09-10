@@ -1,20 +1,24 @@
 /**
- * OVERVIEW -- how bad, where, and how it moves with the CRQC horizon.
+ * OVERVIEW -- "Cryptographic Security Overview", laid out as web/design/ has it
+ * (ADR-0032): nine metric cards on a five-column grid, risk distribution beside
+ * the CRQC horizon, then the priority queue beside the coverage pulse.
  *
- * Every band-derived number here is counted from the document ON SCREEN, so
- * the whole screen follows the Mosca slider through a real rescore round trip
- * (ADR-0016). Cards read off the stored ROW (drift) say so, and do not move.
- * Every card is `computed` with its basis or `not-computed` with its reason.
+ * Every band-derived number is counted from the document ON SCREEN, so the
+ * whole screen follows the Mosca slider through a real rescore round trip
+ * (ADR-0016). Every card is `computed` with its basis or `not-computed` with
+ * its reason. The design's sample captions ("+4 pts since baseline") are not
+ * reproduced -- nothing computes them.
  */
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ChevronRight, Download } from "lucide-react";
 import { useMemo } from "react";
 
+import { cbomUrl } from "@/api/client";
 import { BANDS, VIEWS } from "@/api/types";
 import { EmptyPanel, MetricCard, NotComputed } from "@/components/Honest";
 import { InfoTip } from "@/components/InfoTip";
-import { Panel, ScreenHeader, SkeletonBlock } from "@/components/Panel";
+import { BandBadge, LinkButton, Panel, ScreenHeader, SkeletonBlock, Tag } from "@/components/Panel";
 import { Slider } from "@/components/ui/slider";
-import { BAND_STYLE, cn, shortRef } from "@/lib/format";
+import { BAND_STYLE, cn, pad2, shortLocator } from "@/lib/format";
 import { hrefFor } from "@/lib/router";
 import { Z_MAX, Z_MIN, type ScanView } from "@/state/inventory";
 import {
@@ -40,32 +44,21 @@ const MOSCA_EXPLAINER =
   "re-scores the stored inventory through the rescore endpoint; nothing is " +
   "re-scanned, and the original verdict stays on record.";
 
-function rangeText(range: Range): string {
-  return range.min === range.max ? `${range.min}` : `${range.min}–${range.max}`;
+/** Slider tick marks, as horizons in years; labelled as calendar years. */
+const TICKS = [5, 10, 15, 20].filter((z) => z >= Z_MIN && z <= Z_MAX);
+
+function yearsText(range: Range): string {
+  return range.min === range.max ? `${range.min} years` : `${range.min}–${range.max} years`;
 }
 
-function Term({
-  label,
-  measured,
-  note,
-}: {
-  label: string;
-  measured: Measured<Range>;
-  note?: string;
-}) {
+function Term({ label, measured }: { label: string; measured: Measured<Range> }) {
   return (
-    <div className="bg-panel px-3 py-2">
+    <div className="min-w-0">
       <div className="eyebrow">{label}</div>
       {measured.status === "computed" ? (
-        <>
-          <div className="mt-0.5 font-mono text-base tabular-nums text-ink">
-            {rangeText(measured.value)}
-            <span className="ml-0.5 text-2xs text-ink-faint">y</span>
-          </div>
-          <div className="text-[10px] text-ink-faint">{note ?? measured.basis}</div>
-        </>
+        <div className="mt-1.5 font-mono text-[14px] text-ink">{yearsText(measured.value)}</div>
       ) : (
-        <NotComputed reason={measured.reason} className="mt-1" />
+        <NotComputed reason={measured.reason} className="mt-1.5" />
       )}
     </div>
   );
@@ -79,14 +72,30 @@ export function OverviewScreen({ view }: { view: ScanView }) {
   const quantum = useMemo(() => quantumExposure(artefacts), [artefacts]);
   const coverage = useMemo(() => viewCoverage(artefacts), [artefacts]);
   const agile = useMemo(() => agility(artefacts), [artefacts]);
-  const queue = useMemo(() => priorityQueue(artefacts, 8), [artefacts]);
+  const queue = useMemo(() => priorityQueue(artefacts, 6), [artefacts]);
   const histogram = useMemo(() => scoreHistogram(artefacts), [artefacts]);
   const drift = driftMeasure(scan, artefacts);
+  const baseYear = new Date().getUTCFullYear();
 
   const header = (
     <ScreenHeader
-      title="Overview"
-      subtitle="What this estate holds, how exposed it is, and how that changes with the CRQC horizon. Band counts follow the slider; nothing on this screen is re-scanned."
+      title="Cryptographic Security Overview"
+      subtitle={
+        scan
+          ? `${scan.target.system ?? scan.target.ref} / scan ${scan.id.slice(0, 8)} · ${scan.target.kind} ${scan.target.ref}`
+          : "No scan loaded"
+      }
+      actions={
+        scan ? (
+          <LinkButton
+            href={cbomUrl(scan.id)}
+            download={`qorbit-cbom-${scan.id.slice(0, 8)}.json`}
+            title="Download the stored CBOM this overview is computed from"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden /> Export snapshot
+          </LinkButton>
+        ) : undefined
+      }
     />
   );
 
@@ -94,16 +103,13 @@ export function OverviewScreen({ view }: { view: ScanView }) {
     return (
       <div>
         {header}
-        <div className="space-y-3 p-4">
-          <div className="grid grid-cols-3 gap-px border border-line bg-line sm:grid-cols-5 xl:grid-cols-9">
+        <div className="space-y-4 px-6 pb-6">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
             {Array.from({ length: 9 }).map((_, i) => (
-              <div key={i} className="bg-panel px-3 py-3">
-                <SkeletonBlock className="h-2 w-16" />
-                <SkeletonBlock className="mt-2 h-5 w-10" />
-              </div>
+              <SkeletonBlock key={i} className="h-[6.5rem]" />
             ))}
           </div>
-          <SkeletonBlock className="h-40 w-full" />
+          <SkeletonBlock className="h-72 w-full" />
         </div>
       </div>
     );
@@ -113,257 +119,295 @@ export function OverviewScreen({ view }: { view: ScanView }) {
     return (
       <div>
         {header}
-        <div className="p-4">
+        <div className="px-6 pb-6">
           <EmptyPanel title="No scan in this database">
             Nothing to summarise yet. Run a scan from{" "}
             <a className="text-ink-dim underline" href={hrefFor("scans")}>
               Scans
             </a>
-            , or with <code className="font-mono">ecdat scan</code> against the
-            same <code className="font-mono">ECDAT_DB</code> the server opened.
+            , or with <code className="font-mono">ecdat scan</code> against the same{" "}
+            <code className="font-mono">ECDAT_DB</code> the server opened.
           </EmptyPanel>
         </div>
       </div>
     );
   }
 
-  const inBand = (count: number): Measured<number> =>
-    computed(count, `at z = ${mosca.z ?? view.zYears}y, on screen`);
+  const total = artefacts.length;
+  const ofInventory = (n: number) =>
+    total === 0 ? "of an empty inventory" : `${Math.round((n / total) * 100)}% of inventory`;
   const quantumMeasure: Measured<number> =
-    artefacts.length === 0
+    total === 0
       ? notComputed("this scan holds no artefacts")
-      : computed(
-          quantum.broken,
-          `${quantum.weakened} weakened · ${quantum.unassessed} without a quantum verdict`,
-        );
-  const bandTotal = BANDS.reduce((sum, band) => sum + live[band], 0);
+      : computed(quantum.broken, `${ofInventory(quantum.broken)} · ${quantum.unassessed} without a verdict`);
   const peak = Math.max(1, ...histogram.map((bucket) => bucket.count));
+  const exposed = mosca.delta.status === "computed" ? mosca.delta.value.exposed : null;
 
   return (
     <div>
       {header}
-      <div className={cn("space-y-3 p-4 transition-opacity", view.rescoring && "opacity-70")}>
-        <div className="grid grid-cols-3 gap-px border border-line bg-line sm:grid-cols-5 xl:grid-cols-9">
+      <div className={cn("space-y-4 px-6 pb-6 transition-opacity", view.rescoring && "opacity-70")}>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
           <MetricCard
             id="total"
-            label="Artefacts"
-            measured={computed(artefacts.length, `${scan.target.kind} · ${scan.target.ref}`)}
+            label="Total artefacts"
+            measured={computed(total, `across ${coverage.collected.length} of 3 evidence layers`)}
           />
           {BANDS.map((band) => (
             <MetricCard
               key={band}
               id={band.toLowerCase()}
               label={band}
-              measured={inBand(live[band])}
-              tone={live[band] > 0 && band !== "Low" ? BAND_STYLE[band].text : undefined}
+              pad
+              measured={computed(live[band], ofInventory(live[band]))}
             />
           ))}
-          <MetricCard
-            id="quantum"
-            label="Quantum-vulnerable"
-            measured={quantumMeasure}
-            tone={quantum.broken > 0 ? "text-critical" : undefined}
-          />
-          <MetricCard id="drift" label="Drift" measured={drift} />
-          <MetricCard id="coverage" label="View coverage" measured={coverage.share} unit="%" />
-          <MetricCard id="agility" label="Crypto agility" measured={agile.share} unit="%" />
+          <MetricCard id="quantum" label="Quantum vulnerable" pad measured={quantumMeasure} />
+          <MetricCard id="drift" label="Drift findings" pad measured={drift} />
+          <MetricCard id="coverage" label="Coverage" unit="%" measured={coverage.share} />
+          <MetricCard id="agility" label="Crypto agility" unit="%" measured={agile.share} />
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[1.3fr_1fr]">
+        <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+          <Panel
+            eyebrow="Current scan / severity"
+            title="Risk distribution"
+            meta={<span className="font-mono text-[10.5px] uppercase tracking-wider">{total} artefacts</span>}
+          >
+            <div className="flex h-3 w-full gap-1">
+              {BANDS.map((band) =>
+                live[band] === 0 ? null : (
+                  <div
+                    key={band}
+                    title={`${band}: ${live[band]}`}
+                    style={{ flexGrow: live[band] }}
+                    className={cn("rounded-[3px]", BAND_STYLE[band].dot)}
+                  />
+                ),
+              )}
+              {total === 0 ? <div className="flex-1 rounded-[3px] border border-dashed border-line" /> : null}
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-y-1 sm:grid-cols-4">
+              {BANDS.map((band) => (
+                <div key={band} className="flex items-center justify-between gap-2 pr-4">
+                  <span className="flex items-center gap-1.5 text-[12px] text-ink-dim">
+                    <span className={cn("h-2 w-2 rounded-full", BAND_STYLE[band].dot)} aria-hidden />
+                    {band}
+                  </span>
+                  <span className="font-mono text-[12px] tabular-nums text-ink">{pad2(live[band])}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 border-t border-line pt-4">
+              <div className="flex items-baseline justify-between">
+                <span className="eyebrow">Risk score distribution</span>
+                <span className="font-mono text-[10.5px] uppercase tracking-wider text-ink-faint">
+                  Score / 100 · peak {peak}
+                </span>
+              </div>
+              {/* Bars with a baseline and positioned ticks, so a height means a count. */}
+              <div className="mt-3 flex h-24 items-end gap-1.5 border-b border-line">
+                {histogram.map((bucket) => (
+                  <div
+                    key={bucket.floor}
+                    title={`score ${bucket.floor}–${bucket.floor + 9}: ${bucket.count}`}
+                    className="flex h-full flex-1 items-end"
+                  >
+                    <div
+                      className={cn(
+                        "w-full rounded-t-[2px]",
+                        bucket.count === 0 ? "h-px bg-line" : BAND_STYLE[bucket.band].dot,
+                      )}
+                      style={bucket.count === 0 ? undefined : { height: `${(bucket.count / peak) * 100}%` }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="relative mt-1.5 h-3 font-mono text-[10px] tabular-nums text-ink-faint">
+                {[0, 25, 50, 75, 100].map((tick) => (
+                  <span
+                    key={tick}
+                    className={cn(
+                      "absolute -translate-x-1/2",
+                      tick === 0 && "translate-x-0",
+                      tick === 100 && "-translate-x-full",
+                    )}
+                    style={{ left: `${tick}%` }}
+                  >
+                    {pad2(tick)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </Panel>
+
           {/* The Mosca control. Changing Z re-scores the STORED document through
               POST /scans/{id}/rescore -- a new linked row, never an edit. */}
-          <Panel title="CRQC horizon · Mosca" meta={<InfoTip label={MOSCA_EXPLAINER} />}>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              <div className="flex items-baseline gap-1.5">
-                <span
+          <Panel
+            eyebrow="Quantum risk model / Mosca"
+            title={
+              <span className="flex items-center gap-2">
+                CRQC horizon <InfoTip label={MOSCA_EXPLAINER} />
+              </span>
+            }
+            meta={
+              exposed === null ? null : exposed > 0 ? (
+                <span className="rounded-[3px] border border-critical/60 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-critical">
+                  At risk
+                </span>
+              ) : (
+                <Tag>Within horizon</Tag>
+              )
+            }
+          >
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <div
                   className={cn(
-                    "font-mono text-3xl leading-none tabular-nums transition-colors",
+                    "font-mono text-[40px] font-light leading-none tabular-nums transition-colors",
                     view.rescoring ? "text-ink-dim" : "text-ink",
                   )}
                 >
-                  {view.zYears}
-                </span>
-                <span className="text-2xs text-ink-faint">years to a CRQC</span>
+                  {baseYear + view.zYears}
+                </div>
+                <div className="mt-1.5 text-[12px] text-ink-faint">
+                  Assumed CRQC horizon · z = {view.zYears} years
+                </div>
               </div>
-              <div className="flex min-w-[12rem] flex-1 items-center gap-3">
-                <span className="font-mono text-2xs tabular-nums text-ink-faint">{Z_MIN}</span>
-                <Slider
-                  value={[view.zYears]}
-                  min={Z_MIN}
-                  max={Z_MAX}
-                  step={1}
-                  aria-label="Years until a cryptographically relevant quantum computer"
-                  onValueChange={([value]) => view.setZYears(value)}
-                />
-                <span className="font-mono text-2xs tabular-nums text-ink-faint">{Z_MAX}</span>
+              <div className="text-right">
+                {exposed === null ? (
+                  <div className="text-[12px] text-ink-faint">affected findings not computed</div>
+                ) : (
+                  <div className="font-mono text-[13px] text-ink" title="artefacts where x + y > z">
+                    {exposed} affected findings
+                  </div>
+                )}
+                <div className="mt-0.5 text-[11px] text-ink-faint">
+                  {view.rescoring ? "re-scoring the stored CBOM…" : "Live model consequence"}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <Slider
+                value={[view.zYears]}
+                min={Z_MIN}
+                max={Z_MAX}
+                step={1}
+                aria-label="Years until a cryptographically relevant quantum computer"
+                onValueChange={([value]) => view.setZYears(value)}
+              />
+              <div className="relative mt-2.5 h-3 font-mono text-[10.5px] tabular-nums text-ink-faint">
+                {TICKS.map((z) => (
+                  <span
+                    key={z}
+                    className={cn(
+                      "absolute -translate-x-1/2",
+                      z === Z_MIN && "translate-x-0",
+                      z === Z_MAX && "-translate-x-full",
+                      z === view.zYears && "font-semibold text-ink",
+                    )}
+                    style={{ left: `${((z - Z_MIN) / (Z_MAX - Z_MIN)) * 100}%` }}
+                  >
+                    {baseYear + z}
+                  </span>
+                ))}
               </div>
             </div>
 
             <div
               data-testid="live-readout"
               className={cn(
-                "mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 transition-opacity",
+                "mt-6 grid grid-cols-4 divide-x divide-line border-t border-line pt-4 transition-opacity",
                 view.rescoring ? "opacity-40" : "opacity-100",
               )}
             >
               {BANDS.map((band) => (
-                <span key={band} className="flex items-baseline gap-1.5">
-                  <span className={cn("h-2 w-2 self-center", BAND_STYLE[band].dot)} />
-                  <span
-                    data-testid={`live-${band}`}
-                    className={cn(
-                      "font-mono text-base tabular-nums",
-                      live[band] > 0 ? BAND_STYLE[band].text : "text-ink-faint",
-                    )}
-                  >
+                <div key={band} className="px-3 first:pl-0">
+                  <span className={cn("block h-1.5 w-1.5 rounded-full", BAND_STYLE[band].dot)} aria-hidden />
+                  <div data-testid={`live-${band}`} className="mt-2 text-xl tabular-nums text-ink">
                     {live[band]}
-                  </span>
-                  <span className="text-2xs text-ink-faint">{band}</span>
-                </span>
+                  </div>
+                  <div className="text-[11px] text-ink-faint">{band}</div>
+                </div>
               ))}
-              <span className="ml-auto text-[10px] text-ink-faint">
-                {view.rescoring ? "re-scoring stored CBOM…" : "live — recomputed on drag"}
-              </span>
             </div>
 
-            <div className="mt-3 grid grid-cols-3 gap-px border border-line bg-line">
-              <Term label="Data shelf-life · x" measured={mosca.x} note="per data class" />
-              <Term label="Migration time · y" measured={mosca.y} note="an estimate, not a measurement" />
-              <div data-testid="horizon-delta" className="bg-panel px-3 py-2">
-                <div className="eyebrow">Horizon delta · z − (x + y)</div>
+            <div className="mt-4 grid grid-cols-3 gap-4 border-t border-line pt-4">
+              <Term label="Data shelf life" measured={mosca.x} />
+              <Term label="Migration time" measured={mosca.y} />
+              <div data-testid="horizon-delta" className="min-w-0">
+                <div className="eyebrow">Horizon delta</div>
                 {mosca.delta.status === "computed" ? (
                   <>
                     <div
                       className={cn(
-                        "mt-0.5 font-mono text-base tabular-nums",
+                        "mt-1.5 font-mono text-[14px]",
                         mosca.delta.value.worst < 0 ? "text-critical" : "text-ink",
                       )}
                     >
-                      {mosca.delta.value.worst > 0 ? `+${mosca.delta.value.worst}` : mosca.delta.value.worst}
-                      <span className="ml-0.5 text-2xs text-ink-faint">y worst</span>
+                      {mosca.delta.value.worst > 0 ? `+${mosca.delta.value.worst}` : mosca.delta.value.worst} years
                     </div>
-                    <div className="text-[10px] text-ink-faint">
-                      {mosca.delta.value.exposed} of {mosca.delta.value.assessed} exposed (x + y &gt; z)
-                    </div>
+                    <div className="mt-0.5 text-[10.5px] text-ink-faint">z − (x + y), worst component</div>
                   </>
                 ) : (
-                  <NotComputed reason={mosca.delta.reason} className="mt-1" />
+                  <NotComputed reason={mosca.delta.reason} className="mt-1.5" />
                 )}
               </div>
             </div>
           </Panel>
-
-          <Panel title="Risk distribution" meta={<span className="font-mono">{bandTotal}</span>}>
-            <div className="flex h-2 w-full overflow-hidden bg-line">
-              {BANDS.map((band) =>
-                live[band] === 0 ? null : (
-                  <div
-                    key={band}
-                    title={`${band}: ${live[band]}`}
-                    style={{ width: `${(live[band] / Math.max(1, bandTotal)) * 100}%` }}
-                    className={BAND_STYLE[band].dot}
-                  />
-                ),
-              )}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              {BANDS.map((band) => (
-                <span key={band} className="flex items-center gap-1.5 text-2xs">
-                  <span className={cn("h-2 w-2", BAND_STYLE[band].dot)} />
-                  <span className="text-ink-faint">{band}</span>
-                  <span className="font-mono tabular-nums text-ink-dim">{live[band]}</span>
-                </span>
-              ))}
-            </div>
-
-            <div className="mt-4 flex items-baseline justify-between">
-              <span className="eyebrow">Risk-score histogram</span>
-              <span className="font-mono text-[10px] tabular-nums text-ink-faint">peak {peak}</span>
-            </div>
-            {/* Bars with a baseline and positioned axis labels, so a height means a count. */}
-            <div className="mt-1.5 flex h-20 items-end gap-px border-b border-line">
-              {histogram.map((bucket) => (
-                <div
-                  key={bucket.floor}
-                  title={`score ${bucket.floor}–${bucket.floor + 9}: ${bucket.count}`}
-                  className="flex h-full flex-1 items-end"
-                >
-                  <div
-                    className={cn("w-full", bucket.count === 0 ? "h-px bg-line" : BAND_STYLE[bucket.band].dot)}
-                    style={bucket.count === 0 ? undefined : { height: `${(bucket.count / peak) * 100}%` }}
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="relative mt-1 h-3 font-mono text-[10px] tabular-nums text-ink-faint">
-              {[0, 40, 60, 80, 100].map((tick) => (
-                <span
-                  key={tick}
-                  className="absolute -translate-x-1/2 first:translate-x-0 last:-translate-x-full"
-                  style={{ left: `${tick}%` }}
-                >
-                  {tick}
-                </span>
-              ))}
-            </div>
-          </Panel>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[1.3fr_1fr]">
+        <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
           <Panel
+            eyebrow="Investigation queue"
             title="Priority findings"
             meta={
-              <a href={hrefFor("inventory")} className="inline-flex items-center gap-1 hover:text-ink">
-                Inventory <ArrowRight className="h-3 w-3" aria-hidden />
+              <a
+                href={hrefFor("inventory")}
+                className="inline-flex items-center gap-1 text-[13px] font-medium text-ink hover:text-white"
+              >
+                View inventory <ArrowRight className="h-3.5 w-3.5" aria-hidden />
               </a>
             }
-            bodyClassName="p-0"
+            bodyClassName="pt-2"
           >
             {queue.length === 0 ? (
-              <EmptyPanel className="m-3" title="This scan found no cryptographic artefacts" />
+              <EmptyPanel title="This scan found no cryptographic artefacts" />
             ) : (
               <ol>
                 {queue.map((artefact) => {
                   const target = targetOf(artefact);
+                  const place =
+                    artefact.endpoint ??
+                    (artefact.occurrences[0] ? shortLocator(artefact.occurrences[0].locator) : "no location");
                   return (
-                    <li key={artefact.bomRef} className="border-b border-line-soft last:border-b-0">
+                    <li key={artefact.bomRef} className="border-t border-line first:border-t-0">
                       <a
                         href={hrefFor("inventory", { ref: artefact.bomRef })}
-                        className={cn(
-                          "grid grid-cols-[1fr_auto_auto] items-baseline gap-3 border-l-2 px-3 py-1.5 transition-colors hover:bg-raised/60",
-                          artefact.band === "Critical"
-                            ? "border-l-critical"
-                            : artefact.band === "High"
-                              ? "border-l-high"
-                              : "border-l-transparent",
-                        )}
+                        className="flex items-center gap-4 py-3 transition-colors hover:bg-raised/40"
                       >
-                        <span className="min-w-0 truncate">
-                          <span className="text-xs font-medium text-ink">{artefact.name}</span>
-                          <span className="ml-2 font-mono text-[10px] text-ink-faint">
-                            {shortRef(artefact.bomRef)}
+                        <span
+                          className={cn("h-10 w-[3px] shrink-0 rounded-full", BAND_STYLE[artefact.band].dot)}
+                          aria-hidden
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="text-[14px] font-semibold text-ink">{artefact.name}</span>
+                            <BandBadge band={artefact.band} />
+                            {artefact.drift.length > 0 ? <Tag variant="strong">Drift</Tag> : null}
                           </span>
-                          <span className="ml-2 text-2xs text-ink-faint">
-                            {artefact.usage}
+                          <span className="mt-1 block truncate font-mono text-[11.5px] text-ink-faint">
+                            {place} · {artefact.usage}
                             {target ? ` → ${target}` : ""}
                           </span>
                         </span>
-                        <span
-                          className={cn(
-                            "font-mono text-[10px] tabular-nums",
-                            artefact.deadlineProvisional ? "text-ink-faint line-through" : "text-ink-dim",
-                          )}
-                        >
-                          {artefact.deadline ?? "no deadline"}
+                        <span className="shrink-0 text-right">
+                          <span className="block text-xl tabular-nums text-ink">{artefact.score}</span>
+                          <span className="eyebrow">Risk score</span>
                         </span>
-                        <span
-                          className={cn(
-                            "w-8 text-right font-mono text-xs tabular-nums",
-                            BAND_STYLE[artefact.band].text,
-                          )}
-                        >
-                          {artefact.score}
-                        </span>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint" aria-hidden />
                       </a>
                     </li>
                   );
@@ -373,50 +417,49 @@ export function OverviewScreen({ view }: { view: ScanView }) {
           </Panel>
 
           <Panel
+            eyebrow="Evidence layers"
             title="Coverage pulse"
             meta={
-              <a href={hrefFor("coverage")} className="inline-flex items-center gap-1 hover:text-ink">
-                Coverage <ArrowRight className="h-3 w-3" aria-hidden />
-              </a>
+              coverage.share.status === "computed" ? (
+                <span className="text-[26px] font-semibold leading-none tabular-nums text-ink">
+                  {coverage.share.value}%
+                </span>
+              ) : (
+                <span className="font-mono text-[10.5px] uppercase tracking-wider">not computed</span>
+              )
             }
           >
-            <div className="space-y-2.5">
+            <div className="space-y-4">
               {VIEWS.map((name) => {
                 const pulse = coverage.pulse[name];
                 const collected = coverage.collected.includes(name);
                 return (
                   <div key={name} data-testid={`pulse-${name}`}>
-                    <div className="flex items-baseline justify-between text-2xs">
-                      <span className="uppercase tracking-wider text-ink-dim">{name}</span>
-                      {collected ? (
-                        <span className="font-mono tabular-nums text-ink-dim">
-                          {pulse.percent}%{" "}
-                          <span className="text-ink-faint">
-                            {pulse.seen}/{pulse.total}
-                          </span>
-                        </span>
-                      ) : (
-                        <span className="text-ink-faint">not collected</span>
-                      )}
+                    <div className="flex items-baseline justify-between text-[11.5px]">
+                      <span className="font-medium uppercase tracking-wider text-ink">{name}</span>
+                      <span className="font-mono tabular-nums text-ink-dim">
+                        {collected ? `${pulse.percent}%` : "not collected"}
+                      </span>
                     </div>
                     <div
                       className={cn(
-                        "mt-1 h-1.5 w-full",
+                        "mt-2 h-2 w-full rounded-full",
                         collected ? "bg-line" : "border border-dashed border-line",
                       )}
                     >
                       {collected ? (
-                        <div className="h-full bg-ink-dim" style={{ width: `${pulse.percent}%` }} />
+                        <div className="h-full rounded-full bg-ink/80" style={{ width: `${pulse.percent}%` }} />
                       ) : null}
+                    </div>
+                    <div className="mt-1.5 text-[11px] text-ink-faint">
+                      {collected
+                        ? `${pulse.seen} of ${pulse.total} artefacts sighted in this view or its correlation group`
+                        : "nothing in this scan says anything about this view"}
                     </div>
                   </div>
                 );
               })}
             </div>
-            <p className="mt-3 text-[10px] leading-relaxed text-ink-faint">
-              Share of artefacts sighted in each view, directly or through their
-              correlation group. A view nobody collected is a gap, not a clean result.
-            </p>
           </Panel>
         </div>
       </div>

@@ -22,7 +22,7 @@ const SECTORS: Sector[] = ["bfsi", "government", "strategic", "defence", "power"
 const EXPOSURES: Exposure[] = ["internet", "internal", "build", "unknown"];
 
 const field =
-  "h-7 w-full border border-line bg-ground px-2 text-xs text-ink placeholder:text-ink-faint focus:border-ink-faint focus:outline-none";
+  "h-8 w-full rounded-md border border-line bg-ground px-2.5 text-[13px] text-ink placeholder:text-ink-faint focus:border-ink-faint focus:outline-none";
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
@@ -120,7 +120,7 @@ export function NewScanDialog({
             aria-selected={mode === value}
             onClick={() => setMode(value)}
             className={cn(
-              "border px-2.5 py-1 text-2xs",
+              "rounded-md border px-3 py-1 text-[12px]",
               mode === value ? "border-ink-dim bg-raised text-ink" : "border-line text-ink-faint hover:text-ink-dim",
             )}
           >

@@ -2,10 +2,11 @@
  * The user menu -- VISUAL ONLY (ADR-0031).
  *
  * ECDAT has no authentication yet: the API serves the whole inventory, and its
- * verified fix diffs, unauthenticated on localhost (PUNCHLIST, Tier-3). A menu
- * that offered "Sign out" would imply a session that does not exist, so every
- * entry here is disabled and the panel says why in plain text.
+ * verified fix diffs, unauthenticated on localhost (PUNCHLIST, Tier-3). The
+ * trigger has the design's shape -- round avatar, name, role, chevron -- and
+ * every entry in the menu is disabled, with a sentence saying why.
  */
+import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/format";
@@ -38,20 +39,27 @@ export function UserMenu() {
         aria-label="User menu (cosmetic until authentication lands)"
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          "flex h-7 w-7 items-center justify-center border text-[10px] font-semibold tracking-wide transition-colors",
-          open ? "border-ink-dim bg-raised text-ink" : "border-line text-ink-dim hover:border-ink-faint",
+          "flex items-center gap-2.5 rounded-md border px-2 py-1.5 transition-colors",
+          open ? "border-ink-dim bg-raised" : "border-line hover:border-ink-faint",
         )}
       >
-        OP
+        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-ink-faint text-[10px] font-semibold text-ink">
+          OP
+        </span>
+        <span className="hidden text-left leading-tight xl:block">
+          <span className="block text-[12px] font-medium text-ink">Local operator</span>
+          <span className="block text-[9.5px] uppercase tracking-wider text-ink-faint">No auth · cosmetic</span>
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 text-ink-faint" aria-hidden />
       </button>
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 top-9 z-30 w-64 border border-line bg-panel shadow-2xl"
+          className="absolute right-0 top-11 z-30 w-64 rounded-lg border border-line bg-panel shadow-2xl"
         >
-          <div className="border-b border-line px-3 py-2">
-            <div className="text-xs font-medium text-ink">Local operator</div>
-            <div className="mt-0.5 text-2xs leading-snug text-ink-faint">
+          <div className="border-b border-line px-3 py-2.5">
+            <div className="text-[12.5px] font-medium text-ink">Local operator</div>
+            <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">
               No authentication is configured. This menu is cosmetic until the
               Tier-3 auth work lands; the API is unauthenticated on localhost.
             </div>
@@ -61,7 +69,7 @@ export function UserMenu() {
               key={item}
               role="menuitem"
               aria-disabled="true"
-              className="cursor-not-allowed px-3 py-1.5 text-2xs text-ink-faint"
+              className="cursor-not-allowed px-3 py-1.5 text-[12px] text-ink-faint"
             >
               {item}
             </div>

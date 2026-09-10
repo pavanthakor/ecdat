@@ -60,11 +60,6 @@ export function listScans(kind?: string): Promise<ScanSummary[]> {
   return request<ScanSummary[]>(`/scans${kind ? `?kind=${kind}` : ""}`);
 }
 
-/** One row's denormalised summary -- no CBOM parse (ADR-0016). */
-export function getScan(scanId: string): Promise<ScanSummary> {
-  return request<ScanSummary>(`/scans/${scanId}`);
-}
-
 /** The stored document, verbatim bytes. */
 export function getCbom(scanId: string): Promise<Cbom> {
   return request<Cbom>(`/scans/${scanId}/cbom`);

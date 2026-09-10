@@ -1206,9 +1206,33 @@
   LINE is fine -- positions are dropped). That is the identity's stated limit
   and is shown on the Compare screen; a fuzzy pairing was deliberately not
   built. *Raised: Q-orbit console slice.*
-- **The console was built without the design images and without a visual
-  check.** The screenshots the brief refers to never reached the repository or
-  the session, and no headless browser is installed on the build machine, so
-  the layout follows the brief's written description and no screenshot was
-  taken. Layout is untested by design (ADR-0018 §8). The fixup slice is the
-  first comparison against the design. *Raised: Q-orbit console slice.*
+- ~~**The console was built without the design images and without a visual
+  check.**~~ **Design matched** in [ADR-0032](docs/adr/0032-qorbit-design-match.md)
+  from the twelve screenshots in `web/design/`, screen by screen. **Still owed:**
+  a visual check of the RENDERED console against them -- there is still no
+  headless browser on the build machine, so the human's screenshot is the
+  first look at the result. *Raised: Q-orbit console slice. Design matched:
+  design-match slice.*
+- **Design elements (`web/design/`) the backend does not compute yet.** Each is
+  rendered as an honest empty / not-computed state or left out, never with the
+  mockup's sample figures (ADR-0032). What would fill each:
+  - **Scan names** ("System Security Scan", "Quarterly Baseline"): the scan row
+    has no name, so the console shows the target ref. An optional `name` on
+    `TargetIn` / the row would carry one.
+  - **Scanner outcomes and work counts** (COMPLETE / PARTIAL, "42 manifests
+    indexed", "7 / 12 binaries"): needs the ran / skipped / failed record owed
+    above, plus a per-scanner count of what it examined, not only what it found.
+  - **A TLS / SSH probe scanner card**: no active probe scanner exists; the only
+    runtime view is the eBPF spool (`runtime-spool`).
+  - **Per-component agility percentages and an agility target** ("target 80%"):
+    no per-component agility model and no pack-defined target.
+  - **Deltas against a baseline on the Overview** ("+4 pts since baseline",
+    "3 introduced this scan"): computable from `GET /scans/{a}/compare/{b}`
+    (ADR-0031) against the default baseline, but not wired into the cards.
+  - **Stable drift finding ids** ("FINDING DR-007"): drift records have no id;
+    the console numbers findings by position on screen.
+  - **A roadmap priority distinct from band** ("Critical · High"): no such fact.
+  - **Notifications** (the top-bar bell): nothing raises alerts; the bell is left
+    out rather than shown silent.
+  - **A named user** ("Alex Kim, Analyst / Tier 2"): authentication, above.
+  *Raised: design-match slice (ADR-0032).*

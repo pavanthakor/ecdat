@@ -22,7 +22,7 @@ import z20Doc from "@/test/fixtures/cbom_z20.json";
 import z5Doc from "@/test/fixtures/cbom_z5.json";
 import scansDoc from "@/test/fixtures/scans.json";
 
-import { parseCbom, parseScanSummaries } from "./parse";
+import { parseCbom } from "./parse";
 import type { Cbom, ScanSummary } from "./types";
 
 const z11 = parseCbom(z11Doc as unknown as Cbom);
@@ -37,27 +37,21 @@ const byName = (list: typeof z11, name: string) => {
   return hit;
 };
 
-describe("parseScanSummaries", () => {
-  it("reads the denormalised scan row without touching the CBOM", () => {
-    const [scan] = parseScanSummaries(scansDoc as unknown as ScanSummary[]);
+describe("the scan row", () => {
+  it("is the real wire shape of GET /scans, read without touching the CBOM", () => {
+    // Formerly read through a pass-through `parseScanSummaries`, removed as
+    // dead code in ADR-0032: the console uses the rows as served. What that
+    // pinned -- the denormalised summary's real shape -- is pinned here
+    // directly; the null-vs-[] `scanners_ran` rule (ADR-0016) is pinned where
+    // it is RENDERED: metrics.test.ts (scanStatus, scannerCoverage) and
+    // honesty.test.tsx (the Coverage screen's UNKNOWN cards).
+    const [scan] = scansDoc as unknown as ScanSummary[];
 
     expect(scan.component_count).toBe(17);
     expect(scan.band_counts).toEqual({ Critical: 2, High: 1, Medium: 0, Low: 14 });
     expect(scan.max_score).toBe(98);
     expect(scan.z_years).toBe(11);
     expect(scan.sector).toBe("bfsi");
-  });
-
-  it("keeps a null scanners_ran distinct from an empty one", () => {
-    // ADR-0016: null = "we cannot say what ran"; [] = "we can, and it was
-    // nothing". A console that renders both as "none" is lying about coverage.
-    const rows = parseScanSummaries([
-      { ...(scansDoc as unknown as ScanSummary[])[0], scanners_ran: null },
-      { ...(scansDoc as unknown as ScanSummary[])[0], id: "b", scanners_ran: [] },
-    ]);
-
-    expect(rows[0].scanners_ran).toBeNull();
-    expect(rows[1].scanners_ran).toEqual([]);
   });
 });
 

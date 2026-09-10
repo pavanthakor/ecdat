@@ -4,7 +4,9 @@
 over the CBOM the scanners produce. React + Vite + TypeScript, Tailwind, Radix
 primitives, lucide-react. [ADR-0018](../docs/adr/0018-dashboard.md) is the
 first slice; [ADR-0031](../docs/adr/0031-qorbit-dashboard.md) is the full
-console and its honesty rule.
+console and its honesty rule; [ADR-0032](../docs/adr/0032-qorbit-design-match.md)
+matched its layout to the design screenshots in `web/design/` (reference only —
+nothing there is bundled).
 
 ## Build it before the demo
 
@@ -112,12 +114,14 @@ src/
               parse.ts    CBOM -> the rows the console renders
               client.ts   typed fetch, same-origin, no base URL
   lib/        router.ts   hash routes, the nav table
-              format.ts   band colours, dates, short refs
+              format.ts   band colours, dates, short refs, two-digit counts
+              download.ts local file saves (CSV / JSON exports)
   state/      inventory.ts     filters, sort, and the Mosca rescore round trip
               metrics.ts       every derived number, as Measured<T>
               presentation.ts  live band counts, empty states, footer line
               remote.ts        per-screen loaders; errors stay local
-  components/ shell/      Logo (the Q-orbit mark), Sidebar, TopBar, UserMenu
+  components/ shell/      Logo (the Q-orbit mark), Sidebar, TopBar, StatusStrip,
+                          UserMenu, status.ts
               Honest.tsx  MetricCard / NotComputed / EmptyPanel
               Panel.tsx   ScreenHeader, Panel, Button, Tag
               InventoryTable, ArtefactDrawer, NewScanDialog, Provenance, ui/
@@ -144,7 +148,7 @@ imagined, which is always the shape that works.
 
 ## What is tested
 
-Data logic and interaction — 126 tests. Filtering that silently drops rows, a
+Data logic and interaction — 131 tests. Filtering that silently drops rows, a
 rescore that leaves a stale table, a provisional fact rendered as a verified
 one, and a metric nobody computed rendered as a number are all invisible in a
 screenshot review. Column order is not.
@@ -157,8 +161,10 @@ screenshot review. Column order is not.
 * `state/presentation.test.ts` — the live band readout, the three empty states,
   and the auditable footer line.
 * `components/Provenance.test.tsx` — the verified/provisional rendering RULE.
-* `components/console.test.tsx` — empty states, the severity row accent, and
-  the live readout driven through the real slider.
+* `components/console.test.tsx` — empty states, the severity bar on every row,
+  the band select, and the live readout driven through the real slider.
+* `lib/format.test.ts` — the table date format, "last scanned" age, two-digit
+  counts.
 * `components/honesty.test.tsx` — **the honesty rule at the DOM level**: a
   not-computed metric renders no digit; a computed zero renders "0"; agility,
   drift, roadmap, fixes, compare and coverage each render their empty state

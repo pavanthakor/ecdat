@@ -22,7 +22,6 @@ import type {
   CbomProperty,
   Drift,
   Occurrence,
-  ScanSummary,
 } from "./types";
 
 const BAND_SET = new Set(["Critical", "High", "Medium", "Low"]);
@@ -206,16 +205,4 @@ function toArtefact(component: CbomComponent): Artefact {
 
 export function parseCbom(document: Cbom): Artefact[] {
   return (document.components ?? []).map(toArtefact);
-}
-
-/**
- * Scan rows, passed through unchanged.
- *
- * Deliberately not normalised: `scanners_ran` must stay `null` when it is
- * null and `[]` when it is empty (ADR-0016), and the tidiest-looking thing a
- * parser could do here -- default it to `[]` -- would erase the distinction
- * the column exists to carry.
- */
-export function parseScanSummaries(rows: ScanSummary[]): ScanSummary[] {
-  return rows;
 }

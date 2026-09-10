@@ -26,6 +26,7 @@ import {
   moscaSummary,
   priorityQueue,
   quantumExposure,
+  roadmapCsv,
   roadmapOf,
   scanStatus,
   scannerCoverage,
@@ -339,6 +340,18 @@ describe("inventory CSV", () => {
     expect(lines).toHaveLength(18);
     const tricky = inventoryCsv([{ ...z11[0], name: 'AES, "GCM"' }]);
     expect(tricky).toContain('"AES, ""GCM"""');
+  });
+});
+
+describe("roadmap CSV", () => {
+  it("one row per DATED artefact, the target empty where no pack labelled one", () => {
+    const lines = roadmapCsv(roadmapOf(z11, "2026-09-10").rows).trim().split("\n");
+    expect(lines[0]).toBe(
+      "bom_ref,name,usage,band,score,deadline,overdue,deadline_provisional,target,hybrid",
+    );
+    expect(lines).toHaveLength(4);
+    const md5 = lines.find((line) => line.includes(",MD5,"))!;
+    expect(md5).toContain(",2026-01-01,true,false,,");
   });
 });
 

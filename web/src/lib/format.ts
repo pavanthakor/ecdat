@@ -45,8 +45,33 @@ export function formatDate(iso: string | null): string {
   return iso.slice(0, 10);
 }
 
-/** `2026-09-10T06:35:35.824Z` -> `2026-09-10 06:35 UTC`. Stored times are UTC. */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** `2026-09-10T06:35:35.824Z` -> `10 Sep 2026 · 06:35`, as the design's tables. UTC. */
 export function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const two = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${two(date.getUTCDate())} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}` +
+    ` · ${two(date.getUTCHours())}:${two(date.getUTCMinutes())}`
+  );
+}
+
+/** How long ago a row was stored: `12m ago`, `6h ago`, `9d ago`. */
+export function relativeAge(iso: string, now: number = Date.now()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "unknown";
+  const minutes = Math.max(0, Math.floor((now - then) / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** `8` -> `08`: the design's two-digit counts. The number is unchanged. */
+export function pad2(value: number): string {
+  return Number.isInteger(value) && value >= 0 && value < 10 ? `0${value}` : String(value);
 }
