@@ -1,0 +1,115 @@
+# JWT signing in Java (auth0 java-jwt and jjwt).
+#
+# Sources:
+#   RFC 7518 (JSON Web Algorithms) -- the `alg` registry.
+#   RFC 8725 (JWT Best Current Practices) s3.1 -- reject `alg: none`;
+#     s2.1 -- algorithm confusion between the HMAC and RSA families.
+#   NIST IR 8547 -- RSA and ECDSA signatures deprecated after 2030, disallowed
+#     after 2035.
+#   com.auth0:java-jwt -- the `Algorithm.RSA256/ECDSA256/HMAC256` factories.
+#   io.jsonwebtoken:jjwt -- `SignatureAlgorithm.RS256` and `signWith`.
+#
+# ONE RULE PER FAMILY where the family is knowable, matching the Python, Go and
+# JS packs: RS256 becomes ML-DSA, HS256 needs a key-size review, and collapsing
+# them would give one answer to two different questions.
+#
+# The jjwt rule is the exception and is deliberately `algorithm: unknown`. Its
+# `signWith` takes a `SignatureAlgorithm` enum member that may be RS256, ES256
+# or HS256, and the rule captures WHICH -- but the algorithm family is a
+# property of the captured value rather than of the pattern, and this pack does
+# not guess. The captured `alg` is what a reader and the correlator use.
+rules:
+  - id: java-jwt-auth0-rsa
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        An RSA-signed JWT (RS*/PS*, RFC 7518). Broken outright by Shor;
+        deprecated after 2030 and disallowed after 2035 (NIST IR 8547).
+        Replace with ML-DSA (FIPS 204). RFC 8725 s2.1 additionally warns
+        against algorithm confusion between the RSA and HMAC families at
+        verification time.
+      flags: [quantum-vulnerable]
+    patterns:
+      - pattern: Algorithm.$ALG(...)
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: ^(RSA|PS)(256|384|512)$
+
+  - id: java-jwt-auth0-ecdsa
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: ECDSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        An ECDSA-signed JWT (ES*, RFC 7518). The elliptic-curve discrete log
+        falls to Shor with fewer logical qubits than RSA-2048 needs, so EC goes
+        first; deprecated after 2030, disallowed after 2035 (NIST IR 8547).
+        Replace with ML-DSA (FIPS 204).
+      flags: [quantum-vulnerable]
+    patterns:
+      - pattern: Algorithm.$ALG(...)
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: ^ECDSA(256|384|512)$
+
+  - id: java-jwt-auth0-hmac
+    languages: [java]
+    severity: INFO
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: HMAC
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        An HMAC-signed JWT (HS*, RFC 7518). Symmetric, so Shor does not apply
+        and Grover only halves the effective key strength -- HS256 with a
+        256-bit secret keeps ~128-bit security. This is a key-management
+        question (RFC 8725 s3.5 requires a high-entropy secret, and the
+        `Algorithm.HMAC256(String)` overload makes a short one easy to pass),
+        not a post-quantum migration.
+      flags: [symmetric]
+    patterns:
+      - pattern: Algorithm.$ALG(...)
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: ^HMAC(256|384|512)$
+
+  - id: java-jwt-jjwt
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|alg=$ALG"
+    metadata:
+      algorithm: unknown
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      capture:
+        alg: $ALG
+      quantum_note: >-
+        A jjwt-signed JWT. The captured `alg` decides the migration and the
+        rule does not guess it: RS*/PS* and ES* are Shor-broken and become
+        ML-DSA (FIPS 204) before 2035 (NIST IR 8547), while HS* is symmetric
+        and needs only a key-size review. RFC 8725 s3.1 also requires `none` to
+        be rejected outright -- jjwt's `SignatureAlgorithm.NONE` is reachable
+        here and is a total authentication bypass.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: $B.signWith(SignatureAlgorithm.$ALG, ...)
+      - pattern: $B.signWith(..., SignatureAlgorithm.$ALG)

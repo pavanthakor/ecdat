@@ -1,0 +1,339 @@
+# Ground truth for the Java rule pack (ADR-0024).
+#
+# Same contract as the Python, Go and JS/TS keys: tests/test_rules_java.py scores
+# RECALL against `expected` and PRECISION against the union of every entry here,
+# with precision asserted at exactly 1.0. The key must be EXHAUSTIVE -- a real
+# detection missing from here counts as a false positive and fails the build.
+#
+# Keys are (file, rule_id); `count` is how many distinct findings that pair must
+# produce. Line numbers are absent on purpose so fixtures stay editable.
+
+expected:
+  must_fire/JavaRsaKeygen.java:
+    - rule_id: java-keypairgenerator-rsa
+      algorithm: RSA
+      primitive: pke
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - key_size: 2048
+
+  must_fire/JavaEcKeygen.java:
+    - rule_id: java-keypairgenerator-ec
+      algorithm: ECDSA
+      primitive: signature
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - key_size: 256
+
+  must_fire/JavaDsaKeygen.java:
+    - rule_id: java-keypairgenerator-dsa
+      algorithm: DSA
+      primitive: signature
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - key_size: 1024
+
+  must_fire/JavaSignatureRsa.java:
+    - rule_id: java-signature-rsa
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - transformation: SHA256withRSA
+
+  must_fire/JavaSignatureSha1Rsa.java:
+    - rule_id: java-signature-weak-hash
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - transformation: SHA1withRSA
+          flagged: true
+
+  must_fire/JavaSignatureEcdsa.java:
+    - rule_id: java-signature-ecdsa
+      algorithm: ECDSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - transformation: SHA256withECDSA
+
+  must_fire/JavaCipherRsa.java:
+    - rule_id: java-cipher-rsa
+      algorithm: RSA
+      primitive: pke
+      usage: key-transport
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaCipherAesGcm.java:
+    - rule_id: java-cipher-aes-gcm
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - mode: GCM
+          transformation: AES/GCM/NoPadding
+
+  must_fire/JavaCipherAesCbc.java:
+    - rule_id: java-cipher-aes-cbc
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - mode: CBC
+
+  must_fire/JavaCipherAesEcb.java:
+    - rule_id: java-cipher-aes-ecb
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - mode: ECB
+          flagged: true
+
+  must_fire/JavaCipherAesDefault.java:
+    # `Cipher.getInstance("AES")` names no mode; SunJCE defaults to ECB.
+    - rule_id: java-cipher-aes-ecb
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - mode: ECB
+          flagged: true
+
+  must_fire/JavaCipherDes.java:
+    - rule_id: java-cipher-des
+      algorithm: DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaCipherDesede.java:
+    - rule_id: java-cipher-3des
+      algorithm: 3DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaCipherRc4.java:
+    - rule_id: java-cipher-rc4
+      algorithm: RC4
+      primitive: stream-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaCipherBlowfish.java:
+    - rule_id: java-cipher-blowfish
+      algorithm: Blowfish
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaDigestMd5.java:
+    - rule_id: java-digest-md5
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaDigestSha1.java:
+    - rule_id: java-digest-sha1
+      algorithm: SHA-1
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaDigestSha256.java:
+    - rule_id: java-digest-sha256
+      algorithm: SHA-256
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaMacMd5.java:
+    - rule_id: java-mac-hmacmd5
+      algorithm: HMAC-MD5
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaMacSha1.java:
+    - rule_id: java-mac-hmacsha1
+      algorithm: HMAC-SHA1
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaKeygenAes128.java:
+    - rule_id: java-keygenerator-aes
+      algorithm: AES
+      primitive: block-cipher
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - key_size: 128
+
+  must_fire/JavaKeygenAes256.java:
+    - rule_id: java-keygenerator-aes
+      algorithm: AES
+      primitive: block-cipher
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - key_size: 256
+
+  must_fire/JavaSslContext.java:
+    - rule_id: java-sslcontext
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      count: 1
+      params_any:
+        - version: TLSv1
+          flagged: true
+
+  must_fire/JavaJwtAuth0Rsa.java:
+    - rule_id: java-jwt-auth0-rsa
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - alg: RSA256
+
+  must_fire/JavaJwtAuth0Hmac.java:
+    - rule_id: java-jwt-auth0-hmac
+      algorithm: HMAC
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - alg: HMAC256
+
+  must_fire/JavaJwtJjwt.java:
+    - rule_id: java-jwt-jjwt
+      algorithm: unknown
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - alg: RS256
+
+  must_fire/JavaWeakRandom.java:
+    - rule_id: java-weak-random
+      algorithm: java.util.Random
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaSecureRandom.java:
+    - rule_id: java-securerandom
+      algorithm: SecureRandom
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaBouncyCastleRsa.java:
+    - rule_id: java-bc-rsa-keygen-spec
+      algorithm: RSA
+      primitive: pke
+      usage: unknown
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - key_size: 2048
+
+  must_fire/JavaBouncyCastleEc.java:
+    - rule_id: java-bc-ec-namedcurve
+      algorithm: ECDH
+      primitive: key-agreement
+      usage: key-exchange
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - curve: secp256r1
+
+  must_fire/JavaHardcodedKey.java:
+    - rule_id: java-hardcoded-key
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: key
+      count: 2          # the key literal and the IV literal
+    - rule_id: java-cipher-aes-cbc
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      count: 1          # the CROSS-RULE case: the cipher rule matches here too
+
+  must_fire/JavaKeyOnDigestLine.java:
+    # The cross-rule case on ONE line: java-digest-md5 has no `redact` flag and
+    # no idea a secret is on the line it matched.
+    - rule_id: java-digest-md5
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaPemPrivateKey.java:
+    - rule_id: java-pem-block
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: certificate
+      count: 1
+
+  must_fire/JavaPemCertificate.java:
+    - rule_id: java-pem-block
+      algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      asset_type: certificate
+      count: 1
+
+# Planted inside the fixtures' key material. None may reach any Finding --
+# tests/test_rules_java.py::test_no_planted_secret_reaches_any_java_finding.
+secret_sentinels:
+  - JAVASECRETSENTINEL
+  - JAVANOTAREALKEY
+  - JAVANOTAREALCERT

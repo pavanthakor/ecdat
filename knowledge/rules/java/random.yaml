@@ -1,0 +1,69 @@
+# Randomness in Java.
+#
+# Sources:
+#   NIST SP 800-90A Rev.1 -- approved DRBG constructions.
+#   NIST SP 800-133 Rev.2 -- key generation requires an approved RBG.
+#   java.util.Random (JDK 21 javadoc) -- "not cryptographically secure"; it is
+#     a 48-bit linear congruential generator.
+#   java.security.SecureRandom (JDK 21 javadoc) -- the CSPRNG.
+#
+# NAME-SCOPED, exactly like the Python, Go and JS weak-RNG rules.
+# `java.util.Random` is entirely legitimate for jitter, sampling, shuffling a
+# display list or picking a banner, and a rule that fired on every use would be
+# noise an operator learns to ignore. It fires only where the value is bound to
+# a name that reads like a key, token, secret or nonce -- a heuristic, which is
+# why the decoy file plants a `jitter` and a banner pick that must NOT fire.
+rules:
+  - id: java-weak-random
+    languages: [java]
+    severity: ERROR
+    message: "ecdat|"
+    metadata:
+      algorithm: java.util.Random
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      quantum_note: >-
+        `java.util.Random` is a 48-bit linear congruential generator and its
+        own javadoc says it is not cryptographically secure. Two consecutive
+        outputs are enough to recover the seed and predict every subsequent
+        value, so a key or token drawn from it is recoverable TODAY -- no
+        quantum computer required. NIST SP 800-133 Rev.2 requires an approved
+        RBG (SP 800-90A Rev.1) for key generation. Use
+        `java.security.SecureRandom`.
+      flags: [weak, critical]
+    patterns:
+      - pattern-inside: |
+          $RNG = new Random(...);
+          ...
+      - pattern-either:
+          - pattern: $TYPE $NAME = $RNG.nextLong();
+          - pattern: $TYPE $NAME = $RNG.nextInt();
+          - pattern: $TYPE $NAME = $RNG.nextInt(...);
+          - pattern: $TYPE $NAME = $RNG.nextDouble();
+          - pattern: $RNG.nextBytes($NAME)
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(key|token|secret|nonce|salt|iv|seed|password|credential).*
+
+  - id: java-securerandom
+    languages: [java]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      algorithm: SecureRandom
+      primitive: drbg
+      usage: unknown
+      asset_type: algorithm
+      quantum_note: >-
+        `java.security.SecureRandom` is the approved CSPRNG (NIST SP 800-90A
+        Rev.1 constructions via the provider). Grover offers at most a
+        square-root speedup against a well-seeded generator, which is not a
+        practical concern, so no migration is required. Recorded as a CONTROL:
+        an inventory that lists only problems cannot show coverage, and drift
+        detection needs to know what is correct as well as what is not.
+      flags: [control]
+    pattern-either:
+      - pattern: new SecureRandom()
+      - pattern: new SecureRandom(...)
+      - pattern: SecureRandom.getInstanceStrong()

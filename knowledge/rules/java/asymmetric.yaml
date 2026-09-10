@@ -1,0 +1,148 @@
+# Java public-key cryptography -- the Shor-broken family.
+#
+# Sources:
+#   NIST IR 8547 (initial public draft, Nov 2024) -- RSA, ECDSA, ECDH, DH and
+#     EdDSA are deprecated after 2030 and disallowed after 2035.
+#   FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA), Aug 2024 -- the
+#     approved replacements.
+#   NIST SP 800-131A Rev.2 -- DSA is disallowed for signature generation.
+#   Java Security Standard Algorithm Names (JDK 21 specification) --
+#     `KeyPairGenerator` and `Signature` algorithm strings.
+#
+# THE JCA SHAPE. Almost everything in Java goes through a
+# `getInstance(String)` factory, and the parameters arrive in a SECOND
+# statement: `KeyPairGenerator.getInstance("RSA")` then `initialize(2048)`. So
+# these rules bind the generator with `pattern-inside` and match the
+# initialiser, which is the pattern most of this pack needs.
+#
+# usage=unknown at key generation, matching the Python, Go and JS packs: a
+# generated key may go on to sign or to transport, and the correct PQC
+# replacement differs (ML-DSA vs ML-KEM). The correlator refines usage from the
+# use site; guessing here manufactures a wrong migration plan (ADR-0004).
+rules:
+  - id: java-keypairgenerator-rsa
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|key_size=$KEYSIZE"
+    metadata:
+      algorithm: RSA
+      primitive: pke
+      usage: unknown
+      asset_type: algorithm
+      keysize_metavar: $KEYSIZE
+      quantum_note: >-
+        Broken outright by Shor's algorithm; key size does not help -- RSA-4096
+        falls to the same attack as RSA-2048. Deprecated after 2030 and
+        disallowed after 2035 (NIST IR 8547). Replacement depends on usage:
+        ML-KEM (FIPS 203) for key transport, ML-DSA (FIPS 204) for signatures.
+      flags: [quantum-vulnerable]
+    patterns:
+      - pattern-inside: |
+          $KPG = KeyPairGenerator.getInstance("RSA", ...);
+          ...
+      - pattern-either:
+          - pattern: $KPG.initialize($KEYSIZE)
+          - pattern: $KPG.initialize($KEYSIZE, ...)
+
+  - id: java-keypairgenerator-ec
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|key_size=$KEYSIZE"
+    metadata:
+      algorithm: ECDSA
+      primitive: signature
+      usage: unknown
+      asset_type: algorithm
+      keysize_metavar: $KEYSIZE
+      quantum_note: >-
+        Elliptic-curve discrete log is broken by Shor, and a 256-bit curve needs
+        fewer logical qubits than RSA-2048, so EC falls first. Deprecated after
+        2030 and disallowed after 2035 (NIST IR 8547). Replace signatures with
+        ML-DSA (FIPS 204); if the key is used for agreement rather than signing,
+        ML-KEM (FIPS 203) is the replacement and the correlator decides that
+        from the use site.
+      flags: [quantum-vulnerable]
+    patterns:
+      - pattern-inside: |
+          $KPG = KeyPairGenerator.getInstance("EC", ...);
+          ...
+      - pattern-either:
+          - pattern: $KPG.initialize($KEYSIZE)
+          - pattern: $KPG.initialize($KEYSIZE, ...)
+
+  - id: java-keypairgenerator-dsa
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|key_size=$KEYSIZE"
+    metadata:
+      algorithm: DSA
+      primitive: signature
+      usage: unknown
+      asset_type: algorithm
+      keysize_metavar: $KEYSIZE
+      quantum_note: >-
+        DSA rests on the finite-field discrete log, which Shor breaks with the
+        same machine that breaks RSA. It is also already retired classically:
+        NIST SP 800-131A Rev.2 disallows DSA for signature GENERATION, and
+        1024-bit DSA has been below the acceptable floor since 2013. Replace
+        with ML-DSA (FIPS 204).
+      flags: [quantum-vulnerable, weak]
+    patterns:
+      - pattern-inside: |
+          $KPG = KeyPairGenerator.getInstance("DSA", ...);
+          ...
+      - pattern-either:
+          - pattern: $KPG.initialize($KEYSIZE)
+          - pattern: $KPG.initialize($KEYSIZE, ...)
+
+  # -- Bouncy Castle, where it is common ---------------------------------
+  #
+  # Only two rules. BC has a very large surface and most of it is reached
+  # through the JCA factories above, which these rules do not duplicate; these
+  # are the two spellings that appear in application code often enough to be
+  # worth their own patterns.
+
+  - id: java-bc-rsa-keygen-spec
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|key_size=$KEYSIZE"
+    metadata:
+      algorithm: RSA
+      primitive: pke
+      usage: unknown
+      asset_type: algorithm
+      keysize_metavar: $KEYSIZE
+      quantum_note: >-
+        An explicit RSA key-generation parameter spec (java.security.spec, also
+        used to drive the Bouncy Castle provider). Same Shor break as any other
+        RSA key: deprecated after 2030, disallowed after 2035 (NIST IR 8547).
+        Worth its own rule because the key size here is chosen far from any
+        `KeyPairGenerator.getInstance` call and is easy to miss in review.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: new RSAKeyGenParameterSpec($KEYSIZE, ...)
+
+  - id: java-bc-ec-namedcurve
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|curve=$CURVE"
+    metadata:
+      algorithm: ECDH
+      primitive: key-agreement
+      usage: key-exchange
+      asset_type: algorithm
+      capture:
+        curve: $CURVE
+      quantum_note: >-
+        A named elliptic curve selected through Bouncy Castle's curve table.
+        Every curve reachable this way (secp256r1, secp384r1, curve25519) rests
+        on the elliptic-curve discrete log and is broken by Shor; deprecated
+        after 2030 (NIST IR 8547). Key agreement is the urgent case --
+        harvest-now-decrypt-later means a recorded handshake is decryptable
+        later -- so replace with ML-KEM (FIPS 203) or a hybrid group.
+      flags: [quantum-vulnerable]
+    pattern-either:
+      - pattern: ECNamedCurveTable.getParameterSpec($CURVE)
+      - pattern: new ECNamedCurveParameterSpec($CURVE, ...)
+      - pattern: ECGenParameterSpec($CURVE)
+      - pattern: new ECGenParameterSpec($CURVE)

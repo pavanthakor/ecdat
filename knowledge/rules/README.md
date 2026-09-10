@@ -17,6 +17,7 @@ half-populated Finding.
         ...
       go/
       javascript/        <- targets both .js and .ts
+      java/
 
 Semgrep is pointed at `knowledge/rules/` itself, not at one language
 subdirectory, and every rule's own `languages:` decides which files it reads.
@@ -178,8 +179,7 @@ matches usage, and collapsing them produces confident wrong advice.
 
 * Unique across the whole pack, and **no dots** — the scanner recovers the bare
   id from Semgrep's `check_id` by taking the last dotted segment.
-* Prefix with the language: `py-`, `go-`, `js-`, then `java-` as packs are
-  added. `js-` covers both `.js` and `.ts`; the rules declare
+* Prefix with the language: `py-`, `go-`, `js-`, `java-`. `js-` covers both `.js` and `.ts`; the rules declare
   `languages: [javascript, typescript]` and a test asserts the `.ts` half
   actually matches rather than trusting the declaration.
 * The id ends up in every Finding's `Occurrence.detail` as `rule=<id>`, so it

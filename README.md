@@ -145,7 +145,7 @@ here.
 
 | id | view | what it reads |
 |---|---|---|
-| `source` | declared | Python, Go and JS/TS source via Semgrep — 28 + 23 + 20 cited rules |
+| `source` | declared | Python, Go, JS/TS and Java source via Semgrep — 28 + 23 + 20 + 32 cited rules |
 | `config` | declared | nginx `server{}` blocks, `sshd_config`, `openssl.cnf` |
 | `container` | shipped | `docker save` tar / OCI dir — dpkg+apk DBs, certs, keys |
 | `runtime-spool` | observed | JSONL the eBPF agent left in a directory |
@@ -389,13 +389,13 @@ finding count means nothing without the list of what it declined to measure.
 The living list is [`PUNCHLIST.md`](PUNCHLIST.md). The ones a reader should know
 before believing anything above:
 
-- **Source scanning covers Python, Go and JavaScript/TypeScript.** Java, C/C++,
-  Rust and C# are not scanned — four of seven planned language families.
+- **Source scanning covers Python, Go, JavaScript/TypeScript and Java.** C/C++,
+  Rust and C# are not scanned — three of seven planned language families.
   QuantumBank's Go gateway was a *measured* known gap until
   [ADR-0023](docs/adr/0023-go-js-rules.md) closed it; the KPI denominator grew
   from 20 to 22 rather than the gap being quietly dropped. C/C++ is the hard
-  one: OpenSSL call sites are macro-heavy, so that pack is a tree-sitter
-  question rather than more YAML.
+  one and is deliberately not a Semgrep job: OpenSSL call sites are macro-heavy,
+  so that pack wants tree-sitter, or reading the compiled binary instead.
 - **Binary and network scanners are designed, not built.** Five of a planned
   seven scanner families exist; a statically linked binary and a packet capture
   are still invisible. The dependency scanner landed in
@@ -483,6 +483,7 @@ consequences:
 | [0021](docs/adr/0021-deps-scanner.md) | Scanner B: dependencies, lockfile-preferred |
 | [0022](docs/adr/0022-dep-bump-fix.md) | dep-bump: manifest bump, verified target only |
 | [0023](docs/adr/0023-go-js-rules.md) | Go and JS/TS rule packs; the QuantumBank Go gap closed |
+| [0024](docs/adr/0024-java-rules.md) | Java rule pack; a language-neutral redaction net |
 
 ---
 

@@ -1,0 +1,230 @@
+# Java symmetric ciphers, and the mode parsed out of the transformation string.
+#
+# Sources:
+#   AES      -- FIPS 197. Grover halves the effective key strength, so AES-128
+#               retains ~64-bit security against a quantum adversary and
+#               AES-256 ~128; CNSA 2.0 requires AES-256 for long-lived data.
+#   ECB      -- NIST SP 800-38A Appendix A: identical plaintext blocks produce
+#               identical ciphertext blocks, so structure survives encryption.
+#   CBC      -- NIST SP 800-38A; unauthenticated and padding-oracle prone
+#               (Vaudenay 2002) unless paired with a MAC.
+#   GCM      -- NIST SP 800-38D (authenticated encryption).
+#   DES/3DES -- NIST SP 800-131A Rev.2 (3DES disallowed after 2023);
+#               Sweet32, CVE-2016-2183; EFF Deep Crack (1998) for single DES.
+#   RC4      -- RFC 7465 prohibits RC4 in TLS; the keystream is biased.
+#   Blowfish -- 64-bit block, so Sweet32 applies; its author has recommended
+#               against it since 2007 in favour of AES.
+#   Java Security Standard Algorithm Names (JDK 21) -- the `Cipher`
+#     transformation grammar is "algorithm/mode/padding", and a transformation
+#     naming only the algorithm takes the PROVIDER'S default mode and padding.
+#
+# THE MODE IS PARSED OUT OF THE TRANSFORMATION STRING. Java packs the
+# algorithm, mode and padding into one literal -- `"AES/GCM/NoPadding"` -- so
+# unlike Go there IS something to bind, but the mode is a substring rather than
+# a token. Each rule selects its mode with `metavariable-regex` and then states
+# the parsed value in the message (the convention ADR-0023 introduced and
+# knowledge/rules/README.md documents), while ALSO capturing the whole
+# transformation so the parse never discards what the source said.
+#
+# `Cipher.getInstance("AES")` is the case worth the extra rule branch: it names
+# no mode, SunJCE defaults to ECB, and an operator grepping for "ECB" finds
+# nothing. It is reported as ECB.
+rules:
+  - id: java-cipher-aes-gcm
+    languages: [java]
+    severity: INFO
+    message: "ecdat|mode=GCM|transformation=$T"
+    metadata:
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        mode: GCM
+        transformation: $T
+      quantum_note: >-
+        AES-GCM (FIPS 197 with NIST SP 800-38D): authenticated encryption, and
+        the correct default. Grover halves the effective key strength, so
+        AES-256 retains ~128-bit security; CNSA 2.0 requires AES-256 for data
+        that must stay confidential past 2035. Recorded as a CONTROL.
+      flags: [symmetric, control]
+    patterns:
+      - pattern: Cipher.getInstance($T, ...)
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^"AES(_\d+)?/GCM/
+
+  - id: java-cipher-aes-cbc
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|mode=CBC|transformation=$T"
+    metadata:
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        mode: CBC
+        transformation: $T
+      quantum_note: >-
+        AES itself (FIPS 197) survives quantum: Grover halves the effective key
+        strength, so AES-256 keeps ~128-bit security and is what CNSA 2.0
+        requires for long-lived data. CBC is the classical concern -- it is
+        unauthenticated and padding-oracle prone (NIST SP 800-38A; Vaudenay
+        2002), and `PKCS5Padding` with no MAC is the exact shape that attack
+        needs. Prefer AES-256-GCM (NIST SP 800-38D).
+      flags: [symmetric]
+    patterns:
+      - pattern: Cipher.getInstance($T, ...)
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^"AES(_\d+)?/CBC/
+
+  - id: java-cipher-aes-ecb
+    languages: [java]
+    severity: ERROR
+    message: "ecdat|mode=ECB|transformation=$T"
+    metadata:
+      algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        mode: ECB
+        transformation: $T
+      quantum_note: >-
+        ECB leaks plaintext structure: identical plaintext blocks produce
+        identical ciphertext blocks (NIST SP 800-38A Appendix A). A classical
+        break with nothing to do with quantum. Note that a transformation
+        naming only "AES" gets the PROVIDER'S default, which for SunJCE is
+        ECB/PKCS5Padding -- so a codebase with no occurrence of the string
+        "ECB" can be using it everywhere. Use an AEAD: AES-256-GCM
+        (NIST SP 800-38D).
+      flags: [symmetric, weak]
+      mode_flags:
+        ECB: "identical plaintext blocks leak as identical ciphertext blocks"
+    patterns:
+      - pattern: Cipher.getInstance($T, ...)
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^"AES(_\d+)?(/ECB/|")
+
+  - id: java-cipher-des
+    languages: [java]
+    severity: ERROR
+    message: "ecdat|transformation=$T"
+    metadata:
+      algorithm: DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        transformation: $T
+      quantum_note: >-
+        Single DES has a 56-bit key and has been brute-forceable since 1998
+        (EFF Deep Crack); disallowed by NIST SP 800-131A Rev.2. Quantum is
+        irrelevant -- this is already broken. Replace with AES-256-GCM
+        (FIPS 197 with NIST SP 800-38D).
+      flags: [weak, symmetric, critical]
+    patterns:
+      - pattern: Cipher.getInstance($T, ...)
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^"DES(/|")
+
+  - id: java-cipher-3des
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|transformation=$T"
+    metadata:
+      algorithm: 3DES
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        transformation: $T
+      quantum_note: >-
+        Triple DES (`DESede` in JCA) is DISALLOWED after 2023 (NIST SP 800-131A
+        Rev.2). Its 64-bit block makes Sweet32 (CVE-2016-2183) practical on
+        long-lived connections regardless of key length. Already retired;
+        quantum is not the argument. Replace with AES-256-GCM (FIPS 197).
+      flags: [weak, symmetric]
+    patterns:
+      - pattern: Cipher.getInstance($T, ...)
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^"DESede(/|")
+
+  - id: java-cipher-rc4
+    languages: [java]
+    severity: ERROR
+    message: "ecdat|transformation=$T"
+    metadata:
+      algorithm: RC4
+      primitive: stream-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        transformation: $T
+      quantum_note: >-
+        RC4's keystream is biased and partially recoverable; RFC 7465 prohibits
+        it in TLS outright. JCA also spells it `ARCFOUR`. Classically dead,
+        quantum irrelevant. Replace with AES-256-GCM (FIPS 197) or
+        ChaCha20-Poly1305 (RFC 8439).
+      flags: [weak, critical]
+    patterns:
+      - pattern: Cipher.getInstance($T, ...)
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^"(RC4|ARCFOUR)(/|")
+
+  - id: java-cipher-blowfish
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|transformation=$T"
+    metadata:
+      algorithm: Blowfish
+      primitive: block-cipher
+      usage: encrypt
+      asset_type: algorithm
+      capture:
+        transformation: $T
+      quantum_note: >-
+        Blowfish has a 64-bit block, so Sweet32 (CVE-2016-2183) applies to any
+        long-lived stream regardless of key length; its own designer has
+        recommended AES instead since 2007. Not a NIST-approved algorithm, so
+        it is outside SP 800-131A entirely rather than merely deprecated.
+        Replace with AES-256-GCM (FIPS 197).
+      flags: [weak, symmetric]
+    patterns:
+      - pattern: Cipher.getInstance($T, ...)
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^"Blowfish(/|")
+
+  - id: java-keygenerator-aes
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|key_size=$KEYSIZE"
+    metadata:
+      algorithm: AES
+      primitive: block-cipher
+      usage: unknown
+      asset_type: algorithm
+      keysize_metavar: $KEYSIZE
+      quantum_note: >-
+        The AES key size, chosen at generation. Grover's algorithm halves the
+        effective strength, so AES-128 offers roughly 64 bits against a quantum
+        adversary and AES-256 roughly 128. CNSA 2.0 requires AES-256 for data
+        that must stay confidential past 2035, and NIST SP 800-131A Rev.2 keeps
+        AES-128 acceptable for shorter-lived data -- so the size is a fact the
+        POLICY engine scores against the data's lifetime, not something this
+        rule flags on its own.
+      flags: [symmetric]
+    patterns:
+      - pattern-inside: |
+          $KG = KeyGenerator.getInstance("AES", ...);
+          ...
+      - pattern-either:
+          - pattern: $KG.init($KEYSIZE)
+          - pattern: $KG.init($KEYSIZE, ...)

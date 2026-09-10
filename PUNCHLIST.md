@@ -43,11 +43,22 @@
   language asserts none reaches any Finding -- including via a DIFFERENT rule
   that matches the same line, which is why the AES rule is declared against the
   hard-coded-key fixture in both answer keys.
-  **The second layer does NOT extend, and that is a real hole.** The
-  byte-literal net is Python-specific (`b"..."`), so on Go and JS what holds is
-  the PEM-banner scrub plus each rule author remembering `redact: true`. Four
-  scanner families are now covered by discipline; **the schema-level guard is
-  still owed** and is what would make it structural.
+  **Update (Java pack, ADR-0024): the second layer is now LANGUAGE-NEUTRAL.**
+  It previously recognised only Python's `b"..."` spelling, so on Go, JS and
+  Java the guard was each rule author remembering `redact: true` with nothing
+  behind them. A Java fixture was written to exercise the case that protects --
+  a sentinel hashed by `MessageDigest.getInstance("MD5")` on ONE line, where
+  the digest rule has no `redact` flag and no idea a secret is there -- and the
+  test failed, correctly. `_redact` gained a third case: a quoted literal whose
+  whole content is one unbroken alphanumeric run of 24+ characters. The bound
+  and the alphabet were chosen by what the net must NOT eat (8 ate
+  `PKCS5Padding`; 16 ate `PBKDF2WithHmacSHA256`; `/` in the alphabet ate
+  `AES/CBC/PKCS5Padding`), and
+  `test_the_opaque_literal_net_keeps_algorithm_strings_intact` pins that from
+  the other side. Five scanner families now have a net as well as discipline.
+  **Still owed, unchanged:** a slash-bearing base64 key is caught only by its
+  own rule's flag, and **the schema-level guard in `core/schema.py` is what
+  would make any of this structural** rather than a scanner-local convention.
   *Raised: Phase 0, core schema slice. Partially resolved: Scanner A slice,
   see [ADR-0004](docs/adr/0004-source-scanning-semgrep.md).*
 - **Cross-view merging only happens when the normalised locus matches.** The
@@ -687,14 +698,39 @@
   and overall 20 -> 22 with recall still 100% -- the gap closed rather than the
   measurement moving. The KNOWN GAPS section of `make kpi` is now empty.
   *Raised: KPI slice. Resolved: Go/JS rule-pack slice.*
-- **Java, C/C++, Rust and C# source are still not scanned.** Four of seven
-  planned language families. Java is the obvious next one -- JCA
-  (`KeyPairGenerator.getInstance`, `Cipher.getInstance`, `MessageDigest`) is
-  well shaped for Semgrep patterns and needs no engine work. C/C++ is the hard
-  one: OpenSSL call sites are macro-heavy and a Semgrep pattern over them is
-  fragile, so that pack is a tree-sitter question rather than a YAML one and
-  should not be forced into this engine.
-  *Raised: Go/JS rule-pack slice, see [ADR-0023](docs/adr/0023-go-js-rules.md).*
+- ~~**Java source is not scanned.**~~ **Resolved** by
+  [ADR-0024](docs/adr/0024-java-rules.md). `knowledge/rules/java/` ships 32
+  rules -- JCA-first (`KeyPairGenerator`, `Cipher`, `Signature`,
+  `MessageDigest`, `Mac`, `KeyGenerator`, `SSLContext`), two Bouncy Castle
+  spellings, both JWT libraries, the name-scoped RNG rule and key material --
+  at recall 100% and precision 100%. Four languages now run on one scanner and
+  one metadata contract, and Java added no matching or mapping code.
+  *Raised: Go/JS rule-pack slice. Resolved: Java rule-pack slice.*
+- **C/C++, Rust and C# source are still not scanned.** Three of seven planned
+  language families. **C/C++ is deliberately NOT a Semgrep job**: OpenSSL call
+  sites are macro-heavy (`EVP_*` behind conditional compilation), so a pattern
+  pack over them would be fragile in exactly the way this project has said it
+  will not ship. It wants tree-sitter, or reading the compiled binary instead --
+  which is Scanner D's territory rather than Scanner A's. Rust
+  (`RustCrypto`, `ring`, `rustls`) and C# (`System.Security.Cryptography`) are
+  ordinary additive packs and are simply not started.
+  *Raised: Go/JS rule-pack slice; narrowed by
+  [ADR-0024](docs/adr/0024-java-rules.md).*
+- **`java-keygenerator-aes` reports the key size and does not flag AES-128.**
+  Deliberate: CNSA 2.0's requirement is conditional -- AES-128 is acceptable
+  under NIST SP 800-131A Rev.2 for shorter-lived data and unacceptable for
+  anything that must stay confidential past 2035 -- and the POLICY engine
+  already scores key size against the data class. A rule flagging it
+  unconditionally would assert the conditional half as a fact and duplicate the
+  scorer. If the policy engine turns out not to score symmetric key size
+  against `x_years`, that is the gap to close, in `policy/`, not here.
+  *Raised: Java rule-pack slice.*
+- **The Java pack is 32 rules, not the JCA surface.** Unmatched:
+  `SecretKeyFactory` / PBKDF2 iteration counts, `KeyStore` types (JKS vs
+  PKCS12), `SSLParameters` cipher-suite lists, explicit JCA provider selection,
+  and the JCE unlimited-strength policy. Each is additive YAML against the
+  existing contract.
+  *Raised: Java rule-pack slice.*
 - **The Go and JS packs are a starting set, not a complete inventory.** 23 and
   20 rules. Unmatched today: Go's `crypto/ecdh` X25519 path and
   `golang.org/x/crypto` (nacl, bcrypt, argon2); browser WebCrypto

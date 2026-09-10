@@ -1,0 +1,125 @@
+# Java hash functions and MACs.
+#
+# Sources:
+#   MD5    -- RFC 6151 (collision attacks; MUST NOT where collision resistance
+#             is required); NIST SP 800-131A Rev.2 Table 8 (disallowed for
+#             digital signatures).
+#   SHA-1  -- NIST SP 800-131A Rev.2 (disallowed for signature generation since
+#             2013); SHAttered (Stevens et al., 2017) demonstrated a practical
+#             collision.
+#   SHA-2  -- FIPS 180-4. Grover halves the effective preimage strength, so
+#             SHA-256 retains ~128-bit preimage resistance against a quantum
+#             adversary.
+#   HMAC   -- RFC 2104, FIPS 198-1.
+#   Java Security Standard Algorithm Names (JDK 21) -- `MessageDigest` and
+#     `Mac` algorithm strings.
+#
+# JCA spells the digests with a hyphen (`SHA-1`, `SHA-256`) and the MACs
+# without one (`HmacSHA1`), so the two families need separate patterns even
+# though they name the same underlying hash.
+rules:
+  - id: java-digest-md5
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: MD5
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        Classically broken: chosen-prefix collisions are practical on commodity
+        hardware (RFC 6151; NIST SP 800-131A Rev.2 Table 8 disallows MD5 for
+        digital signatures). Quantum is not the problem -- this is already
+        unfit. Replace with SHA-256 (FIPS 180-4) for integrity, or a
+        memory-hard KDF (Argon2id, PBKDF2) if it is hashing a credential.
+      flags: [weak]
+    pattern-either:
+      - pattern: MessageDigest.getInstance("MD5")
+      - pattern: MessageDigest.getInstance("MD5", ...)
+      - pattern: DigestUtils.md5Hex(...)
+      - pattern: DigestUtils.md5(...)
+
+  - id: java-digest-sha1
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: SHA-1
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        Collision resistance is broken classically (SHAttered, 2017);
+        disallowed for digital signature generation since 2013 (NIST SP
+        800-131A Rev.2). Replace with SHA-256 (FIPS 180-4).
+      flags: [weak]
+    pattern-either:
+      - pattern: MessageDigest.getInstance("SHA-1")
+      - pattern: MessageDigest.getInstance("SHA-1", ...)
+      - pattern: MessageDigest.getInstance("SHA1")
+      - pattern: MessageDigest.getInstance("SHA1", ...)
+      - pattern: DigestUtils.sha1Hex(...)
+
+  - id: java-digest-sha256
+    languages: [java]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      algorithm: SHA-256
+      primitive: hash
+      usage: hash
+      asset_type: algorithm
+      quantum_note: >-
+        FIPS 180-4. Grover's algorithm halves the effective preimage strength,
+        leaving roughly 128 bits against a quantum adversary -- adequate, and
+        no migration is required. Recorded as a CONTROL so coverage and drift
+        can be measured, not because it is a problem.
+      flags: [control]
+    pattern-either:
+      - pattern: MessageDigest.getInstance("SHA-256")
+      - pattern: MessageDigest.getInstance("SHA-256", ...)
+      - pattern: MessageDigest.getInstance("SHA-384")
+      - pattern: MessageDigest.getInstance("SHA-512")
+
+  - id: java-mac-hmacmd5
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: HMAC-MD5
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      quantum_note: >-
+        HMAC-MD5 (RFC 2104 with RFC 6151). HMAC does not rest on the hash's
+        collision resistance, so this is not the immediate break that
+        MD5-for-signatures is -- but MD5 is disallowed by NIST SP 800-131A
+        Rev.2 and no new system should use it. Symmetric: Shor does not apply,
+        Grover only halves the effective strength. Replace with HMAC-SHA-256
+        (FIPS 198-1).
+      flags: [weak]
+    pattern-either:
+      - pattern: Mac.getInstance("HmacMD5")
+      - pattern: Mac.getInstance("HmacMD5", ...)
+
+  - id: java-mac-hmacsha1
+    languages: [java]
+    severity: WARNING
+    message: "ecdat|"
+    metadata:
+      algorithm: HMAC-SHA1
+      primitive: mac
+      usage: sign
+      asset_type: algorithm
+      quantum_note: >-
+        HMAC-SHA1 (RFC 2104 with FIPS 180-4). HMAC's security does not rest on
+        collision resistance, so SHAttered does not break it and NIST SP
+        800-131A Rev.2 still permits HMAC-SHA-1 for most uses -- but it is on
+        the way out and new systems should not adopt it. Symmetric: Shor does
+        not apply, Grover halves the effective strength. Move to HMAC-SHA-256
+        (FIPS 198-1).
+      flags: [weak]
+    pattern-either:
+      - pattern: Mac.getInstance("HmacSHA1")
+      - pattern: Mac.getInstance("HmacSHA1", ...)

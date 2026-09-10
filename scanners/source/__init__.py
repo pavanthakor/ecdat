@@ -123,6 +123,17 @@ _UNRESOLVED_CONFIDENCE = 0.6
 #: bytes is a DES key -- the shortest thing worth protecting.
 _KEY_LITERAL_MIN_BYTES = 8
 
+#: A LANGUAGE-NEUTRAL opaque blob: this many characters of unbroken
+#: alphanumeric text inside a quoted literal, with no separator, space or
+#: punctuation anywhere in it.
+#:
+#: Twenty-four, arrived at by what it must NOT eat rather than what it must
+#: catch. Eight caught `PKCS5Padding`; sixteen caught `PBKDF2WithHmacSHA256`,
+#: a real `SecretKeyFactory` argument. Twenty-four clears both and still
+#: catches every key worth the name -- an AES-128 key is 32 hex characters and
+#: 24 base64, an AES-256 key twice that.
+_OPAQUE_LITERAL_MIN_CHARS = 24
+
 _ASSET_TYPES = frozenset(get_args(AssetType))
 _PRIMITIVES = frozenset(get_args(Primitive))
 _USAGES = frozenset(get_args(Usage))
@@ -131,6 +142,22 @@ _BARE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PEM_BANNER = re.compile(r"-----BEGIN[A-Z0-9 ]*-----")
 _BYTES_LITERAL = re.compile(
     r"(?:rb|br|b|RB|BR|B)(['\"])((?:\\.|(?!\1).)*)\1",
+)
+
+#: A quoted literal whose WHOLE content is one unbroken alphanumeric run,
+#: optionally base64-padded. Anchored to the entire literal on purpose: a `/`,
+#: `-`, `_`, `.` or space anywhere in it disqualifies the match, which is what
+#: keeps JCA transformations ("AES/CBC/PKCS5Padding",
+#: "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"), Node suite strings ("aes-256-gcm")
+#: and prose out of it.
+#:
+#: `/` is deliberately NOT in the alphabet even though base64 uses it -- the
+#: JCA transformation grammar is built on `/`, and protecting a slash-bearing
+#: base64 key here would cost every Java cipher finding its evidence. Such a
+#: key is still covered by its own rule's `redact: true`; this layer is the
+#: backstop for the rule that does not know a key is there.
+_OPAQUE_LITERAL = re.compile(
+    rf"(['\"])([A-Za-z0-9+]{{{_OPAQUE_LITERAL_MIN_CHARS},}}={{0,2}})\1",
 )
 
 
@@ -416,9 +443,18 @@ def _redact(line: str, *, always: bool) -> str:
 
     Two layers. A rule that knows it matches key material sets ``redact: true``
     and its snippet is dropped outright. Independently, any line is scrubbed if
-    it carries a PEM banner or a byte-string literal long enough to be a key --
-    because a rule about a *cipher* frequently matches the very line a key
-    literal sits on, and that rule has no idea the key is there.
+    it carries a PEM banner, a Python byte-string literal long enough to be a
+    key, or an opaque quoted blob in any language -- because a rule about a
+    *cipher* or a *digest* frequently matches the very line a key literal sits
+    on, and that rule has no idea the key is there.
+
+    The third case is what makes the second layer language-neutral. The
+    byte-literal net only ever recognised Python's ``b"..."`` spelling, so a
+    Java or JavaScript key sitting on a matched line was protected only by its
+    own rule remembering ``redact: true`` -- and a DIFFERENT rule matching the
+    same line remembered nothing. ``tests/test_rules_java.py`` plants exactly
+    that: a sentinel hashed by ``MessageDigest.getInstance("MD5")`` on one
+    line, where the digest rule is the one that must not carry it out.
     """
     if always:
         return REDACTED
@@ -427,13 +463,19 @@ def _redact(line: str, *, always: bool) -> str:
     if _PEM_BANNER.search(text):
         return REDACTED
 
-    def _scrub(match: re.Match[str]) -> str:
+    def _scrub_bytes(match: re.Match[str]) -> str:
         body = match.group(2)
         if len(body) >= _KEY_LITERAL_MIN_BYTES:
             return 'b"<redacted>"'
         return match.group(0)
 
-    return _BYTES_LITERAL.sub(_scrub, text)
+    scrubbed = _BYTES_LITERAL.sub(_scrub_bytes, text)
+
+    def _scrub_opaque(match: re.Match[str]) -> str:
+        quote = match.group(1)
+        return f"{quote}<redacted>{quote}"
+
+    return _OPAQUE_LITERAL.sub(_scrub_opaque, scrubbed)
 
 
 def _read_line(path: Path, number: int, cache: dict[Path, list[str]]) -> str:

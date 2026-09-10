@@ -1,0 +1,76 @@
+# Java TLS context selection.
+#
+# Sources:
+#   RFC 8996 -- TLS 1.0 and TLS 1.1 are deprecated and MUST NOT be used.
+#   RFC 8446 -- TLS 1.3.
+#   NIST SP 800-52 Rev.2 -- TLS 1.2 minimum for US federal systems.
+#   RFC 7568 -- SSLv3 MUST NOT be used (POODLE, CVE-2014-3566).
+#   Java Security Standard Algorithm Names (JDK 21) -- `SSLContext` protocol
+#     strings; "TLS" means "the provider's best supported version".
+#
+# A TLS version is a PROTOCOL: `asset_type: protocol`, `primitive: unknown`.
+# The suites it negotiates are the cryptography and are recorded separately
+# (knowledge/rules/README.md).
+#
+# TWO RULES, because `SSLContext.getInstance("TLS")` and
+# `SSLContext.getInstance("TLSv1")` are opposite facts. The first asks the
+# provider for its best version and ages WELL -- a JDK upgrade improves it. The
+# second pins the protocol at a version RFC 8996 says must not be used, and no
+# JDK upgrade will fix it.
+rules:
+  - id: java-sslcontext
+    languages: [java]
+    severity: ERROR
+    message: "ecdat|version=$VERSION"
+    metadata:
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      capture:
+        version: $VERSION
+      quantum_note: >-
+        A PINNED legacy protocol version. TLS 1.0 and 1.1 are deprecated and
+        MUST NOT be used (RFC 8996); SSLv3 fell to POODLE (RFC 7568,
+        CVE-2014-3566); NIST SP 800-52 Rev.2 requires TLS 1.2 as a minimum.
+        Quantum-wise the version matters because only TLS 1.3 (RFC 8446)
+        carries the key-share extension the hybrid ML-KEM groups use, so a
+        service pinned here cannot negotiate a post-quantum key exchange at all
+        however capable its JDK becomes.
+      flags: [override, weak, critical]
+    patterns:
+      - pattern-either:
+          - pattern: SSLContext.getInstance($VERSION)
+          - pattern: SSLContext.getInstance($VERSION, ...)
+          - pattern: SSLContext.getInstance($VERSION)
+      - metavariable-regex:
+          metavariable: $VERSION
+          regex: ^"(SSLv2|SSLv3|SSL|TLSv1|TLSv1\.1)"$
+
+  - id: java-sslcontext-provider-default
+    languages: [java]
+    severity: INFO
+    message: "ecdat|version=$VERSION"
+    metadata:
+      algorithm: TLS
+      primitive: unknown
+      usage: unknown
+      asset_type: protocol
+      capture:
+        version: $VERSION
+      quantum_note: >-
+        `SSLContext.getInstance("TLS")` asks the provider for its best
+        supported version, so this ages WELL: a JDK upgrade moves it forward
+        without a code change, and it is what will pick up TLS 1.3's hybrid
+        ML-KEM groups when the runtime supports them. Recorded as a CONTROL and
+        as inventory -- the protocol floor is then a JDK and
+        `java.security` question rather than a source-code one, which is where
+        the drift view should look.
+      flags: [control]
+    patterns:
+      - pattern-either:
+          - pattern: SSLContext.getInstance($VERSION)
+          - pattern: SSLContext.getInstance($VERSION, ...)
+      - metavariable-regex:
+          metavariable: $VERSION
+          regex: ^"(TLS|TLSv1\.2|TLSv1\.3)"$
