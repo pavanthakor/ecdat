@@ -50,6 +50,12 @@ rules:
   # The honesty rule. Fires on exactly the absence the rule above requires, so
   # an unclassified asset is visibly UNASSESSED rather than quietly scored as
   # safe -- which is what a default of x=0 would have done.
+    verified: true
+    source: >-
+      Michele Mosca, 'Cybersecurity in an era with quantum computers: will we
+      be ready?', IEEE Security & Privacy 16(5), 2018; NIST IR 8547 ipd Sec. 2
+      describes the same harvest-now-decrypt-later threat. Confirmed against
+      the published paper and draft.
   - id: mosca-data-lifetime-unknown
     when:
       x_years:
@@ -68,3 +74,8 @@ rules:
       inequality is undefined. Scoring an undefined term as zero would assert
       that the data has no confidentiality requirement, which is a claim no
       scan can support.
+    verified: true
+    source: >-
+      Mosca (IEEE S&P 2018): x is required to evaluate x + y > z, so its
+      absence is a gap in the assessment rather than a value. This rule
+      asserts only that absence, which is a fact about our own input.

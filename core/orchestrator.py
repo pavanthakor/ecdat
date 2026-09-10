@@ -39,8 +39,9 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from core import store
+from core import ECDAT_VERSION, store
 from core.logs import get_logger
 from core.normalise import normalise, validate_cbom_json
 from core.scanner import ScanContext, Scanner, Target, TargetKind
@@ -57,6 +58,7 @@ __all__ = [
     "FixRun",
     "collect_findings",
     "default_context",
+    "engine_versions",
     "propose_fixes",
     "run_fix",
     "run_rescore",
@@ -126,6 +128,54 @@ def scanner_records(scanners: Sequence[Scanner]) -> list[store.ScannerRecord]:
             record["version"] = str(version)
         records.append(record)
     return records
+
+
+def engine_versions(
+    scanners: Sequence[Scanner],
+) -> tuple[dict[str, Any], str | None]:
+    """Which engines produced a scan, and whether any is off its pin.
+
+    A scanner MAY expose ``engine_version()`` and ``pinned_engine_version``;
+    most are pure Python and have no external engine, so this is read through
+    ``getattr`` rather than added to the Scanner protocol. Today only the
+    source scanner has one (semgrep).
+
+    A mismatch is a WARNING, never a failure. Blocking a teammate whose
+    `semgrep` is one patch release ahead would cost more than it buys; what
+    actually matters is that a surprising detection result can be traced to
+    the engine that produced it instead of being argued about. So the
+    divergence is returned, logged, and written onto the scan row.
+    """
+    versions: dict[str, Any] = {"ecdat": ECDAT_VERSION}
+    warnings: list[str] = []
+
+    for scanner in scanners:
+        probe = getattr(scanner, "engine_version", None)
+        if probe is None:
+            continue
+        pinned = getattr(scanner, "pinned_engine_version", None)
+        installed = probe()
+        versions[scanner.id] = {
+            "pinned": pinned,
+            "installed": installed,
+            "matches": installed is not None and installed == pinned,
+        }
+        if installed is None:
+            warnings.append(
+                f"scanner {scanner.id!r}: its engine is not installed or would "
+                f"not report a version; results are not reproducible against "
+                f"the pinned {pinned}"
+            )
+        elif pinned is not None and installed != pinned:
+            warnings.append(
+                f"scanner {scanner.id!r}: engine version {installed} differs "
+                f"from the pinned {pinned}. Detection results are only "
+                f"reproducible within one engine version (semgrep is the "
+                f"matcher, and ECDAT does not control it), so this scan may "
+                f"not be byte-identical to one produced on the pin."
+            )
+
+    return versions, "; ".join(warnings) or None
 
 
 def target_kind_of(value: str) -> TargetKind | None:
@@ -261,6 +311,7 @@ def run_scan(
 
     findings: list[Finding] = []
     ran: list[str] = []
+    ran_scanners: list[Scanner] = []
     failed: list[str] = []
     skipped: list[str] = []
 
@@ -295,6 +346,7 @@ def run_scan(
 
         if failure is None:
             ran.append(scanner.id)
+            ran_scanners.append(scanner)
             _log.info(
                 "scanner_completed",
                 extra={
@@ -337,6 +389,20 @@ def run_scan(
         ),
     )
 
+    # Engine versions describe what actually PRODUCED this document, so they
+    # are read from the scanners that ran rather than from the offered set: a
+    # skipped source scanner did not involve semgrep (ADR-0017).
+    versions, engine_warning = engine_versions(ran_scanners)
+    if engine_warning is not None:
+        _log.warning(
+            "engine_version_mismatch",
+            extra={
+                "event": "engine_version_mismatch",
+                "engine_versions": versions,
+                "warning": engine_warning,
+            },
+        )
+
     # The row records what was OFFERED, not what happened to produce findings:
     # "nothing looked for binaries" and "binaries were clean" are different
     # answers, and only the scanner set can tell them apart (ADR-0016).
@@ -345,6 +411,8 @@ def run_scan(
         cbom_json,
         scanners_ran=scanner_records(scanners),
         z_years=z_years,
+        engine_versions=versions,
+        engine_warning=engine_warning,
     )
 
     _log.info(

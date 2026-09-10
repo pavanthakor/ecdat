@@ -46,14 +46,23 @@ KNOWLEDGE_DIR = Path("knowledge")
 FIXTURES = Path("testdata/fixit_fixtures")
 QUANTUMBANK = Path("testdata/quantumbank")
 
-#: The context QuantumBank is scanned in. It is what makes RSA-2048 Critical
-#: rather than Medium, which is what the new-Critical rejection test needs.
+#: The context QuantumBank is scanned in.
 BFSI: dict[str, Any] = {
     "system": "quantumbank",
     "data_class": "pii",
     "sector": "bfsi",
     "exposure": "internet",
 }
+
+#: The context in which an introduced RSA-2048 genuinely reaches Critical.
+#:
+#: `pii` used to be enough: it scored 98, of which 20 came from the India DST
+#: pack. ADR-0017 demoted those unverified facts to zero, so `pii` now lands at
+#: 78/High and would no longer exercise the new-Critical rejection at all. A
+#: 50-year data lifetime reaches 80 on quantum 40 + mosca 30 + exposure 10 --
+#: three checked facts. The blast-radius gate is unchanged; what changed is
+#: that fewer things are Critical now, which is the whole point of the gate.
+SOVEREIGN: dict[str, Any] = {**BFSI, "data_class": "Sovereign"}
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +461,7 @@ def test_a_fix_that_introduces_a_new_critical_is_rejected(
     finding, so a verifier that only checked "is it gone?" would call this a
     success. The blast radius is what makes it a failure.
     """
-    target = target_for(FIXTURES / "md5_integrity")
+    target = target_for(FIXTURES / "md5_integrity", **SOVEREIGN)
     md5 = only(scan_with(SourceScanner(), target, context), algorithm="MD5")
 
     result = propose_fix(md5, target, context=context, templates=[_Md5ToRsaTemplate()])
@@ -571,7 +580,7 @@ def test_mutation_removing_the_new_critical_check_accepts_the_bad_fix(
     context: ScanContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Disable the blast-radius check and the RSA-2048 swap sails through."""
-    target = target_for(FIXTURES / "md5_integrity")
+    target = target_for(FIXTURES / "md5_integrity", **SOVEREIGN)
     md5 = only(scan_with(SourceScanner(), target, context), algorithm="MD5")
 
     def no_blast_radius_check(*_: object, **__: object) -> list[str]:

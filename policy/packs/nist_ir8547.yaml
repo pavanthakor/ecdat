@@ -55,6 +55,11 @@ rules:
   # ------------------------------------------------------------------
   # Exposure. See the header for why these live here.
   # ------------------------------------------------------------------
+    verified: true
+    source: >-
+      NIST IR 8547 ipd (2024-11) Table 1 / Sec. 4: 112-bit-security asymmetric
+      algorithms are deprecated after 2030 and disallowed after 2035.
+      Confirmed against the published draft.
   - id: exposure-internet-reachable
     when:
       exposure: internet
@@ -71,6 +76,12 @@ rules:
       NIST IR 8547 ipd Sec. 4 directs organisations to prioritise the
       transition by risk rather than migrate uniformly; externally reachable
       systems carry the highest collection risk.
+    verified: true
+    source: >-
+      NIST IR 8547 ipd Sec. 2 (harvest-now-decrypt-later applies to traffic an
+      adversary can collect today); the internet/internal/build split is
+      ECDAT's own three-bucket model, stated as an estimate in ADR-0008 and
+      carried on every score as such.
 
   - id: exposure-internal-only
     when:
@@ -82,6 +93,10 @@ rules:
     citation: >-
       NIST IR 8547 ipd Sec. 4 (risk-based prioritisation). Internal reachability
       still permits collection by an adversary already inside the perimeter.
+    verified: true
+    source: >-
+      NIST IR 8547 ipd Sec. 2; the bucket model is ECDAT's own, declared as an
+      estimate in ADR-0008.
 
   - id: exposure-build-time-only
     when:
@@ -94,3 +109,7 @@ rules:
       NIST IR 8547 ipd Sec. 4 (risk-based prioritisation). Build-time-only
       cryptography is not exposed to live traffic collection, but it remains a
       supply-chain integrity concern.
+    verified: true
+    source: >-
+      NIST IR 8547 ipd Sec. 2; the bucket model is ECDAT's own, declared as an
+      estimate in ADR-0008.

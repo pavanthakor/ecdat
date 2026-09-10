@@ -41,6 +41,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Iterator, Sequence
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast, get_args
 
@@ -56,6 +57,7 @@ from core.schema import (
 )
 
 __all__ = [
+    "PINNED_SEMGREP_VERSION",
     "RulePackContractError",
     "RulePackMissingError",
     "SemgrepFailedError",
@@ -67,6 +69,19 @@ __all__ = [
 
 #: The semgrep executable. Module-level so tests can point it at nothing.
 SEMGREP_BINARY = "semgrep"
+
+#: The engine version this rule pack and its recall/precision fixtures were
+#: scored against (ADR-0004, ADR-0017). ECDAT's determinism promise -- same
+#: input + same knowledge packs -> byte-identical CBOM -- holds WITHIN a
+#: matching engine and is not claimed across engines, because the matcher is an
+#: external binary whose results can legitimately change between releases.
+#:
+#: requirements.txt pins this exact version and a test asserts the two agree.
+#: A scan run against a different installed version is NOT refused -- a
+#: teammate on a slightly different patch should not be blocked -- but the
+#: mismatch is written onto the scan row, so a surprising result can be traced
+#: to the engine that produced it rather than argued about.
+PINNED_SEMGREP_VERSION = "1.176.1"
 
 #: Where the Python rule pack lives, relative to ``ScanContext.knowledge_dir``.
 RULE_SUBDIR = Path("rules") / "python"
@@ -138,6 +153,35 @@ class RulePackContractError(SourceScanError):
 # ---------------------------------------------------------------------------
 # Running semgrep
 # ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def installed_semgrep_version() -> str | None:
+    """The version of the semgrep on PATH, or ``None`` if there isn't one.
+
+    Cached: this forks a process, and a scan should not pay for it twice.
+    Returns ``None`` rather than raising -- a missing engine is reported on the
+    scan row, and the scan itself fails later and more informatively when a
+    scanner that actually needs semgrep tries to run it.
+    """
+    binary = shutil.which(SEMGREP_BINARY)
+    if binary is None:
+        return None
+    try:
+        completed = subprocess.run(  # noqa: S603 - argv list, no shell, fixed binary
+            [binary, "--version", "--disable-version-check"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    # `semgrep --version` prints the bare version on one line.
+    first = completed.stdout.strip().splitlines()
+    return first[0].strip() if first else None
 
 
 def _run_semgrep(rules_dir: Path, target_path: Path) -> str:
@@ -518,6 +562,16 @@ class SourceScanner:
     # and a bare assignment infers `str`, which does not conform.
     id: str = "source"
     view: View = "declared"
+
+    #: The engine version this plugin was verified against. Read by the
+    #: orchestrator through `getattr`, so this stays an OPTIONAL capability
+    #: rather than something every scanner has to implement -- most plugins
+    #: are pure Python and have no external engine to pin.
+    pinned_engine_version: str = PINNED_SEMGREP_VERSION
+
+    def engine_version(self) -> str | None:
+        """The semgrep actually installed, or ``None`` if it is missing."""
+        return installed_semgrep_version()
 
     #: Target kinds this plugin can say anything about.
     SUPPORTED_KINDS = frozenset({"repo", "directory"})

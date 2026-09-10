@@ -32,6 +32,7 @@ from policy import sign
 from policy.apply import DEFAULT_Z_YEARS, ScoreInputs, apply_policy
 from policy.engine import (
     MOSCA_GAP_CEILING,
+    PROVISIONAL_SUFFIX,
     Y_YEARS_BASE,
     Y_YEARS_HARDCODED_PENALTY,
     Pack,
@@ -129,11 +130,20 @@ def test_the_same_algorithm_is_critical_or_medium_by_context(
     If this ever passes only because a cap was raised, the point of the slice
     has been lost. The two calls differ in nothing but the target's context and
     whether the key size is hard-coded.
+
+    **Rebased on VERIFIED facts only (ADR-0017).** This case used to be
+    `Personal`, and reached Critical partly on the DST pack's 20 points of
+    `criticality` -- a fact nobody had checked. With that demoted the same
+    component scores 78/High (pinned by
+    `test_the_personal_case_is_now_high_because_dst_demoted`). Criticality is
+    still reachable, from quantum 40 + mosca 30 + exposure 10, which is what
+    this now asserts: the band comes from three checked facts and no unchecked
+    one.
     """
     exposed = score(
         packs,
         rsa_component(configurable=False),
-        data_class="Personal",
+        data_class="Sovereign",
         sector="bfsi",
         exposure="internet",
     )
@@ -148,6 +158,12 @@ def test_the_same_algorithm_is_critical_or_medium_by_context(
     assert one(exposed, "ecdat:band") == "Critical"
     assert int(one(exposed, "ecdat:score")) >= 80
     assert one(exposed, "ecdat:deadline") == "2028-12-31"
+    # ... and none of those 80 points came from an unverified fact.
+    categories = dict(
+        entry.split("=", 1) for entry in exposed.get("ecdat:category_score", [])
+    )
+    assert categories["criticality"] == "0"
+    assert {"quantum", "mosca", "exposure"} <= set(categories)
 
     assert one(sheltered, "ecdat:band") == "Medium"
     assert 40 <= int(one(sheltered, "ecdat:score")) < 60
@@ -529,7 +545,12 @@ def test_labels_are_a_sorted_union_across_four_packs(packs: list[Pack]) -> None:
     labels = one(properties, "ecdat:labels").split(",")
 
     assert labels == sorted(set(labels))
-    assert {"shor-broken", "CII", "nist-disallowed-2035"} <= set(labels)
+    # Verified facts label plainly.
+    assert {"shor-broken", "nist-disallowed-2035"} <= set(labels)
+    # The DST facts are unverified (ADR-0017), so their labels are DEMOTED --
+    # still present, and carrying the caveat with them.
+    assert "CII" not in labels
+    assert f"CII{PROVISIONAL_SUFFIX}" in labels
 
 
 def test_pack_order_does_not_change_the_verdict(packs: list[Pack]) -> None:
@@ -685,15 +706,21 @@ def test_an_unknown_effect_type_is_refused(tmp_path: Path) -> None:
 
 
 @pytest.mark.validation
-def test_end_to_end_a_bfsi_personal_internet_scan_is_critical(
+def test_end_to_end_a_bfsi_sovereign_internet_scan_is_critical(
     tmp_path: Path,
 ) -> None:
+    """Critical end to end, on verified facts alone.
+
+    Was `Personal` before ADR-0017, when the unverified DST rule supplied 20 of
+    the 98 points. `Sovereign` reaches Critical on quantum + mosca + exposure,
+    all checked.
+    """
     context = ScanContext(knowledge_dir=Path("knowledge"), scratch_dir=tmp_path)
     target = Target(
         kind="repo",
         ref="testdata/minimal_repo",
         system="quantumbank",
-        data_class="Personal",
+        data_class="Sovereign",
         sector="bfsi",
         exposure="internet",
     )
@@ -712,14 +739,55 @@ def test_end_to_end_a_bfsi_personal_internet_scan_is_critical(
 
     assert one(values, "ecdat:band") == "Critical"
     assert one(values, "ecdat:deadline") == "2028-12-31"
-    assert one(values, "ecdat:x_years") == "25"
+    assert one(values, "ecdat:x_years") == "50"
     assert one(values, "ecdat:sector") == "bfsi"
+    # The deadline is displayed and flagged: it comes from a DST rule nobody
+    # has checked, so it informs and does not score (ADR-0017).
+    assert one(values, "ecdat:deadline_provisional") == "true"
 
     fired = one(values, "ecdat:fired_rules")
     assert "quantum-shor-broken-asymmetric" in fired
     assert "mosca-harvest-now-decrypt-later" in fired
     assert "dst-cii-priority-migration" in fired
     assert "nist-112-bit-asymmetric-deprecated" in fired
+
+
+def test_the_personal_case_is_now_high_because_dst_demoted(
+    packs: list[Pack],
+) -> None:
+    """WHAT THE DEMOTION COST, recorded rather than quietly absorbed.
+
+    Before ADR-0017 this exact component scored 98/Critical: quantum 40 +
+    mosca 28 + exposure 10 + **criticality 20 from a DST deadline nobody had
+    checked**. It is now 78/High. That is a real change to the headline demo
+    number, and it is the correct one -- 20% of a Critical verdict was resting
+    on an unverified fact.
+
+    Flipping `dst-cii-priority-migration` to `verified: true` with a real
+    source restores the 98. That is the point of the mechanism: the fact is
+    one confirmation away, not deleted.
+    """
+    exposed = score(
+        packs,
+        rsa_component(configurable=False),
+        data_class="Personal",
+        sector="bfsi",
+        exposure="internet",
+    )
+
+    assert one(exposed, "ecdat:band") == "High"
+    assert int(one(exposed, "ecdat:score")) == 78
+    categories = dict(entry.split("=", 1) for entry in exposed["ecdat:category_score"])
+    assert categories == {
+        "criticality": "0",
+        "exposure": "10",
+        "mosca": "28",
+        "quantum": "40",
+    }
+    # The DST deadline is still SHOWN -- demoted, never dropped.
+    assert one(exposed, "ecdat:deadline") == "2028-12-31"
+    assert one(exposed, "ecdat:provisional") == "true"
+    assert "dst-cii-priority-migration" in exposed["ecdat:provisional_rule"]
 
 
 @pytest.mark.validation

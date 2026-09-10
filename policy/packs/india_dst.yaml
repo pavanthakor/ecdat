@@ -5,17 +5,33 @@
 # pillar -- India roadmap compliance -- something a scan can answer.
 #
 # ---------------------------------------------------------------------------
-# VERIFICATION STATUS -- read before scoring anything real on this pack
+# VERIFICATION STATUS -- every rule in this pack is currently PROVISIONAL
 # ---------------------------------------------------------------------------
 # The DEADLINES (2028-12-31 for critical information infrastructure,
 # 2029-12-31 for full adoption), the CII sector list, and the L2A assurance
-# label below were supplied to ECDAT as roadmap requirements and are encoded
-# here verbatim. They have NOT been checked line by line against the published
-# DST/NQM roadmap text by this engine's authors. They are structurally right --
-# a phased CII-first migration with a later full-adoption date is exactly the
-# shape such roadmaps take -- but the exact dates and the assurance-level
-# mapping must be confirmed against the published document before an
-# organisation acts on a deadline this pack produces. Tracked in PUNCHLIST.
+# label were supplied to ECDAT as roadmap requirements and encoded verbatim.
+# They have NOT been checked line by line against the published DST/NQM roadmap
+# text. They are structurally right -- a phased CII-first migration with a
+# later full-adoption date is exactly the shape such roadmaps take -- but
+# "structurally right" is not "confirmed".
+#
+# THIS IS NOW MECHANICAL, NOT ADVISORY (ADR-0017). Every rule below carries
+# `verified: false`, and the engine adds NOTHING to a score from an unverified
+# rule. So this pack currently contributes:
+#
+#   * its labels, deadlines and actions -- DISPLAYED, each marked provisional;
+#   * exactly ZERO points.
+#
+# The `criticality` category therefore reports 0 while this file stands as it
+# is. That cost the demo's headline component 20 of its 98 points -- it is
+# 78/High rather than 98/Critical -- which is the correct number, and a
+# measure of how much was resting on an unchecked fact.
+#
+# TO RESTORE SCORING: look each fact up in the published roadmap, replace the
+# `FILL:` marker in that rule's `source` with the document, version and
+# section confirmed, set `verified: true`, and re-sign the pack
+# (`make sign-packs`). No code change is needed; the mechanism is what gates
+# the fact. Tracked in PUNCHLIST as a data-fill task.
 #
 # ASSURANCE LEVELS. Only the software mapping is encoded (library / module /
 # service -> L2A). Hardware, key-management and certificate-authority assurance
@@ -57,6 +73,11 @@ rules:
       DST/NQM roadmap (May 2026): quantum-vulnerable cryptography in critical
       information infrastructure -- defence, power, telecom and BFSI -- carries
       the earlier 2028 migration deadline.
+    verified: false
+    source: >-
+      FILL: confirm against the published DST / National Quantum Mission
+      post-quantum migration roadmap text, then set verified: true and replace
+      this marker with the document, version and section confirmed.
 
   - id: dst-full-adoption
     when:
@@ -72,6 +93,11 @@ rules:
     citation: >-
       DST/NQM roadmap (May 2026): full adoption of post-quantum cryptography
       across all sectors by end-2029.
+    verified: false
+    source: >-
+      FILL: confirm against the published DST / National Quantum Mission
+      post-quantum migration roadmap text, then set verified: true and replace
+      this marker with the document, version and section confirmed.
 
   - id: dst-aes-128-uplift
     when:
@@ -89,6 +115,11 @@ rules:
     citation: >-
       DST/NQM roadmap (May 2026) symmetric-key uplift guidance; NIST IR 8547
       ipd Sec. 3 for the Grover halving; FIPS 197 for the key sizes.
+    verified: false
+    source: >-
+      FILL: confirm against the published DST / National Quantum Mission
+      post-quantum migration roadmap text, then set verified: true and replace
+      this marker with the document, version and section confirmed.
 
   - id: dst-assurance-software-l2a
     when:
@@ -102,3 +133,8 @@ rules:
       DST/NQM roadmap (May 2026) assurance-level mapping for software
       cryptographic assets. Only the software mapping is encoded; hardware,
       key-management and CA levels are deliberately not guessed.
+    verified: false
+    source: >-
+      FILL: confirm against the published DST / National Quantum Mission
+      post-quantum migration roadmap text, then set verified: true and replace
+      this marker with the document, version and section confirmed.

@@ -25,7 +25,12 @@ uvicorn>=0.30,<1
 
 # Scanner A (source). The scanner shells out to the `semgrep` binary rather
 # than importing the package -- the CLI's --json contract is stable across
-# releases in a way the internal API is not (ADR-0004). The floor is the
-# version the rule pack and the recall/precision fixtures were verified on;
-# detection results are only reproducible within a matching engine version.
-semgrep>=1.176,<2
+# releases in a way the internal API is not (ADR-0004).
+#
+# PINNED, not floored (ADR-0017). "Same input + same knowledge packs ->
+# byte-identical CBOM" depends on the matching engine, so a range makes the
+# determinism guarantee a range too. This is the exact version the rule pack
+# and the recall/precision fixtures were scored against. It must stay equal to
+# scanners.source.PINNED_SEMGREP_VERSION, which a test asserts; a scan run
+# against any other version records the mismatch on its row.
+semgrep==1.176.1

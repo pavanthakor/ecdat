@@ -38,7 +38,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -156,6 +156,19 @@ class Scan(Base):
     )
     coverage_gaps: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # -- which engine produced it (ADR-0017) ----------------------------
+    #: ``{"ecdat": "0.1.0", "source": {"pinned": ..., "installed": ...,
+    #: "matches": bool}}``. A scan that cannot say which matcher produced it
+    #: cannot support the determinism claim it is used to make.
+    engine_versions: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
+    #: Set when an installed engine differs from the pinned one. A scan is NOT
+    #: refused for this -- a teammate on a slightly different patch should not
+    #: be blocked -- but a surprising result must be traceable to the engine
+    #: rather than argued about, so the mismatch rides on the row.
+    engine_warning: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # -- lineage --------------------------------------------------------
     #: The scan this row was derived from, for ``fix`` and ``rescore`` rows.
     #: Deliberately not a database FOREIGN KEY: SQLite enforces those only with
@@ -198,6 +211,8 @@ ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("max_score", "INTEGER"),
     ("drift_counts", "JSON"),
     ("coverage_gaps", "INTEGER"),
+    ("engine_versions", "JSON"),
+    ("engine_warning", "TEXT"),
     ("parent_scan_id", "VARCHAR(36)"),
     ("kind", f"VARCHAR(16) NOT NULL DEFAULT '{KIND_SCAN}'"),
 )
@@ -338,6 +353,8 @@ def _row(
     context: StoredContext,
     parent_scan_id: str | None,
     kind: str,
+    engine_versions: Mapping[str, Any] | None = None,
+    engine_warning: str | None = None,
 ) -> Scan:
     """Build a row, deriving everything derivable from the document itself.
 
@@ -364,6 +381,8 @@ def _row(
         max_score=summary.max_score,
         drift_counts=summary.drift_counts,
         coverage_gaps=summary.coverage_gaps,
+        engine_versions=None if engine_versions is None else dict(engine_versions),
+        engine_warning=engine_warning,
         parent_scan_id=parent_scan_id,
         kind=kind,
     )
@@ -382,6 +401,8 @@ def save_scan(
     *,
     scanners_ran: Sequence[ScannerRecord] | None = None,
     z_years: int | None = None,
+    engine_versions: Mapping[str, Any] | None = None,
+    engine_warning: str | None = None,
 ) -> str:
     """Persist a CBOM against its target and return the new scan id.
 
@@ -403,6 +424,8 @@ def save_scan(
             ),
             parent_scan_id=None,
             kind=KIND_SCAN,
+            engine_versions=engine_versions,
+            engine_warning=engine_warning,
         )
     )
 

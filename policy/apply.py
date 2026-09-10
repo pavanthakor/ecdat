@@ -1,5 +1,12 @@
 """Write policy verdicts onto a CBOM as ``ecdat:`` component properties.
 
+Verdicts carry their own honesty markers since ADR-0017: ``ecdat:provisional``
+and the repeated ``ecdat:provisional_rule`` say that some of what is displayed
+came from a rule nobody has checked against its source, and
+``ecdat:deadline_provisional`` says the reported deadline is one of them. None
+of them are written when nothing is provisional, so their ABSENCE is the clean
+signal that every contributing fact was verified.
+
 Separate from the engine on purpose: :mod:`policy.engine` decides what a
 component is worth and knows nothing about CycloneDX, while this module knows
 where a verdict goes in the document and nothing about how it was reached.
@@ -87,6 +94,9 @@ VERDICT_PROPERTIES = (
     "ecdat:fired_rules",
     "ecdat:quantum_status",
     "ecdat:category_score",
+    "ecdat:provisional",
+    "ecdat:provisional_rule",
+    "ecdat:deadline_provisional",
 )
 
 _INDENT = 2
@@ -259,6 +269,18 @@ def verdict_properties(verdict: Verdict) -> list[dict[str, str]]:
     properties.extend(
         {"name": "ecdat:actions", "value": action} for action in verdict.actions
     )
+
+    # Provisional reporting (ADR-0017). Written only when something IS
+    # provisional, so a component carrying none of these is one whose every
+    # contributing fact was checked -- absence is the clean signal.
+    if verdict.provisional_rules:
+        properties.append({"name": "ecdat:provisional", "value": "true"})
+        properties.extend(
+            {"name": "ecdat:provisional_rule", "value": rule_id}
+            for rule_id in verdict.provisional_rules
+        )
+    if verdict.deadline_provisional:
+        properties.append({"name": "ecdat:deadline_provisional", "value": "true"})
     return properties
 
 

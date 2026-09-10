@@ -237,9 +237,14 @@ rescore_scan_id=29844d83 parent_scan_id=d3bd3e3d z_years=30 max_score=10
 ```
 
 `--sector`, `--data-class` and `--exposure` are the context that decides
-severity: the same RSA-2048 scores **98/Critical** in a BFSI system holding
-personal data on the internet, and **45/Medium** in an internal lab holding
-public data. Criticality comes from context, never from tuning a number.
+severity: the same RSA-2048 scores **80/Critical** in a BFSI system holding
+sovereign data on the internet, **78/High** with personal data, and
+**45/Medium** in an internal lab holding public data. Criticality comes from
+context, never from tuning a number — and, since
+[ADR-0017](docs/adr/0017-verified-facts.md), never from a fact nobody checked:
+those 80 points are quantum 40 + Mosca 30 + exposure 10, all verified. The
+India DST deadline is displayed alongside them and scores zero until somebody
+confirms it against the published roadmap.
 
 A scored component, abbreviated from a real run:
 
@@ -256,10 +261,14 @@ A scored component, abbreviated from a real run:
   },
   "properties": [
     { "name": "ecdat:view",            "value": "declared" },
-    { "name": "ecdat:band",            "value": "Critical" },
-    { "name": "ecdat:score",           "value": "98" },
+    { "name": "ecdat:band",            "value": "High" },
+    { "name": "ecdat:score",           "value": "78" },
     { "name": "ecdat:quantum_status",  "value": "broken" },
     { "name": "ecdat:deadline",        "value": "2028-12-31" },
+    { "name": "ecdat:deadline_provisional", "value": "true" },
+    { "name": "ecdat:provisional",     "value": "true" },
+    { "name": "ecdat:provisional_rule","value": "dst-cii-priority-migration" },
+    { "name": "ecdat:category_score",  "value": "criticality=0" },
     { "name": "ecdat:category_score",  "value": "quantum=40" },
     { "name": "ecdat:fired_rules",     "value": "quantum-shor-broken-asymmetric,dst-cii-priority-migration,..." },
     { "name": "ecdat:x_years",         "value": "25" },
@@ -271,7 +280,9 @@ A scored component, abbreviated from a real run:
 }
 ```
 
-Every score names the rules that produced it; every rule cites its source.
+Every score names the rules that produced it; every rule cites its source — and
+a rule whose source nobody has checked contributes `0`, says so
+(`ecdat:provisional`), and still shows what it would have said.
 
 ---
 
@@ -336,11 +347,18 @@ before believing anything above:
 - **Observed findings carry no endpoint.** A uprobe sees a process, not a
   listening socket, so an observed handshake joins every declared endpoint in a
   system. Unattributable drift is printed as such, scored neither way.
-- **Some knowledge-pack facts need verification.** The DST deadlines and
-  assurance labels are encoded as supplied and have *not* been checked line by
-  line against the published roadmap; GnuTLS and libgcrypt PQC floors are
-  deliberately `null` rather than guessed. Both are flagged in the packs
-  themselves.
+- **Unverified facts are structurally unscoreable, and some are still
+  unverified.** Every policy rule and library floor carries `verified` +
+  `source`, and **the engine adds nothing to a score from an unverified rule**
+  ([ADR-0017](docs/adr/0017-verified-facts.md)). The India DST deadlines and
+  assurance mapping were supplied verbatim and never checked against the
+  published roadmap, so all four rules are `verified: false`: they still show
+  their labels, deadlines and actions — marked *provisional* — and contribute
+  zero points. **This cost the headline demo number:** the same RSA-2048 in a
+  BFSI/internet/Personal context was 98/Critical and is 78/High, because 20 of
+  those points came from an unchecked fact. Criticality is still reachable from
+  quantum + Mosca + exposure alone. Confirming each fact and flipping its flag
+  restores the score with no code change — that is the point of the mechanism.
 - **Policy packs are signed with a committed DEV key.** It proves a pack was
   built by this repo's tooling and nothing about who approved it. Production key
   management is deferred.

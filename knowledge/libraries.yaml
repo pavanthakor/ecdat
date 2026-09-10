@@ -23,6 +23,18 @@
 #                     signature support, or `null` if it has none / unverified.
 #                     Compared against the parsed UPSTREAM version, so distro
 #                     revisions (3.0.2-0ubuntu1.10) do not confuse it.
+#   pqc_capable_verified
+#                     REQUIRED. Whether the floor above has been confirmed
+#                     against upstream release material. **The scanner emits
+#                     `pqc_capable` ONLY when this is true** (ADR-0017), so a
+#                     version filled in without a confirmed source stays
+#                     unscored rather than quietly starting to drive drift.
+#                     Defaults to false if omitted: silence is not
+#                     verification.
+#   pqc_capable_source
+#                     REQUIRED. When verified, the release material checked.
+#                     When not, a `FILL:` marker naming exactly what would
+#                     settle it, so the work is recorded rather than lost.
 #   eol               Upstream end-of-support date, or `null`. Distro vendors
 #                     often support past this via backports -- that is a
 #                     separate fact and does not belong in this field.
@@ -34,14 +46,21 @@
 #                     rather than asserting it in a typed field.
 #
 # ---------------------------------------------------------------------------
-# VERIFICATION STATUS -- read before relying on this pack
+# VERIFICATION STATUS -- now MECHANICAL, not advisory (ADR-0017)
 # ---------------------------------------------------------------------------
-# The OpenSSL entry is verified against upstream release material and is the
-# one the drift demo depends on. The GnuTLS and libgcrypt PQC fields are
-# deliberately `null` with a note: their post-quantum support is moving, and
-# recording an unverified version here would be exactly the uncited crypto
-# fact CLAUDE.md forbids. Verify against upstream NEWS before scoring on them.
-# Tracked in PUNCHLIST.
+# `pqc_capable_verified` is what decides whether a floor may influence
+# anything. The scanner emits `pqc_capable` only for a verified entry, so an
+# unconfirmed value cannot be scored on even if somebody fills the version in
+# and forgets the source -- the gate is the mechanism, not this note.
+#
+# VERIFIED:   OpenSSL 3.5.0, confirmed against the upstream release
+#             announcement and CHANGES.md. This is the one the drift demo
+#             depends on.
+# PROVISIONAL: GnuTLS, libgcrypt and NSS. Their post-quantum support is
+#             moving and no first-supporting version was confirmed, so the
+#             floors stay `null` and each carries a FILL marker naming the
+#             upstream NEWS file that would settle it. Tracked in PUNCHLIST as
+#             a data-fill task rather than a scoring risk.
 version: 1
 
 libraries:
@@ -76,6 +95,11 @@ libraries:
     # provider such as oqs-provider, which is a separate shipped artefact and
     # would be detected as its own component.
     pqc_capable_from: "3.5.0"
+    pqc_capable_verified: true
+    pqc_capable_source: >-
+      OpenSSL 3.5.0 release announcement and CHANGES.md (2025-04-08):
+      "Support for the ML-KEM, ML-DSA and SLH-DSA algorithms". Confirmed
+      against the published upstream release material.
     eol: null
     weak_defaults: []
     source: >-
@@ -106,6 +130,11 @@ libraries:
       - SHA-2
       - HMAC
     pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: confirm the first GnuTLS release with hybrid ML-KEM key exchange
+      against upstream NEWS (gnutls.org, 3.8.x series), then set
+      pqc_capable_from and pqc_capable_verified: true.
     eol: null
     weak_defaults: []
     source: >-
@@ -135,6 +164,11 @@ libraries:
       - SHA-3
       - HMAC
     pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: confirm the first libgcrypt release shipping Kyber / ML-KEM
+      against upstream NEWS (gnupg.org, 1.11 series), then set
+      pqc_capable_from and pqc_capable_verified: true.
     eol: null
     weak_defaults:
       - >-
@@ -163,6 +197,11 @@ libraries:
       - SHA-2
       - HMAC
     pqc_capable_from: null
+    pqc_capable_verified: false
+    pqc_capable_source: >-
+      FILL: confirm whether and from which release NSS ships a post-quantum
+      KEM against the Mozilla NSS release notes, then set pqc_capable_from and
+      pqc_capable_verified: true.
     eol: null
     weak_defaults: []
     source: >-

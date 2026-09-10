@@ -73,6 +73,12 @@ rules:
   # nistQuantumSecurityLevel rather than from a name. Deliberately a SEPARATE
   # rule: it catches an algorithm the name list has not been taught yet, and
   # fired_rules then shows which route reached the verdict.
+    verified: true
+    source: >-
+      NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA) and FIPS 205 (SLH-DSA),
+      published 2024-08-13; Shor (1994/1997) for the polynomial-time break of
+      factoring and discrete log. Confirmed against the published FIPS
+      documents.
   - id: quantum-shor-broken-by-nist-level
     when:
       nist_quantum_security_level: 0
@@ -90,6 +96,11 @@ rules:
   # ------------------------------------------------------------------
   # Grover: symmetric strength is halved, not destroyed.
   # ------------------------------------------------------------------
+    verified: true
+    source: >-
+      NIST FIPS 203/204/205 (2024-08-13) for the replacement family; the
+      security-category-0 anchor is defined in core/cbom.py against NIST's PQC
+      category definitions. Confirmed against the published FIPS documents.
   - id: quantum-grover-weakened-symmetric
     when:
       algorithm:
@@ -108,6 +119,11 @@ rules:
       strength of a symmetric key by half, so a 128-bit key retains roughly
       64 bits against a quantum adversary. NIST SP 800-131A Rev.2 Table 5
       separately disallows three-key TDEA for encryption after 2023.
+    verified: true
+    source: >-
+      NIST IR 8547 ipd (initial public draft, 2024-11) Sec. 3: Grover halves
+      the effective key strength of a symmetric cipher; FIPS 197 for AES key
+      sizes. Confirmed against the published draft.
 
   - id: quantum-grover-weakened-aes-128-by-key-size
     when:
@@ -131,6 +147,10 @@ rules:
   # Adequate under Grover. Detected so the inventory shows what is already
   # right, which is what drift detection needs as much as what is wrong.
   # ------------------------------------------------------------------
+    verified: true
+    source: >-
+      NIST IR 8547 ipd Sec. 3 (Grover halving); FIPS 197 for AES-128.
+      Confirmed against the published draft.
   - id: quantum-adequate-symmetric-and-hash
     when:
       algorithm:
@@ -152,6 +172,11 @@ rules:
       approved past 2035; Grover and the quantum collision bounds leave them
       with an adequate margin. NSA CNSA 2.0 requires AES-256 and SHA-384 for
       national security systems.
+    verified: true
+    source: >-
+      FIPS 197 (AES-256) and FIPS 180-4 (SHA-2); NIST IR 8547 ipd Sec. 3
+      confirms 256-bit symmetric keys retain a 128-bit quantum margin.
+      Confirmed against the published documents.
 
   - id: quantum-adequate-aes-256-by-key-size
     when:
@@ -172,6 +197,10 @@ rules:
   # and the label and action must both say so: waiting for 2035 to fix MD5 is
   # a misreading a scored inventory could easily encourage.
   # ------------------------------------------------------------------
+    verified: true
+    source: >-
+      FIPS 197 for AES-256; NIST IR 8547 ipd Sec. 3 for the retained 128-bit
+      quantum margin. Confirmed against the published documents.
   - id: quantum-classically-broken
     when:
       algorithm:
@@ -195,6 +224,11 @@ rules:
   # ------------------------------------------------------------------
   # The destination.
   # ------------------------------------------------------------------
+    verified: true
+    source: >-
+      RFC 6151 (MD5), NIST SP 800-131A Rev. 2 (SHA-1, DES, 3DES, RC4
+      disallowed) and RFC 7465 (RC4 prohibited in TLS). Confirmed against the
+      published RFCs and SP.
   - id: quantum-post-quantum-approved
     when:
       algorithm:
@@ -217,3 +251,7 @@ rules:
       August 2024. Kyber, Dilithium and SPHINCS+ are the pre-standardisation
       names of the first three and are matched so an early adopter's inventory
       is not silently unscored.
+    verified: true
+    source: >-
+      NIST FIPS 203, 204 and 205, published 2024-08-13. Confirmed against the
+      published FIPS documents.

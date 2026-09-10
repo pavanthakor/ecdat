@@ -107,6 +107,33 @@
   of a large legacy database slower than every open after it. Fine at current
   scale; wants batching if a database ever holds thousands of scans.
   *Raised: store migration.*
+- **`verified: true` is an assertion by whoever edits the pack.** Nothing
+  checks that a rule's `source` names a real document, or that anybody read it.
+  ADR-0017 raises the cost of an unchecked fact from "say nothing" to "write a
+  specific false citation and sign the pack" — it does not make lying
+  impossible. A verification DATE and verifier identity per fact, plus a second
+  reviewer, is the next increment; it needs the production signing story
+  (ADR-0007's dev-key entry above) to mean anything.
+  *Raised: verified-fact slice.*
+- **Provisional status is not surfaced in the dashboard.** `ecdat:provisional`,
+  `ecdat:provisional_rule` and `ecdat:deadline_provisional` are on the
+  components and the API serves them, but no view says "this deadline is
+  unconfirmed" — which is exactly where a reader would need to see it. A
+  deadline shown without its caveat is the failure ADR-0017 exists to prevent,
+  reintroduced one layer up.
+  *Raised: verified-fact slice.*
+- **The `ecdat` version recorded on a scan is a hard-coded string.**
+  `core.ECDAT_VERSION` is not derived from a git tag or a build, so it will
+  drift from reality the first time somebody forgets to bump it. Wants deriving
+  from packaging metadata once the repo is a distribution (it deliberately is
+  not yet — see `pyproject.toml`).
+  *Raised: verified-fact slice.*
+- **Pinning semgrep exactly will cause install friction.** `pip install -r
+  requirements.txt` on a machine with a different semgrep now downgrades it.
+  That is the intended trade — reproducibility over convenience, with the
+  mismatch path kept non-fatal — but it is a real cost for anyone who shares an
+  environment with another semgrep user.
+  *Raised: verified-fact slice.*
 - **The API has no authentication and `GET /scans` is unpaginated.** It serves
   an estate's complete cryptographic inventory over plain localhost CORS. Needs
   authn/authz and pagination before it is exposed anywhere but a developer
@@ -127,14 +154,18 @@
   tracking -- Semgrep Pro or a tree-sitter pass.
   *Raised: Scanner A slice. See
   [ADR-0004](docs/adr/0004-source-scanning-semgrep.md) Consequences.*
-- **Determinism is only guaranteed within one semgrep version.** "Same input +
-  same knowledge packs -> byte-identical CBOM" now also depends on the matching
-  engine, which is an external binary. `requirements.txt` pins
-  `semgrep>=1.176,<2` and ADR-0004 records 1.176.1 as the verified version, but
-  nothing fails the build if the installed engine differs from the one the
-  fixtures were scored against. Wants a recorded engine version in the scan
-  record, and a stricter pin, as part of reproducible builds.
-  *Raised: Scanner A slice.*
+- ~~**Determinism is only guaranteed within one semgrep version.**~~
+  **Resolved** by the verified-fact slice. `requirements.txt` pins
+  `semgrep==1.176.1` exactly rather than a range, and a test asserts it equals
+  `scanners.source.PINNED_SEMGREP_VERSION`. Every scan records the engine that
+  produced it on its row (`store.Scan.engine_versions`: the ecdat version plus
+  each engine's pinned/installed/matches), and a divergence sets
+  `engine_warning` and a structured log line. A mismatch WARNS rather than
+  fails, deliberately: a teammate one patch release ahead should not be
+  blocked, and what matters is that a surprising result can be traced to the
+  engine rather than argued about.
+  *Raised: Scanner A slice. Resolved: verified-fact slice, see
+  [ADR-0017](docs/adr/0017-verified-facts.md).*
 - **`params.flagged` is a boolean where a reason belongs.** The scanner sets
   `flagged: true` for rules tagged `critical` and for modes named in a rule's
   `mode_flags`, but the *why* -- which is written in the rule and is the useful
@@ -162,14 +193,20 @@
   first. Fine for base images and the fixtures; a multi-gigabyte application
   image will want a spooled temporary file under `ctx.scratch_dir`.
   *Raised: Scanner C slice.*
-- **GnuTLS and libgcrypt PQC capability is unverified.** `knowledge/libraries.yaml`
-  records `pqc_capable_from: null` for both, with a note, because their
-  post-quantum support was moving and the first supporting version was not
-  confirmed against upstream NEWS. `pqc_capable` is therefore absent rather
-  than false for those libraries -- deliberately, since a guessed version would
-  be an uncited crypto fact. Verify against upstream NEWS and fill both in
-  before any scoring depends on them.
-  *Raised: Scanner C slice.*
+- **GnuTLS and libgcrypt PQC capability is unverified — MECHANISM BUILT,
+  values await human confirmation.** `knowledge/libraries.yaml` entries now
+  carry `pqc_capable_verified` and `pqc_capable_source`, and
+  `_is_pqc_capable()` returns `None` for an unverified floor — so filling in a
+  plausible version WITHOUT confirming it produces no `pqc_capable` parameter
+  at all, rather than a drift verdict nobody checked (ADR-0017). GnuTLS,
+  libgcrypt and NSS are `verified: false` with `FILL:` markers naming the
+  upstream NEWS file that would settle each; OpenSSL 3.5.0 is `verified: true`
+  against its release announcement and CHANGES.md, which is the one the drift
+  demo depends on.
+  **REMAINING WORK IS A DATA FILL:** confirm each floor against upstream NEWS,
+  then set the version and the flag together.
+  *Raised: Scanner C slice. Mechanism: verified-fact slice, see
+  [ADR-0017](docs/adr/0017-verified-facts.md).*
 - **`libssl3` and `libcrypto3` are inventoried as two components.** They are
   one source package shipped as two binaries, and the scanner reports both
   because the image ships both. `params.source_package` carries the link, but
@@ -224,16 +261,23 @@
   Acceptable while `quantum` is the only pack defining the field; revisit if a
   second pack wants its own status vocabulary.
   *Raised: policy engine slice.*
-- **The India DST deadlines and assurance mapping are unverified.** The
-  2028-12-31 CII deadline, the 2029-12-31 full-adoption deadline, the CII sector
-  list and the `assurance:L2A` software mapping in
-  `policy/packs/india_dst.yaml` were supplied to ECDAT as roadmap requirements
-  and encoded verbatim; they have not been checked line by line against the
-  published DST/NQM roadmap text. The structure is right, but a deadline an
-  organisation acts on must be confirmed against the source. Hardware,
-  key-management and CA assurance levels are deliberately absent rather than
-  guessed. The pack header carries the same warning.
-  *Raised: mosca/DST/NIST slice. See ADR-0008.*
+- **The India DST deadlines and assurance mapping are unverified —
+  MECHANISM BUILT, values await human confirmation.** No longer a scoring risk:
+  ADR-0017 gives every rule a `verified` flag and **the engine adds nothing to
+  a score from an unverified rule**. All four DST rules are `verified: false`,
+  so the 2028-12-31 CII deadline, the 2029-12-31 full-adoption deadline, the
+  CII sector list and the `assurance:L2A` mapping now contribute labels,
+  deadlines and actions — each marked provisional — and ZERO points.
+  **Measured cost:** the demo's headline RSA-2048 (BFSI/internet/Personal) went
+  from 98/Critical to 78/High, because `criticality` dropped from 20 to 0.
+  20% of a Critical verdict had been resting on an unchecked fact.
+  **REMAINING WORK IS A DATA FILL, not code:** look each fact up in the
+  published DST/NQM roadmap, replace the `FILL:` marker in that rule's
+  `source` with the document, version and section confirmed, set
+  `verified: true`, and run `make sign-packs`. Hardware, key-management and CA
+  assurance levels remain deliberately absent rather than guessed.
+  *Raised: mosca/DST/NIST slice. Mechanism: verified-fact slice, see
+  [ADR-0017](docs/adr/0017-verified-facts.md).*
 - **The Y (migration time) model is crude.** `Y = 3 years, +2 if hard-coded` is
   a two-value heuristic derived from one bit of information. Real migration time
   depends on blast radius, test coverage, deployment cadence, vendor

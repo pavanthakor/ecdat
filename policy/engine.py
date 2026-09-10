@@ -14,6 +14,13 @@ want one:
   load. A rule without a citation does not load. Per CLAUDE.md there are no
   uncited crypto facts, and a score nobody can trace is a number nobody should
   act on.
+* **Only a VERIFIED fact may move a number (ADR-0017).** A citation says where
+  an idea came from; `verified: true` says somebody checked it against that
+  source and wrote down what they checked. A rule with `verified: false` still
+  fires and still attaches its label, deadline and action -- marked provisional
+  -- and contributes EXACTLY ZERO to the score. So an unchecked fact can inform
+  a reader and cannot influence a band, and nothing is dropped: the gap stays
+  visible instead of disappearing.
 * **Merging is deterministic.** Scores add within a per-category cap, labels
   union and sort, the deadline is the earliest, actions order by (deadline,
   rule id). Pack load order cannot change a verdict.
@@ -44,6 +51,8 @@ __all__ = [
     "DERIVED_FACTS",
     "EFFECT_TYPES",
     "MOSCA_GAP_CEILING",
+    "PROVISIONAL_ACTION_PREFIX",
+    "PROVISIONAL_SUFFIX",
     "Y_YEARS_BASE",
     "Y_YEARS_HARDCODED_PENALTY",
     "Pack",
@@ -85,6 +94,16 @@ CATEGORY_CAP_DEFAULT = 40
 #: Most severe first. When several rules set `quantum_status`, the worst wins,
 #: so adding a reassuring rule can never mask a damning one.
 _QUANTUM_STATUS_SEVERITY = ("broken", "weakened", "adequate", "pqc")
+
+#: Appended to every label an UNVERIFIED rule attaches. In the label itself
+#: rather than only in a sibling property, because labels are what get copied
+#: into a slide, a ticket and an email -- and the caveat has to travel with the
+#: claim it qualifies.
+PROVISIONAL_SUFFIX = " (provisional -- unverified against source)"
+
+#: Prepended to every action an unverified rule proposes. An instruction a
+#: human is about to follow must not hide that it rests on an unchecked fact.
+PROVISIONAL_ACTION_PREFIX = "PROVISIONAL (unverified against source): "
 
 # ---------------------------------------------------------------------------
 # Mosca's inequality
@@ -376,13 +395,32 @@ def _coerce(raw: str) -> Any:
 
 @dataclass(frozen=True, slots=True)
 class Rule:
-    """One scoring rule: a data selector, an effect, and a citation."""
+    """One scoring rule: a data selector, an effect, a citation and a check.
+
+    ``citation`` and ``source`` are deliberately two fields, because they are
+    two different claims:
+
+    ``citation``
+        Where this idea comes from. Required of every rule since ADR-0007.
+    ``source``
+        What somebody actually CHECKED it against. Required when ``verified``
+        is true, and used on an unverified rule to carry the ``FILL:`` marker
+        naming the document that would settle it.
+
+    The India DST rules had impeccable citations and had never been checked
+    against the published text -- which is precisely the state the second field
+    exists to make visible (ADR-0017).
+    """
 
     id: str
     pack: str
     when: Mapping[str, Any]
     effect: Mapping[str, Any]
     citation: str
+    #: Whether this fact has been confirmed against ``source``. Defaults to
+    #: FALSE: silence is not verification, and a pack author must opt in.
+    verified: bool = False
+    source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,6 +451,17 @@ class Verdict:
     #: Per-category subtotals after capping. Diagnostic, not part of equality
     #: for scoring purposes -- but included so a reviewer can see the split.
     categories: Mapping[str, int] = field(default_factory=dict)
+    #: Rules that fired but are NOT verified, so contributed zero. Sorted.
+    #: Non-empty means some of what is displayed rests on an unchecked fact.
+    provisional_rules: tuple[str, ...] = ()
+    #: Whether the reported ``deadline`` comes only from unverified rules. A
+    #: deadline an organisation might plan around has to say which it is.
+    deadline_provisional: bool = False
+
+    @property
+    def provisional(self) -> bool:
+        """Whether anything in this verdict rests on an unverified fact."""
+        return bool(self.provisional_rules)
 
 
 def band_for(score: int) -> str:
@@ -500,12 +549,36 @@ def _parse_rule(raw: Mapping[str, Any], pack_name: str, source: Path) -> Rule:
                     f"{sorted(_OPERATORS)}"
                 )
 
+    verified = raw.get("verified", False)
+    if not isinstance(verified, bool):
+        raise PackValidationError(
+            f"{source}: rule {rule_id!r} `verified` must be true or false, "
+            f"got {verified!r}"
+        )
+    fact_source = raw.get("source")
+    if fact_source is not None and not isinstance(fact_source, str):
+        raise PackValidationError(
+            f"{source}: rule {rule_id!r} `source` must be a string or absent"
+        )
+    if verified and not (fact_source or "").strip():
+        # You cannot mark a fact checked without saying what you checked it
+        # against. A bare `verified: true` is the exact move this gate exists
+        # to prevent -- it would restore scoring while recording nothing.
+        raise PackValidationError(
+            f"{source}: rule {rule_id!r} sets `verified: true` with no "
+            f"`source`. A verified fact must name the document and section it "
+            f"was confirmed against; otherwise it is an unchecked fact wearing "
+            f"a checked label."
+        )
+
     return Rule(
         id=rule_id,
         pack=pack_name,
         when=dict(when),
         effect=dict(effect),
         citation=citation,
+        verified=verified,
+        source=fact_source,
     )
 
 
@@ -628,6 +701,25 @@ def _listed(effect: Mapping[str, Any], singular: str, plural: str) -> list[str]:
     return values
 
 
+def _fires(rule: Rule) -> bool:  # noqa: ARG001 - the seam takes the rule by design
+    """Whether a matching rule produces any output at all.
+
+    Always true, and that is the decision: an unverified fact is DEMOTED to a
+    labelled note, never dropped. A named function taking the rule -- rather
+    than an absent check -- so `tests/test_verified_facts.py` can mutate it
+    into `rule.verified` and show exactly what dropping would lose.
+    """
+    return True
+
+
+def _scores(rule: Rule) -> bool:
+    """Whether a matching rule may move the numeric score.
+
+    The whole verified-fact gate, in one line. See ADR-0017.
+    """
+    return rule.verified
+
+
 def _is_derived_rule(rule: Rule) -> bool:
     """Whether a rule selects on a fact that evaluation itself produces."""
     return any(key in DERIVED_FACTS for key in rule.when)
@@ -671,15 +763,25 @@ def evaluate(component: Mapping[str, Any], packs: Iterable[Pack]) -> Verdict:
     labels: set[str] = set()
     fired: list[str] = []
     deadlines: list[dt.date] = []
+    verified_deadlines: list[dt.date] = []
     actions: list[tuple[dt.date, str, str]] = []
     statuses: set[str] = set()
+    provisional: list[str] = []
 
     def run(rules: Iterable[Rule]) -> None:
         for rule in rules:
             if not matches(rule.when, facts):
                 continue
+            if not _fires(rule):
+                # Never taken as shipped. The seam exists so a mutation test
+                # can turn demotion into dropping and show the difference.
+                continue
 
             fired.append(rule.id)
+            scores = _scores(rule)
+            if not scores:
+                provisional.append(rule.id)
+
             effect = rule.effect
             category = str(effect["category"])
 
@@ -695,21 +797,42 @@ def evaluate(component: Mapping[str, Any], packs: Iterable[Pack]) -> Verdict:
             else:
                 contribution = int(effect["score"])
 
-            subtotals[category] = subtotals.get(category, 0) + contribution
-            labels.update(_listed(effect, "label", "labels"))
+            # THE GATE. An unverified rule reaches every line below this one --
+            # it fires, it labels, it dates, it advises -- and it adds nothing.
+            #
+            # The category is registered either way, so a demoted dimension
+            # reports `criticality=0` rather than vanishing from
+            # `ecdat:category_score`. "Assessed, contributed nothing" and
+            # "never assessed" are different answers, and a category that
+            # silently disappears reads as the second when it is the first.
+            subtotals.setdefault(category, 0)
+            if scores:
+                subtotals[category] = subtotals[category] + contribution
+
+            suffix = "" if scores else PROVISIONAL_SUFFIX
+            labels.update(
+                f"{label}{suffix}" for label in _listed(effect, "label", "labels")
+            )
 
             status = effect.get("quantum_status")
-            if isinstance(status, str):
+            # `quantum_status` is a DERIVED FACT that second-pass rules select
+            # on, not merely something displayed. Letting an unverified rule
+            # assert it would launder an unchecked fact into a score by making
+            # a verified rule fire, so only a verified rule may set it.
+            if isinstance(status, str) and scores:
                 statuses.add(status)
 
             deadline = _as_date(effect.get("deadline"))
             if deadline is not None:
                 deadlines.append(deadline)
+                if scores:
+                    verified_deadlines.append(deadline)
 
             # A rule with no deadline sorts after every dated one.
             sort_date = deadline or dt.date.max
+            prefix = "" if scores else PROVISIONAL_ACTION_PREFIX
             for action in _listed(effect, "action", "actions"):
-                actions.append((sort_date, rule.id, action))
+                actions.append((sort_date, rule.id, f"{prefix}{action}"))
 
     all_rules = [rule for pack in packs for rule in pack.rules]
     run(r for r in all_rules if not _is_derived_rule(r))
@@ -733,15 +856,24 @@ def evaluate(component: Mapping[str, Any], packs: Iterable[Pack]) -> Verdict:
         if action not in ordered_actions:
             ordered_actions.append(action)
 
+    earliest = min(deadlines) if deadlines else None
+    # Provisional only when NO verified rule demands a deadline this early. A
+    # verified rule asking for the same date makes the date a checked fact.
+    deadline_provisional = earliest is not None and (
+        not verified_deadlines or min(verified_deadlines) > earliest
+    )
+
     return Verdict(
         score=score,
         band=band_for(score),
         labels=tuple(sorted(labels)),
-        deadline=min(deadlines) if deadlines else None,
+        deadline=earliest,
         actions=tuple(ordered_actions),
         fired_rules=tuple(sorted(fired)),
         quantum_status=quantum_status,
         categories=capped,
+        provisional_rules=tuple(sorted(set(provisional))),
+        deadline_provisional=deadline_provisional,
     )
 
 

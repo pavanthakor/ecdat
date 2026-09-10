@@ -126,6 +126,12 @@ class LibraryFact:
     pqc_capable_from: str | None
     eol: str | None
     source: str
+    #: Whether ``pqc_capable_from`` has been confirmed against upstream
+    #: release material. Defaults to FALSE, and an unverified floor produces
+    #: no ``pqc_capable`` parameter at all (ADR-0017) -- so a version filled
+    #: in without a source cannot quietly start driving drift.
+    pqc_capable_verified: bool = False
+    pqc_capable_source: str | None = None
 
 
 def _load_library_pack(knowledge_dir: Path) -> dict[str, LibraryFact]:
@@ -151,6 +157,8 @@ def _load_library_pack(knowledge_dir: Path) -> dict[str, LibraryFact]:
             pqc_capable_from=entry.get("pqc_capable_from"),
             eol=entry.get("eol"),
             source=str(entry.get("source", "")),
+            pqc_capable_verified=bool(entry.get("pqc_capable_verified", False)),
+            pqc_capable_source=entry.get("pqc_capable_source"),
         )
         for package in entry.get("packages") or ():
             index[str(package).lower()] = fact
@@ -173,8 +181,16 @@ def _version_tuple(version: str) -> tuple[int, ...]:
 
 
 def _is_pqc_capable(fact: LibraryFact, version: str) -> bool | None:
-    """``None`` when the pack does not know -- never a guess."""
-    if fact.pqc_capable_from is None:
+    """``None`` when the pack does not know -- never a guess.
+
+    "Does not know" now covers two cases, and the second is the point of
+    ADR-0017: no floor recorded at all, OR a floor nobody has confirmed
+    against upstream release material. An unverified floor is data, not a
+    fact, and a scan must not compare against it -- otherwise filling in a
+    plausible version without checking it would silently start producing drift
+    verdicts.
+    """
+    if fact.pqc_capable_from is None or not fact.pqc_capable_verified:
         return None
     return _version_tuple(version) >= _version_tuple(fact.pqc_capable_from)
 
