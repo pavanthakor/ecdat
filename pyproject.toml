@@ -11,6 +11,7 @@ addopts = "-ra --strict-markers --strict-config"
 markers = [
     "validation: asserts a produced CBOM validates against the official CycloneDX schema",
     "docker: needs Docker and a real image present locally; skips itself otherwise",
+    "binary_real: reads a real system binary rather than a committed fixture; opt-in",
 ]
 
 [tool.mypy]

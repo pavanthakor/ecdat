@@ -141,13 +141,15 @@ here.
 
 ## What's built today
 
-**Scanners** — `core/registry.py` returns exactly these four:
+**Scanners** — `core/registry.py` returns exactly these six:
 
 | id | view | what it reads |
 |---|---|---|
 | `source` | declared | Python, Go, JS/TS and Java source via Semgrep — 28 + 23 + 20 + 32 cited rules |
 | `config` | declared | nginx `server{}` blocks, `sshd_config`, `openssl.cnf` |
+| `deps` | declared | Python/Node/Go manifests and lockfiles, lockfile-preferred |
 | `container` | shipped | `docker save` tar / OCI dir — dpkg+apk DBs, certs, keys |
+| `binary` | shipped | ELF/PE — symbols, OIDs, embedded PEM, version banners, constants |
 | `runtime-spool` | observed | JSONL the eBPF agent left in a directory |
 
 Plus the **eBPF agent** — a separate root process, deliberately *not* a
@@ -396,10 +398,19 @@ before believing anything above:
   from 20 to 22 rather than the gap being quietly dropped. C/C++ is the hard
   one and is deliberately not a Semgrep job: OpenSSL call sites are macro-heavy,
   so that pack wants tree-sitter, or reading the compiled binary instead.
-- **Binary and network scanners are designed, not built.** Five of a planned
-  seven scanner families exist; a statically linked binary and a packet capture
-  are still invisible. The dependency scanner landed in
-  [ADR-0021](docs/adr/0021-deps-scanner.md) — Python, Node and Go.
+- **The network scanner is designed, not built.** Six of a planned seven
+  scanner families exist; a packet capture is still invisible. The dependency
+  scanner landed in [ADR-0021](docs/adr/0021-deps-scanner.md) and the binary
+  scanner in [ADR-0025](docs/adr/0025-binary-scanner.md).
+- **Everything the binary scanner says is a heuristic, and it says so.** No
+  finding is ever confidence 1.0: symbols score 0.90, OIDs 0.85, version
+  banners 0.80, well-known constants 0.60, and each carries the technique that
+  produced it. A stripped or statically linked binary genuinely reduces recall,
+  so the scanner reports what it could not read per binary rather than
+  returning fewer findings silently — but saying so does not recover them, and
+  nothing yet aggregates those limits into the coverage report. It also cannot
+  see inside a container image yet: wiring `container` → `binary` is the next
+  step.
 - **Fix templates are a starter set** — five templates over nginx,
   `openssl.cnf`, Python MD5 and dependency manifests.
   `dockerfile-base-bump` is still absent because nothing reads a Dockerfile, so
@@ -484,6 +495,7 @@ consequences:
 | [0022](docs/adr/0022-dep-bump-fix.md) | dep-bump: manifest bump, verified target only |
 | [0023](docs/adr/0023-go-js-rules.md) | Go and JS/TS rule packs; the QuantumBank Go gap closed |
 | [0024](docs/adr/0024-java-rules.md) | Java rule pack; a language-neutral redaction net |
+| [0025](docs/adr/0025-binary-scanner.md) | Scanner D: binaries, heuristic and confidence-scored |
 
 ---
 

@@ -1,0 +1,192 @@
+# Ground truth for the binary scanner (Scanner D, ADR-0025).
+#
+# Unlike the source rule packs, these fixtures are COMMITTED BINARIES. The key
+# can therefore be exact -- the bytes never change unless someone reruns
+# make_fixtures.sh, and the note on each entry says which technique is supposed
+# to find it.
+#
+# Precision is asserted at 1.0 against the DECOY only, not against the union of
+# every entry, and that is a real difference from the source packs. A binary is
+# a haystack: `elf_openssl_symbols` legitimately contains libc imports, section
+# names and compiler strings, and demanding that the key enumerate every byte a
+# heuristic could touch would make it a transcript rather than a measuring
+# stick. What must hold is that the non-crypto binary produces NOTHING, which
+# is the claim an operator actually relies on.
+
+expected:
+  # -- SYMBOLS: the strongest technique ------------------------------------
+  elf_openssl_symbols:
+    - algorithm: RSA
+      primitive: pke
+      usage: unknown
+      technique: symbol
+      confidence: 0.9
+      symbol: RSA_new
+    - algorithm: RSA
+      primitive: signature
+      usage: sign
+      technique: symbol
+      confidence: 0.9
+      symbol: RSA_sign
+    - algorithm: SHA-256
+      primitive: hash
+      usage: hash
+      technique: symbol
+      confidence: 0.9
+      symbol: EVP_sha256
+    - algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      technique: symbol
+      confidence: 0.9
+      symbol: EVP_aes_256_gcm
+      params_any:
+        - key_size: 256
+          mode: GCM
+    - algorithm: EC
+      primitive: unknown
+      usage: unknown
+      technique: symbol
+      confidence: 0.9
+      symbol: EC_KEY_new_by_curve_name
+    - algorithm: PBKDF2
+      primitive: kdf
+      usage: kdf
+      technique: symbol
+      confidence: 0.9
+      symbol: PKCS5_PBKDF2_HMAC
+
+  # The stripped copy keeps its DYNAMIC symbol table -- that is what `strip`
+  # does not remove -- so the same six survive. The coverage report is what
+  # changes, and tests/test_scanner_binary.py asserts on that separately.
+  elf_openssl_symbols_stripped:
+    - algorithm: RSA
+      primitive: pke
+      usage: unknown
+      technique: symbol
+      confidence: 0.9
+      symbol: RSA_new
+    - algorithm: RSA
+      primitive: signature
+      usage: sign
+      technique: symbol
+      confidence: 0.9
+      symbol: RSA_sign
+    - algorithm: SHA-256
+      primitive: hash
+      usage: hash
+      technique: symbol
+      confidence: 0.9
+      symbol: EVP_sha256
+    - algorithm: AES
+      primitive: block-cipher
+      usage: encrypt
+      technique: symbol
+      confidence: 0.9
+      symbol: EVP_aes_256_gcm
+    - algorithm: EC
+      primitive: unknown
+      usage: unknown
+      technique: symbol
+      confidence: 0.9
+      symbol: EC_KEY_new_by_curve_name
+    - algorithm: PBKDF2
+      primitive: kdf
+      usage: kdf
+      technique: symbol
+      confidence: 0.9
+      symbol: PKCS5_PBKDF2_HMAC
+
+  # -- PE: the Windows CNG import path -------------------------------------
+  pe_bcrypt.exe:
+    - algorithm: unknown
+      primitive: signature
+      usage: sign
+      technique: symbol
+      confidence: 0.9
+      symbol: BCryptSignHash
+    - algorithm: unknown
+      primitive: block-cipher
+      usage: encrypt
+      technique: symbol
+      confidence: 0.9
+      symbol: BCryptEncrypt
+    - algorithm: unknown
+      primitive: block-cipher
+      usage: unknown
+      technique: symbol
+      confidence: 0.9
+      symbol: BCryptGenerateSymmetricKey
+    - algorithm: OpenSSL
+      primitive: unknown
+      usage: unknown
+      technique: version-string
+      confidence: 0.8
+      asset_type: library
+
+  # -- OIDs ----------------------------------------------------------------
+  elf_embedded_oid:
+    - algorithm: RSA
+      primitive: signature
+      usage: sign
+      technique: oid
+      confidence: 0.85
+      oid: 1.2.840.113549.1.1.11
+    - algorithm: EC
+      primitive: unknown
+      usage: unknown
+      technique: oid
+      confidence: 0.85
+      oid: 1.2.840.10045.2.1
+
+  # -- Embedded PEM: a real certificate, and a private key ------------------
+  elf_embedded_pem:
+    - algorithm: RSA
+      primitive: pke
+      usage: unknown
+      technique: pem
+      confidence: 0.95
+      asset_type: certificate
+      params_any:
+        - key_size: 2048
+    - algorithm: unknown
+      primitive: unknown
+      usage: unknown
+      technique: pem
+      confidence: 0.95
+      asset_type: key
+
+  # -- Constants: the low-confidence bonus ---------------------------------
+  elf_constants:
+    - algorithm: AES
+      primitive: block-cipher
+      usage: unknown
+      technique: constant
+      confidence: 0.6
+      constant: aes-sbox-forward
+
+  # -- Version banner ------------------------------------------------------
+  elf_version_banner:
+    - algorithm: OpenSSL
+      primitive: unknown
+      usage: unknown
+      technique: version-string
+      confidence: 0.8
+      asset_type: library
+      params_any:
+        - version: 3.0.13
+
+#: The PRECISION decoy. libc imports, ELF section names and compiler strings
+#: are not cryptography, and this binary must produce EXACTLY nothing.
+decoys:
+  - elf_hello
+
+#: Not a parseable binary. It must be logged and skipped, and every other
+#: fixture in the same directory must still be scanned.
+unparseable:
+  - broken.bin
+
+#: Planted inside the fixtures' key material. None may reach any Finding --
+#: tests/test_scanner_binary.py::test_no_planted_secret_reaches_any_finding.
+secret_sentinels:
+  - BINSECRETSENTINEL

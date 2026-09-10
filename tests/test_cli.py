@@ -90,6 +90,7 @@ def test_list_scanners_prints_the_registered_ids(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.out.split() == [
+        "binary",
         "config",
         "container",
         "deps",

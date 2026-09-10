@@ -126,6 +126,7 @@ def test_the_other_scanners_decline_a_spool_target() -> None:
 
 def test_registered_in_the_registry() -> None:
     assert registry.available_ids() == [
+        "binary",
         "config",
         "container",
         "deps",

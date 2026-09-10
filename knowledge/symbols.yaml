@@ -1,0 +1,430 @@
+# Cryptographic library symbols, for the binary scanner (Scanner D, ADR-0025).
+#
+# A symbol in a binary's import table is the STRONGEST binary technique
+# available: the linker put it there because the code calls it, and the name is
+# the library's own documented API rather than something inferred from bytes.
+# It is still not proof of execution -- a call site may be unreachable -- so the
+# scanner scores it 0.9 rather than 1.0. Nothing a binary scanner reports is
+# 1.0; see ADR-0025.
+#
+# WHAT BELONGS HERE. Only symbols that name an ALGORITHM. `EVP_MD_CTX_new` and
+# `EVP_DigestInit_ex` are deliberately absent: they say a digest is computed and
+# not which one, so a finding from them would be `unknown/hash` at an unknown
+# call site, which is inventory nobody can act on. The specific
+# `EVP_sha256`/`EVP_md5` fetchers below carry the fact.
+#
+# MATCHING. Names are matched after stripping an ELF version suffix
+# (`RSA_new@OPENSSL_3.0.0` -> `RSA_new`), case-sensitively, exact match only.
+# Prefix matching was considered and rejected: `RSA_` as a prefix pulls in
+# `RSA_free` and `RSA_size`, which are memory management, not cryptography.
+#
+# Sources:
+#   OpenSSL 3.x man3 pages (openssl.org/docs/man3.0/) for every EVP_*, RSA_*,
+#     EC_*, DH_*, HMAC_* and PKCS5_* entry.
+#   libgcrypt 1.10 manual, section "Available algorithms".
+#   Mbed TLS 3.x API reference (mbedtls_* entries).
+#   wolfSSL API reference (wc_* entries).
+#   NSS 3.x public API (PK11_* entries).
+#   Microsoft CNG reference, bcrypt.h (BCrypt* entries).
+#
+# Fields per entry mirror the rule-metadata contract in rules/README.md:
+# `algorithm`, `primitive`, `usage` and a cited `note`. `params` is optional and
+# carries what the symbol name itself states -- `EVP_aes_256_gcm` names its key
+# size and mode, and dropping that would discard the most useful half.
+
+symbols:
+  # -- OpenSSL: public key -------------------------------------------------
+  - symbol: RSA_new
+    library: OpenSSL
+    algorithm: RSA
+    primitive: pke
+    usage: unknown
+    note: >-
+      Allocates an RSA key (OpenSSL man3 RSA_new). Usage is unknown at
+      allocation -- the same object signs or transports -- and the PQC
+      replacement differs (ML-DSA vs ML-KEM), so the correlator refines it.
+      Broken by Shor; disallowed after 2035 (NIST IR 8547).
+
+  - symbol: RSA_generate_key_ex
+    library: OpenSSL
+    algorithm: RSA
+    primitive: pke
+    usage: unknown
+    note: >-
+      RSA key generation (OpenSSL man3 RSA_generate_key_ex). Broken by Shor
+      regardless of modulus size; disallowed after 2035 (NIST IR 8547).
+
+  - symbol: RSA_sign
+    library: OpenSSL
+    algorithm: RSA
+    primitive: signature
+    usage: sign
+    note: >-
+      PKCS#1 v1.5 signature generation (OpenSSL man3 RSA_sign, RFC 8017).
+      Replacement is ML-DSA (FIPS 204), not ML-KEM -- this symbol is what makes
+      the usage knowable rather than guessed.
+
+  - symbol: RSA_verify
+    library: OpenSSL
+    algorithm: RSA
+    primitive: signature
+    usage: verify
+    note: >-
+      PKCS#1 v1.5 signature verification (OpenSSL man3 RSA_verify, RFC 8017).
+      A verifier must accept ML-DSA (FIPS 204) before a signer can emit it, so
+      verify sites lead the migration.
+
+  - symbol: RSA_public_encrypt
+    library: OpenSSL
+    algorithm: RSA
+    primitive: pke
+    usage: key-transport
+    note: >-
+      RSA key transport (OpenSSL man3 RSA_public_encrypt). The
+      harvest-now-decrypt-later case: recorded ciphertext is decryptable once a
+      cryptanalytically relevant quantum computer exists. Replace with ML-KEM
+      (FIPS 203).
+
+  - symbol: EC_KEY_new_by_curve_name
+    library: OpenSSL
+    algorithm: EC
+    primitive: unknown
+    usage: unknown
+    note: >-
+      Allocates an elliptic-curve key for a named curve (OpenSSL man3
+      EC_KEY_new_by_curve_name). The primitive is genuinely UNKNOWN from this
+      symbol: OpenSSL's EC_KEY carries both ECDSA signing keys and ECDH
+      agreement keys, and reporting either would be a guess. Both are broken by
+      Shor and disallowed after 2035 (NIST IR 8547); which replacement applies
+      -- ML-DSA or ML-KEM -- depends on the use site.
+
+  - symbol: ECDSA_do_sign
+    library: OpenSSL
+    algorithm: ECDSA
+    primitive: signature
+    usage: sign
+    note: >-
+      ECDSA signature generation (OpenSSL man3 ECDSA_do_sign). Elliptic-curve
+      discrete log falls to Shor with fewer logical qubits than RSA-2048 needs.
+      Replace with ML-DSA (FIPS 204).
+
+  - symbol: ECDH_compute_key
+    library: OpenSSL
+    algorithm: ECDH
+    primitive: key-agreement
+    usage: key-exchange
+    note: >-
+      ECDH shared-secret derivation (OpenSSL man3 ECDH_compute_key, NIST SP
+      800-56A Rev.3). The urgent case -- a recorded handshake is decryptable
+      later. Replace with ML-KEM (FIPS 203) or a hybrid group.
+
+  - symbol: DH_compute_key
+    library: OpenSSL
+    algorithm: DH
+    primitive: key-agreement
+    usage: key-exchange
+    note: >-
+      Finite-field Diffie-Hellman (OpenSSL man3 DH_compute_key). Broken by
+      Shor; deprecated after 2030 and disallowed after 2035 (NIST IR 8547).
+      Replace with ML-KEM (FIPS 203).
+
+  # -- OpenSSL: digests ----------------------------------------------------
+  - symbol: EVP_md5
+    library: OpenSSL
+    algorithm: MD5
+    primitive: hash
+    usage: hash
+    note: >-
+      Fetches the MD5 digest (OpenSSL man3 EVP_md5). Chosen-prefix collisions
+      are practical (RFC 6151); disallowed for signatures by NIST SP 800-131A
+      Rev.2 Table 8. Already unfit -- quantum is not the argument.
+
+  - symbol: EVP_sha1
+    library: OpenSSL
+    algorithm: SHA-1
+    primitive: hash
+    usage: hash
+    note: >-
+      Fetches the SHA-1 digest (OpenSSL man3 EVP_sha1). Collision resistance
+      broken classically (SHAttered, 2017); disallowed for signature generation
+      since 2013 (NIST SP 800-131A Rev.2).
+
+  - symbol: EVP_sha256
+    library: OpenSSL
+    algorithm: SHA-256
+    primitive: hash
+    usage: hash
+    note: >-
+      Fetches the SHA-256 digest (OpenSSL man3 EVP_sha256, FIPS 180-4). Grover
+      halves the effective preimage strength, leaving ~128 bits -- adequate, no
+      migration required. Recorded as a CONTROL so coverage can be measured.
+    flags: [control]
+
+  - symbol: EVP_sha384
+    library: OpenSSL
+    algorithm: SHA-384
+    primitive: hash
+    usage: hash
+    note: >-
+      Fetches the SHA-384 digest (FIPS 180-4). Adequate against Grover; CNSA
+      2.0 requires SHA-384 or better for long-lived data. A CONTROL.
+    flags: [control]
+
+  - symbol: EVP_sha512
+    library: OpenSSL
+    algorithm: SHA-512
+    primitive: hash
+    usage: hash
+    note: >-
+      Fetches the SHA-512 digest (FIPS 180-4). Adequate against Grover. A
+      CONTROL.
+    flags: [control]
+
+  # -- OpenSSL: symmetric --------------------------------------------------
+  - symbol: EVP_aes_128_cbc
+    library: OpenSSL
+    algorithm: AES
+    primitive: block-cipher
+    usage: encrypt
+    params:
+      key_size: 128
+      mode: CBC
+    note: >-
+      AES-128-CBC (FIPS 197 with NIST SP 800-38A). CBC is unauthenticated and
+      padding-oracle prone (Vaudenay 2002); Grover leaves AES-128 at ~64-bit
+      effective strength, below what CNSA 2.0 requires for long-lived data.
+
+  - symbol: EVP_aes_256_cbc
+    library: OpenSSL
+    algorithm: AES
+    primitive: block-cipher
+    usage: encrypt
+    params:
+      key_size: 256
+      mode: CBC
+    note: >-
+      AES-256-CBC (FIPS 197 with NIST SP 800-38A). The key size is what CNSA
+      2.0 wants; the MODE is the classical concern -- unauthenticated and
+      padding-oracle prone. Prefer GCM (SP 800-38D).
+
+  - symbol: EVP_aes_256_gcm
+    library: OpenSSL
+    algorithm: AES
+    primitive: block-cipher
+    usage: encrypt
+    params:
+      key_size: 256
+      mode: GCM
+    note: >-
+      AES-256-GCM (FIPS 197 with NIST SP 800-38D): authenticated encryption at
+      the key size CNSA 2.0 requires for data that must stay confidential past
+      2035. A CONTROL.
+    flags: [control]
+
+  - symbol: EVP_des_ede3_cbc
+    library: OpenSSL
+    algorithm: 3DES
+    primitive: block-cipher
+    usage: encrypt
+    params:
+      mode: CBC
+    note: >-
+      Triple DES in CBC mode (OpenSSL man3 EVP_des_ede3_cbc). DISALLOWED after
+      2023 (NIST SP 800-131A Rev.2); the 64-bit block makes Sweet32
+      (CVE-2016-2183) practical. Replace with AES-256-GCM.
+
+  - symbol: EVP_rc4
+    library: OpenSSL
+    algorithm: RC4
+    primitive: stream-cipher
+    usage: encrypt
+    note: >-
+      RC4 (OpenSSL man3 EVP_rc4). Biased keystream; prohibited in TLS by RFC
+      7465. Classically dead. Replace with AES-256-GCM or ChaCha20-Poly1305.
+
+  # -- OpenSSL: MAC and KDF ------------------------------------------------
+  - symbol: HMAC_Init_ex
+    library: OpenSSL
+    algorithm: HMAC
+    primitive: mac
+    usage: sign
+    note: >-
+      HMAC (OpenSSL man3 HMAC_Init_ex, RFC 2104). Symmetric: Shor does not
+      apply and Grover halves the effective strength. The digest it wraps is
+      chosen at the call site and is not knowable from this symbol.
+
+  - symbol: PKCS5_PBKDF2_HMAC
+    library: OpenSSL
+    algorithm: PBKDF2
+    primitive: kdf
+    usage: kdf
+    note: >-
+      PBKDF2 (OpenSSL man3 PKCS5_PBKDF2_HMAC, RFC 8018; NIST SP 800-132).
+      Quantum is not the issue: PBKDF2 is not memory-hard, so it resists GPU
+      and ASIC attack far less well than Argon2id or scrypt (NIST SP 800-63B
+      s5.1.1.2). The iteration count decides its strength and is not knowable
+      from the symbol.
+
+  # -- libgcrypt -----------------------------------------------------------
+  - symbol: gcry_pk_sign
+    library: libgcrypt
+    algorithm: unknown
+    primitive: signature
+    usage: sign
+    note: >-
+      libgcrypt public-key signature (libgcrypt 1.10 manual, "Public Key
+      cryptography"). The ALGORITHM is genuinely unknown from the symbol -- it
+      is selected by an S-expression at runtime -- so this records that
+      public-key signing happens and where, and declines to name it.
+
+  - symbol: gcry_cipher_open
+    library: libgcrypt
+    algorithm: unknown
+    primitive: block-cipher
+    usage: encrypt
+    note: >-
+      libgcrypt symmetric cipher handle (libgcrypt 1.10 manual, "Symmetric
+      cryptography"). The algorithm and mode are runtime arguments, so the
+      symbol says a cipher is used and not which -- reported honestly rather
+      than guessed.
+
+  - symbol: gcry_md_open
+    library: libgcrypt
+    algorithm: unknown
+    primitive: hash
+    usage: hash
+    note: >-
+      libgcrypt message-digest handle (libgcrypt 1.10 manual). The digest is a
+      runtime argument; the symbol establishes that hashing happens.
+
+  # -- Mbed TLS ------------------------------------------------------------
+  - symbol: mbedtls_rsa_pkcs1_sign
+    library: Mbed TLS
+    algorithm: RSA
+    primitive: signature
+    usage: sign
+    note: >-
+      PKCS#1 v1.5 signing (Mbed TLS 3.x API reference). Broken by Shor;
+      disallowed after 2035 (NIST IR 8547). Replace with ML-DSA (FIPS 204).
+
+  - symbol: mbedtls_ecdsa_sign
+    library: Mbed TLS
+    algorithm: ECDSA
+    primitive: signature
+    usage: sign
+    note: >-
+      ECDSA signing (Mbed TLS 3.x API reference). Elliptic-curve discrete log
+      falls to Shor first. Replace with ML-DSA (FIPS 204).
+
+  - symbol: mbedtls_ecdh_compute_shared
+    library: Mbed TLS
+    algorithm: ECDH
+    primitive: key-agreement
+    usage: key-exchange
+    note: >-
+      ECDH agreement (Mbed TLS 3.x API reference; NIST SP 800-56A Rev.3).
+      Harvest-now-decrypt-later applies. Replace with ML-KEM (FIPS 203).
+
+  - symbol: mbedtls_aes_setkey_enc
+    library: Mbed TLS
+    algorithm: AES
+    primitive: block-cipher
+    usage: encrypt
+    note: >-
+      AES key schedule for encryption (Mbed TLS 3.x API reference, FIPS 197).
+      Grover halves the effective key strength; the key SIZE is a runtime
+      argument and is not knowable from the symbol.
+
+  # -- wolfSSL -------------------------------------------------------------
+  - symbol: wc_RsaSSL_Sign
+    library: wolfSSL
+    algorithm: RSA
+    primitive: signature
+    usage: sign
+    note: >-
+      wolfCrypt RSA signing (wolfSSL API reference). Broken by Shor;
+      disallowed after 2035 (NIST IR 8547).
+
+  - symbol: wc_ecc_sign_hash
+    library: wolfSSL
+    algorithm: ECDSA
+    primitive: signature
+    usage: sign
+    note: >-
+      wolfCrypt ECDSA signing (wolfSSL API reference). Replace with ML-DSA
+      (FIPS 204).
+
+  - symbol: wc_AesGcmEncrypt
+    library: wolfSSL
+    algorithm: AES
+    primitive: block-cipher
+    usage: encrypt
+    params:
+      mode: GCM
+    note: >-
+      wolfCrypt AES-GCM (wolfSSL API reference; FIPS 197 with NIST SP
+      800-38D). Authenticated encryption -- a CONTROL. Key size is a runtime
+      argument.
+    flags: [control]
+
+  # -- NSS -----------------------------------------------------------------
+  - symbol: PK11_Sign
+    library: NSS
+    algorithm: unknown
+    primitive: signature
+    usage: sign
+    note: >-
+      NSS PKCS#11 signing (NSS 3.x public API). The mechanism is a runtime
+      argument, so the algorithm is not knowable from the symbol -- this
+      records that signing happens and where.
+
+  - symbol: PK11_GenerateKeyPair
+    library: NSS
+    algorithm: unknown
+    primitive: unknown
+    usage: unknown
+    note: >-
+      NSS PKCS#11 key-pair generation (NSS 3.x public API). Records that
+      asymmetric key generation happens; the mechanism decides the algorithm
+      and is a runtime argument.
+
+  # -- Windows CNG (PE) ----------------------------------------------------
+  - symbol: BCryptSignHash
+    library: Windows CNG
+    algorithm: unknown
+    primitive: signature
+    usage: sign
+    note: >-
+      CNG signature generation (Microsoft CNG reference, bcrypt.h). The
+      algorithm comes from the key handle's provider and is not knowable from
+      the symbol. Records that signing happens in this binary.
+
+  - symbol: BCryptEncrypt
+    library: Windows CNG
+    algorithm: unknown
+    primitive: block-cipher
+    usage: encrypt
+    note: >-
+      CNG symmetric encryption (Microsoft CNG reference, bcrypt.h). Algorithm
+      and mode come from the key handle; the symbol establishes that bulk
+      encryption happens.
+
+  - symbol: BCryptGenerateSymmetricKey
+    library: Windows CNG
+    algorithm: unknown
+    primitive: block-cipher
+    usage: unknown
+    note: >-
+      CNG symmetric key import/derivation (Microsoft CNG reference, bcrypt.h).
+      Records that a symmetric key is created here; the algorithm is a property
+      of the provider handle.
+
+  - symbol: BCryptGenerateKeyPair
+    library: Windows CNG
+    algorithm: unknown
+    primitive: unknown
+    usage: unknown
+    note: >-
+      CNG asymmetric key-pair generation (Microsoft CNG reference, bcrypt.h).
+      The algorithm identifier is an argument to BCryptOpenAlgorithmProvider,
+      not to this call.

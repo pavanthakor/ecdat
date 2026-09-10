@@ -101,6 +101,7 @@ def test_declines_other_target_kinds(kind: str) -> None:
 
 def test_registered_in_the_registry() -> None:
     assert registry.available_ids() == [
+        "binary",
         "config",
         "container",
         "deps",

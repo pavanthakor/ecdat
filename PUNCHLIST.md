@@ -56,9 +56,23 @@
   `AES/CBC/PKCS5Padding`), and
   `test_the_opaque_literal_net_keeps_algorithm_strings_intact` pins that from
   the other side. Five scanner families now have a net as well as discipline.
-  **Still owed, unchanged:** a slash-bearing base64 key is caught only by its
-  own rule's flag, and **the schema-level guard in `core/schema.py` is what
-  would make any of this structural** rather than a scanner-local convention.
+  **Update (Scanner D, ADR-0025): all SIX scanner families now enforce it.**
+  The binary scanner records an embedded private key by presence, its PEM label
+  and a blake2b fingerprint of its own bytes -- an identifier stable across
+  scans that carries no part of the key -- and redacts certificates too, even
+  though a certificate is public, because a snippet is not a place for a blob
+  and the fields worth having (subject, issuer, validity, key algorithm and
+  size) are parsed into `params` where they can be scored. Tests assert both
+  that a planted sentinel reaches no Finding and that no `-----BEGIN` reaches
+  one at all.
+  **Still owed, unchanged, and now the ONLY thing left:** a slash-bearing
+  base64 key is caught only by its own rule's flag, and **the schema-level
+  guard in `core/schema.py` is what would make any of this structural** rather
+  than six separate scanner-local conventions. `Occurrence.snippet` is still a
+  free-form string any scanner can fill with anything, and the normaliser still
+  copies it into `evidence.occurrences[].additionalContext` unexamined. Every
+  family enforcing it by discipline is exactly the state where the next scanner
+  written forgets.
   *Raised: Phase 0, core schema slice. Partially resolved: Scanner A slice,
   see [ADR-0004](docs/adr/0004-source-scanning-semgrep.md).*
 - **Cross-view merging only happens when the normalised locus matches.** The
@@ -716,6 +730,50 @@
   ordinary additive packs and are simply not started.
   *Raised: Go/JS rule-pack slice; narrowed by
   [ADR-0024](docs/adr/0024-java-rules.md).*
+- ~~**`scanners/binary` is an empty directory.**~~ **Resolved** by
+  [ADR-0025](docs/adr/0025-binary-scanner.md). Scanner D reads ELF and PE with
+  five techniques -- symbols (0.90), OIDs (0.85), embedded PEM (0.95), version
+  banners (0.80) and well-known constants (0.60) -- at recall 100% and zero
+  findings on a non-crypto decoy. Nothing it emits is ever confidence 1.0.
+  *Raised: Phase 0. Resolved: binary-scanner slice.*
+- **The binary scanner cannot see inside a container image.** It takes a
+  `directory` target and walks it for ELF/PE files; `image` targets belong to
+  the container scanner, which reads package databases out of layer blobs and
+  does NOT hand its extracted contents on. That wiring is the obvious next step
+  and is where most shipped binaries actually live -- an image scan today
+  inventories what dpkg says is installed, not what the binaries contain. Until
+  it exists, scanning a container's binaries means extracting the image
+  yourself and pointing a `directory` target at it.
+  *Raised: binary-scanner slice, see [ADR-0025](docs/adr/0025-binary-scanner.md).*
+- **A stripped or statically linked binary genuinely reduces recall, and the
+  honest report does not aggregate.** `BinaryScanner.coverage()` says per
+  binary what it could not read -- "the finding count here is a FLOOR, not a
+  total" -- and that is logged, but nothing folds those limitations into the
+  scan-level result, the API response or the coverage PDF. So a scan of fifty
+  stripped binaries reports its limits fifty times in a log and zero times
+  where a reader would look.
+  *Raised: binary-scanner slice.*
+- **PE support is shallower than ELF, and Mach-O is untested.** The import
+  directory is read (which is where Windows CNG lives) and the byte techniques
+  are format-independent, but PE export tables, resource sections and .NET
+  metadata are untouched, and the only PE fixture is one this project
+  assembled by hand -- there is no Windows cross-toolchain on the build host.
+  Mach-O is recognised by magic number and otherwise has no fixture and no
+  test.
+  *Raised: binary-scanner slice.*
+- **A symbol proves a LINK, not a call; and ambiguous APIs report `unknown`.**
+  `RSA_sign` in an import table means the linker resolved it, not that any
+  reachable path calls it -- closing that needs call-graph analysis. Separately,
+  `EC_KEY_new_by_curve_name` carries both ECDSA and ECDH keys and
+  `BCryptSignHash` takes its algorithm from a provider handle, so those
+  findings name a primitive or algorithm of `unknown`. That is honest and it is
+  also less useful than a name; closing it needs argument tracking.
+  *Raised: binary-scanner slice.*
+- **No firmware, no packers, no obfuscation.** Every technique reads the file
+  as laid out on disk, so a UPX-packed or otherwise obfuscated binary presents
+  compressed bytes and yields close to nothing. The coverage report will not
+  currently notice that case and call it out, which it should.
+  *Raised: binary-scanner slice.*
 - **`java-keygenerator-aes` reports the key size and does not flag AES-128.**
   Deliberate: CNSA 2.0's requirement is conditional -- AES-128 is acceptable
   under NIST SP 800-131A Rev.2 for shorter-lived data and unacceptable for

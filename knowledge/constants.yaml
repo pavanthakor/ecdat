@@ -1,0 +1,97 @@
+# Well-known cryptographic constant tables, for the binary scanner (ADR-0025).
+#
+# THE WEAKEST TECHNIQUE IN THE PACK, AND DELIBERATELY THIN.
+#
+# A constant table is evidence that an implementation is COMPILED IN, which is
+# exactly what a symbol table cannot tell you about a statically linked or
+# stripped binary -- so it is the technique that survives where the others do
+# not. It is also the one that can be wrong: 32 bytes of a substitution table
+# can appear in a font, a codec, a compression dictionary or another cipher
+# that happens to reuse the same S-box, and nothing about finding them proves
+# the surrounding code is reachable.
+#
+# So every entry here is scored 0.6 and says why in its note. The scanner does
+# not raise that number for a longer match, because a longer match of the same
+# table is the same evidence.
+#
+# The pack is thin on purpose. Four entries that are unambiguous beat forty
+# that are plausible: this technique's failure mode is a confident inventory of
+# ciphers a binary does not implement, and an operator who sees that once stops
+# believing the whole report.
+#
+# Sources:
+#   FIPS 197 Figure 7 -- the AES forward S-box.
+#   FIPS 180-4 s5.3.3 -- the SHA-256 initial hash value.
+#   RFC 8017 -- the RSA public exponent F4 (65537) as a DER INTEGER.
+#   RFC 8032 s5.1 -- the Ed25519 base field prime.
+#
+# `bytes` is a hex string, matched verbatim against the binary's sections.
+# `endianness` records which byte order the entry is written in, because a
+# constant compiled into a little-endian target may appear either way round --
+# where both matter, both are listed as separate entries.
+
+constants:
+  - name: aes-sbox-forward
+    algorithm: AES
+    primitive: block-cipher
+    usage: unknown
+    endianness: n/a
+    bytes: >-
+      637c777bf26b6fc53001672bfed7ab76
+      ca82c97dfa5947f0add4a2af9ca472c0
+    note: >-
+      The first 32 bytes of the AES forward substitution box (FIPS 197 Figure
+      7). Strong evidence that an AES implementation is compiled into this
+      artefact rather than called through a shared library -- and the reason
+      this technique exists, because a statically linked binary has no import
+      table to read. Scored LOW because a byte table is not a call site: these
+      bytes prove the code is present, not that it runs, and they can occur by
+      coincidence in any lookup table. AES itself survives quantum (Grover
+      halves the effective key strength); the key size, which decides whether
+      that is enough, is not knowable from the S-box.
+
+  - name: sha256-initial-hash-be
+    algorithm: SHA-256
+    primitive: hash
+    usage: hash
+    endianness: big
+    bytes: >-
+      6a09e667bb67ae853c6ef372a54ff53a
+      510e527f9b05688c1f83d9ab5be0cd19
+    note: >-
+      The SHA-256 initial hash value H(0), all eight words, big-endian
+      (FIPS 180-4 s5.3.3). Evidence of a compiled-in SHA-256 implementation.
+      Scored low for the same reason as every constant. SHA-256 is a CONTROL --
+      Grover halves the preimage strength, leaving ~128 bits, which is
+      adequate.
+    flags: [control]
+
+  - name: sha256-initial-hash-le
+    algorithm: SHA-256
+    primitive: hash
+    usage: hash
+    endianness: little
+    bytes: >-
+      67e6096a85ae67bb72f36e3c3af54fa5
+      7f520e518c68059babd9831f19cde05b
+    note: >-
+      The same SHA-256 initial hash value, word-swapped for a little-endian
+      target (FIPS 180-4 s5.3.3). Listed separately because a compiler stores
+      these words in the target's byte order, and a scanner that searched only
+      one order would miss half the binaries it looks at.
+    flags: [control]
+
+  - name: rsa-public-exponent-f4
+    algorithm: RSA
+    primitive: pke
+    usage: unknown
+    endianness: big
+    bytes: "020301 0001"
+    note: >-
+      The RSA public exponent F4, 65537, as a complete DER INTEGER TLV --
+      tag 02, length 03, value 01 00 01 (RFC 8017). The five-byte TLV rather
+      than the bare three-byte value on purpose: 01 00 01 alone occurs in
+      almost any binary of reasonable size and would make this rule pure noise.
+      Even so, this is the weakest entry in a weak technique -- it says an RSA
+      key structure may be present, and the key SIZE, which is what a migration
+      plan needs, is not knowable from the exponent.

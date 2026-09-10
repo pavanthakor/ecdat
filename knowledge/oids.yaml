@@ -1,0 +1,254 @@
+# ASN.1 algorithm OIDs, for the binary scanner (Scanner D, ADR-0025).
+#
+# An OID in a binary is a strong signal and a slightly indirect one. The bytes
+# are unambiguous -- an OID arc is a registered identifier and nothing else
+# encodes to the same TLV -- but their PRESENCE means the binary can name the
+# algorithm, not that it uses it: a TLS library ships the whole table whether or
+# not any of it is reached. So the scanner scores an OID 0.85, below a symbol.
+#
+# ENCODING. Each entry gives the dotted arc; the scanner encodes it to a DER
+# OBJECT IDENTIFIER TLV (tag 0x06, length, packed arcs) and searches for those
+# exact bytes. Encoding in code rather than storing hex here keeps the pack
+# readable and makes a transcription error impossible -- the dotted form is what
+# the registry publishes and what a reviewer can check.
+#
+# Sources:
+#   RFC 8017 (PKCS#1 v2.2) Appendix B.1 -- the RSA and RSASSA-PSS arcs.
+#   RFC 5480 s2.1.1 -- id-ecPublicKey and the named curves.
+#   RFC 5758 -- the ECDSA-with-SHA2 arcs.
+#   RFC 5754 / NIST CSOR (2.16.840.1.101.3.4) -- the SHA-2 and AES arcs.
+#   RFC 3279 s2.2.1 -- sha1WithRSAEncryption, id-dsa-with-sha1.
+#   NIST CSOR 2.16.840.1.101.3.4.3.17-.20 -- ML-DSA; .4.4.1-.3 -- ML-KEM
+#     (FIPS 204 / FIPS 203, 2024).
+#
+# Every entry mirrors the rule-metadata contract: algorithm, primitive, usage
+# and a cited note.
+
+oids:
+  # -- RSA -----------------------------------------------------------------
+  - oid: 1.2.840.113549.1.1.1
+    name: rsaEncryption
+    algorithm: RSA
+    primitive: pke
+    usage: unknown
+    note: >-
+      The RSA public-key algorithm identifier (RFC 8017 Appendix B.1.1). Broken
+      outright by Shor; deprecated after 2030 and disallowed after 2035
+      (NIST IR 8547). Usage is unknown from the identifier alone -- the same
+      key may sign or transport, and the replacement differs (ML-DSA vs
+      ML-KEM).
+
+  - oid: 1.2.840.113549.1.1.5
+    name: sha1WithRSAEncryption
+    algorithm: RSA
+    primitive: signature
+    usage: sign
+    params:
+      hash: SHA-1
+    note: >-
+      RSA PKCS#1 v1.5 signature over SHA-1 (RFC 3279 s2.2.1). Broken
+      CLASSICALLY through the digest -- a chosen-prefix collision (SHAttered,
+      2017) forges the signature whatever the modulus -- and disallowed for
+      signature generation since 2013 (NIST SP 800-131A Rev.2). Fix the digest
+      before worrying about Shor.
+    flags: [weak]
+
+  - oid: 1.2.840.113549.1.1.11
+    name: sha256WithRSAEncryption
+    algorithm: RSA
+    primitive: signature
+    usage: sign
+    params:
+      hash: SHA-256
+    note: >-
+      RSA PKCS#1 v1.5 signature over SHA-256 (RFC 8017 Appendix B.1.1). The
+      digest is sound; the signature scheme is not, long-term. Broken by Shor,
+      disallowed after 2035 (NIST IR 8547). Replace with ML-DSA (FIPS 204).
+
+  - oid: 1.2.840.113549.1.1.10
+    name: id-RSASSA-PSS
+    algorithm: RSA
+    primitive: signature
+    usage: sign
+    note: >-
+      RSASSA-PSS (RFC 8017 Appendix B.1.1). A better padding than PKCS#1 v1.5
+      and the same Shor break -- padding is not what quantum attacks. Replace
+      with ML-DSA (FIPS 204).
+
+  # -- Elliptic curve ------------------------------------------------------
+  - oid: 1.2.840.10045.2.1
+    name: id-ecPublicKey
+    algorithm: EC
+    primitive: unknown
+    usage: unknown
+    note: >-
+      The elliptic-curve public-key identifier (RFC 5480 s2.1.1). Carries both
+      ECDSA signing keys and ECDH agreement keys, so the primitive is genuinely
+      unknown from the identifier -- both fall to Shor, and which replacement
+      applies (ML-DSA or ML-KEM) depends on use.
+
+  - oid: 1.2.840.10045.4.3.2
+    name: ecdsa-with-SHA256
+    algorithm: ECDSA
+    primitive: signature
+    usage: sign
+    params:
+      hash: SHA-256
+    note: >-
+      ECDSA over SHA-256 (RFC 5758 s3.2). Elliptic-curve discrete log falls to
+      Shor with fewer logical qubits than RSA-2048 needs, so EC goes first;
+      disallowed after 2035 (NIST IR 8547). Replace with ML-DSA (FIPS 204).
+
+  - oid: 1.2.840.10045.3.1.7
+    name: prime256v1
+    algorithm: ECDH
+    primitive: key-agreement
+    usage: key-exchange
+    params:
+      curve: P-256
+    note: >-
+      The NIST P-256 curve, secp256r1 (RFC 5480 s2.1.1.1). ~128-bit classical
+      security, zero against Shor. Where it appears as a TLS group, the
+      harvest-now-decrypt-later exposure starts the day traffic is recorded.
+      Replace with ML-KEM (FIPS 203) or a hybrid group.
+
+  - oid: 1.3.132.0.34
+    name: secp384r1
+    algorithm: ECDH
+    primitive: key-agreement
+    usage: key-exchange
+    params:
+      curve: P-384
+    note: >-
+      The NIST P-384 curve (RFC 5480 s2.1.1.1). CNSA 1.0's curve; still zero
+      security against Shor, and CNSA 2.0 replaces it with ML-KEM (FIPS 203).
+
+  # -- Digests -------------------------------------------------------------
+  - oid: 1.2.840.113549.2.5
+    name: md5
+    algorithm: MD5
+    primitive: hash
+    usage: hash
+    note: >-
+      The MD5 digest identifier (RFC 3279 s2.1). Chosen-prefix collisions are
+      practical on commodity hardware (RFC 6151); disallowed for signatures by
+      NIST SP 800-131A Rev.2 Table 8.
+    flags: [weak]
+
+  - oid: 1.3.14.3.2.26
+    name: id-sha1
+    algorithm: SHA-1
+    primitive: hash
+    usage: hash
+    note: >-
+      The SHA-1 digest identifier (RFC 3279 s2.1). Collision resistance broken
+      classically (SHAttered, 2017); disallowed for signature generation since
+      2013 (NIST SP 800-131A Rev.2).
+    flags: [weak]
+
+  - oid: 2.16.840.1.101.3.4.2.1
+    name: id-sha256
+    algorithm: SHA-256
+    primitive: hash
+    usage: hash
+    note: >-
+      The SHA-256 digest identifier (RFC 5754; NIST CSOR). Grover halves the
+      effective preimage strength, leaving ~128 bits -- adequate, no migration
+      required. A CONTROL.
+    flags: [control]
+
+  - oid: 2.16.840.1.101.3.4.2.2
+    name: id-sha384
+    algorithm: SHA-384
+    primitive: hash
+    usage: hash
+    note: >-
+      The SHA-384 digest identifier (RFC 5754; NIST CSOR). What CNSA 2.0
+      requires for long-lived data. A CONTROL.
+    flags: [control]
+
+  # -- Symmetric -----------------------------------------------------------
+  - oid: 2.16.840.1.101.3.4.1.2
+    name: aes128-CBC
+    algorithm: AES
+    primitive: block-cipher
+    usage: encrypt
+    params:
+      key_size: 128
+      mode: CBC
+    note: >-
+      AES-128 in CBC mode (NIST CSOR 2.16.840.1.101.3.4.1; FIPS 197 with SP
+      800-38A). Grover leaves AES-128 at ~64-bit effective strength, below what
+      CNSA 2.0 requires for data protected past 2035; CBC is also
+      unauthenticated.
+
+  - oid: 2.16.840.1.101.3.4.1.46
+    name: aes256-GCM
+    algorithm: AES
+    primitive: block-cipher
+    usage: encrypt
+    params:
+      key_size: 256
+      mode: GCM
+    note: >-
+      AES-256 in GCM mode (NIST CSOR; FIPS 197 with SP 800-38D). Authenticated
+      encryption at the key size CNSA 2.0 requires. A CONTROL.
+    flags: [control]
+
+  - oid: 1.2.840.113549.3.7
+    name: des-ede3-cbc
+    algorithm: 3DES
+    primitive: block-cipher
+    usage: encrypt
+    params:
+      mode: CBC
+    note: >-
+      Triple DES in CBC mode (RFC 3370 s5.1). DISALLOWED after 2023 (NIST SP
+      800-131A Rev.2); the 64-bit block makes Sweet32 (CVE-2016-2183)
+      practical. Replace with AES-256-GCM.
+    flags: [weak]
+
+  # -- Post-quantum: the ones a migrated binary should contain -------------
+  - oid: 2.16.840.1.101.3.4.3.17
+    name: id-ml-dsa-44
+    algorithm: ML-DSA-44
+    primitive: signature
+    usage: sign
+    note: >-
+      ML-DSA-44, the FIPS 204 (Aug 2024) lattice signature at NIST security
+      category 2. Finding this in a binary is the POSITIVE signal -- it is what
+      a migrated artefact looks like -- so it is recorded as a control rather
+      than a risk.
+    flags: [control, post-quantum]
+
+  - oid: 2.16.840.1.101.3.4.3.18
+    name: id-ml-dsa-65
+    algorithm: ML-DSA-65
+    primitive: signature
+    usage: sign
+    note: >-
+      ML-DSA-65, FIPS 204 at NIST security category 3. The positive signal:
+      what a migrated signing path looks like.
+    flags: [control, post-quantum]
+
+  - oid: 2.16.840.1.101.3.4.4.1
+    name: id-alg-ml-kem-512
+    algorithm: ML-KEM-512
+    primitive: kem
+    usage: key-exchange
+    note: >-
+      ML-KEM-512, the FIPS 203 (Aug 2024) lattice KEM at NIST security category
+      1. The replacement for RSA key transport and for ECDH agreement. A
+      control -- finding it means the migration has started here.
+    flags: [control, post-quantum]
+
+  - oid: 2.16.840.1.101.3.4.4.2
+    name: id-alg-ml-kem-768
+    algorithm: ML-KEM-768
+    primitive: kem
+    usage: key-exchange
+    note: >-
+      ML-KEM-768, FIPS 203 at NIST security category 3 -- the parameter set in
+      the X25519MLKEM768 hybrid group TLS 1.3 deployments are adopting. A
+      control.
+    flags: [control, post-quantum]

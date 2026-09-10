@@ -114,6 +114,7 @@ def test_supports_only_image_targets() -> None:
 
 def test_registered_in_the_registry() -> None:
     assert registry.available_ids() == [
+        "binary",
         "config",
         "container",
         "deps",
