@@ -141,27 +141,30 @@ src/
 | `cbom_drift.json` | all three views merged, so drift is present |
 | `cbom_provisional.json` | scored with the India DST pack demoted (ADR-0017) |
 | `cbom_candidate.json` | `testdata/js_fixtures` scanned after ADR-0034: one 0.5 candidate, 31 confirmed findings, and five at 0.6 whose captured parameter did not resolve |
+| `cbom_binary.json` | `testdata/binary_fixtures`, binary scanner only (`--kind directory --scanner binary`): 22 components, every one below 1.0 by design, none a candidate |
 | `scans.json` | a `GET /scans` row, with its denormalised summary |
 
-Regenerate them by scanning `testdata/quantumbank` (for `cbom_candidate.json`,
-`testdata/js_fixtures`) and copying the stored documents. Hand-written fixtures
-would test the parser against the shape one imagined, which is always the shape
-that works.
+Regenerate them by scanning `testdata/quantumbank`, and copying the stored
+documents. The two exceptions are `cbom_candidate.json`, which comes from
+`testdata/js_fixtures`, and `cbom_binary.json`, which comes from
+`testdata/binary_fixtures`. Hand-written fixtures would test the parser against
+the shape one imagined, which is always the shape that works.
 
 ## What is tested
 
-Data logic and interaction — 173 tests. Each of these failures is invisible in
+Data logic and interaction — 181 tests. Each of these failures is invisible in
 a screenshot review: filtering that silently drops rows, a rescore that leaves
 a stale table, a provisional fact rendered as a verified one, a candidate
 rendered as a confirmed finding, and a metric nobody computed rendered as a
 number. Column order is not.
 
-* `state/certainty.test.ts` covers candidate / confirmed / unrecorded, the
-  reason in words, and the candidates / confirmed filter, all against a real
-  document.
-* `components/certainty.test.tsx` covers the candidate treatment on screen.
-  That means the tag, the weight and the wording, and never a band colour. It
-  also covers the drawer's confidence and the filter end to end.
+* `state/certainty.test.ts` covers candidate / inferred / confirmed /
+  unrecorded, the reason in words, and the candidates / confirmed filter, all
+  against real documents.
+* `components/certainty.test.tsx` covers the candidate tag, which appears on
+  flagged candidates only and never on a 0.6 or binary finding, and is never a
+  band colour. It also covers the drawer's confidence for every finding and
+  the filter end to end.
 
 * `api/parse.test.ts` — the real wire shapes parse into typed models.
 * `state/inventory.test.ts` — filters, sorting, and the debounced rescore round

@@ -27,27 +27,37 @@ const PROVISIONAL =
 const VERIFIED = "border border-line bg-raised text-ink";
 /** Dotted: ADR-0031 §8's border for UNKNOWN -- neither solid nor dashed. */
 const UNKNOWN = "border border-dotted border-ink-faint/60 text-ink-faint bg-transparent";
+/**
+ * Solid but lighter than VERIFIED: real crypto, stated at less than full
+ * confidence because one detail was inferred. Deliberately NOT dashed -- the
+ * dashed border means "might not be real", and an inferred finding is real.
+ */
+const INFERRED = "border border-line text-ink-dim bg-transparent";
 
 /**
  * Certainty borrows provenance's vocabulary exactly (ADR-0034 on screen): a
  * confirmed finding is solid like a verified fact, a candidate is dashed like
- * a provisional one, and a confidence nobody recorded is dotted like any other
- * unknown. Never a colour -- colour is severity.
+ * a provisional one, an inferred finding is solid but lighter, and a
+ * confidence nobody recorded is dotted like any other unknown. Never a colour
+ * -- colour is severity.
  */
 const CERTAINTY_STYLE: Record<Certainty, string> = {
   candidate: PROVISIONAL,
+  inferred: INFERRED,
   confirmed: VERIFIED,
   unrecorded: UNKNOWN,
 };
 
 const CERTAINTY_LABEL: Record<Certainty, string> = {
   candidate: "Candidate",
+  inferred: "Inferred",
   confirmed: "Confirmed",
   unrecorded: "Confidence not recorded",
 };
 
 const CERTAINTY_VERDICT: Record<Certainty, string> = {
   candidate: "candidate — not confirmed",
+  inferred: "inferred — not read outright",
   confirmed: "confirmed",
   unrecorded: "not recorded",
 };

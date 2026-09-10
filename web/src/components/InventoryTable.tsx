@@ -9,10 +9,13 @@
  * * **Verified vs provisional is a shape**, not a colour: a filled dot or a
  *   dashed ring beside the name, and the word "provisional" in the sub-line --
  *   a caveat that needs a hover is a caveat that will be missed (ADR-0018).
- * * **Candidate vs confirmed is the same vocabulary** (ADR-0034): a finding
- *   below confidence 1.0, or flagged a candidate, gets a dashed "candidate"
- *   tag, a lighter name, and its confidence in the sub-line. The severity bar
- *   and the band pill are untouched -- a Low candidate is still Low.
+ * * **A candidate is marked in the same vocabulary** (ADR-0034): a finding its
+ *   rule FLAGGED a candidate -- one that might not be real key material -- gets
+ *   a dashed "candidate" tag, a lighter name, and its confidence in the
+ *   sub-line. A finding below 1.0 for another reason (a parameter through a
+ *   variable, a binary heuristic) is real crypto and gets no mark here; its
+ *   confidence is in the drawer. The severity bar and the band pill are
+ *   untouched -- a Low candidate is still Low.
  * * The filter bar is one search plus band and view selects, a drift-only
  *   toggle, and a candidates / confirmed pair; the filter LOGIC lives in
  *   inventory.ts.
@@ -160,7 +163,7 @@ export function InventoryTable({
               type="button"
               aria-pressed={filters.certainty === "candidates"}
               onClick={() => toggleCertainty("candidates")}
-              title="Findings below confidence 1.0, or flagged as candidates (ADR-0034): shown, not confirmed"
+              title="Findings flagged as candidates (ADR-0034): a key-ish name holding a high-entropy literal not seen reaching a crypto sink"
               className={cn(TOGGLE, filters.certainty === "candidates" ? TOGGLE_ON : TOGGLE_OFF)}
             >
               <span className={CANDIDATE_SWATCH} aria-hidden />
@@ -171,7 +174,7 @@ export function InventoryTable({
               type="button"
               aria-pressed={filters.certainty === "confirmed"}
               onClick={() => toggleCertainty("confirmed")}
-              title="Findings at confidence 1.0"
+              title="Findings at confidence 1.0. An inferred finding (below 1.0, one detail not read outright) is in neither toggle."
               className={cn(TOGGLE, filters.certainty === "confirmed" ? TOGGLE_ON : TOGGLE_OFF)}
             >
               <span className={CONFIRMED_SWATCH} aria-hidden />
@@ -200,7 +203,7 @@ export function InventoryTable({
           <span
             data-testid="legend-candidate"
             className="flex items-center gap-1.5"
-            title="Confidence below 1.0: shown, marked uncertain, never a confirmed finding"
+            title="Flagged a candidate (ADR-0034): might not be real key material, shown for review"
           >
             <span className={CANDIDATE_SWATCH} aria-hidden /> Candidate
           </span>
@@ -251,7 +254,7 @@ export function InventoryTable({
               rows.map((artefact) => {
                 const isSelected = artefact.bomRef === selected;
                 const certainty = certaintyOf(artefact);
-                const uncertain = certainty === "candidate";
+                const isCandidate = certainty === "candidate";
                 const location =
                   artefact.endpoint ??
                   (artefact.occurrences[0] ? shortLocator(artefact.occurrences[0].locator) : "—");
@@ -282,7 +285,7 @@ export function InventoryTable({
                                 "truncate",
                                 // Weight, not colour: a candidate never reads as the
                                 // strongest thing in its row.
-                                uncertain ? "font-medium text-ink-dim" : "font-semibold text-ink",
+                                isCandidate ? "font-medium text-ink-dim" : "font-semibold text-ink",
                               )}
                             >
                               {artefact.name}
@@ -298,7 +301,7 @@ export function InventoryTable({
                                 artefact.provisional ? "border border-dashed border-ink-faint" : "bg-ink-dim",
                               )}
                             />
-                            {uncertain ? (
+                            {isCandidate ? (
                               <Tag
                                 variant="provisional"
                                 testId="candidate-tag"
@@ -311,7 +314,7 @@ export function InventoryTable({
                           <div className="truncate text-[11px] text-ink-faint">
                             {artefact.primitive ?? artefact.assetType}
                             {artefact.provisional ? " · provisional" : ""}
-                            {uncertain ? ` · confidence ${formatConfidence(artefact.confidence)}` : ""}
+                            {isCandidate ? ` · confidence ${formatConfidence(artefact.confidence)}` : ""}
                           </div>
                         </div>
                       </div>

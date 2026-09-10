@@ -586,14 +586,14 @@
   candidate treatment. The browser-side CSV export and the PDFs carry no
   confidence and no candidate flag, so an exported candidate reads as a
   confirmed finding. *Raised: candidate/confidence display slice.*
-- **"candidate" covers every finding below 1.0.** This is the rule as locked:
-  the tag marks a 0.6 unresolved-parameter finding, and every binary-scanner
-  finding (all below 1.0 by design, ADR-0025), as well as ADR-0034's entropy
-  candidates. In the captured JS-fixture scan, 5 of the 6 tagged components are
-  0.6 findings, not candidates. The drawer says why for each. If the table
-  should reserve the word for flagged candidates and use something like
-  "inferred" otherwise, that is a label change in `InventoryTable.tsx` and
-  `Provenance.tsx`. *Raised: candidate/confidence display slice.*
+- ~~**"candidate" covers every finding below 1.0.**~~ **Resolved** the same
+  day (ADR-0031 addendum, "Revised the same day"). The table's `candidate` tag
+  and the Candidates filter now fire only on the flag (`ecdat:param:candidate`).
+  A finding below 1.0 for another reason is **inferred**: no table tag, and its
+  confidence and reason are still in the drawer. That covers a 0.6 parameter
+  from a variable and every binary-scanner finding. The JS-fixture scan now
+  tags 1 of 37 components, not 6, and the binary-fixture scan tags 0 of 22, not
+  all 22. *Raised and resolved: candidate/confidence display slice.*
 - **The console and the coverage PDF do not read `ecdat:coverage:*` yet.** A
   scan whose every file failed to parse is honest in the stored document ("
   nothing could be parsed ... not a clean result") and still LOOKS empty in the
