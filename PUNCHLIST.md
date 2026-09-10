@@ -695,23 +695,79 @@
   `correlate/fixit/template.py` was written to make each addition
   self-contained: one class, one entry in `DEFAULT_TEMPLATES`.
   *Raised: fix-it slice.*
-- **`dockerfile-base-bump` is BLOCKED on a Dockerfile parser; `dep-bump` is
-  now UNBLOCKED.** ~~Both~~ were held out of ADR-0015 because a fix that cannot
-  be re-verified by a scanner is a fix ECDAT will not ship. `scanners/deps`
-  (ADR-0021) is that producer for dependencies, so **`dep-bump` can now be
-  written and re-verified against a manifest** -- it is the next slice.
-  `dockerfile-base-bump` still has none: nothing parses a Dockerfile, and the
-  container scanner reads `dpkg`/`apk` databases from inside layer blobs, which
-  a unified text diff cannot patch.
-  `test_every_shipped_template_names_a_registered_scanner` is what stops an
-  unverifiable template creeping in.
-  *Raised: fix-it slice. Half-resolved: deps-scanner slice, see
-  [ADR-0021](docs/adr/0021-deps-scanner.md).*
+- ~~**`dep-bump` is BLOCKED on its producer scanner.**~~ **Resolved** by
+  [ADR-0022](docs/adr/0022-dep-bump-fix.md). `scanners/deps` (ADR-0021) is the
+  producer that re-verifies it, so the template ships and is proved end to end:
+  below-floor pin -> manifest bump -> sandbox re-scan clean. See the three
+  entries below for what it still cannot do.
+  *Raised: fix-it slice. Resolved: dep-bump slice.*
+- **`dockerfile-base-bump` is STILL BLOCKED on a Dockerfile parser.** Held out
+  of ADR-0015 because a fix that cannot be re-verified by a scanner is a fix
+  ECDAT will not ship, and nothing parses a Dockerfile yet. The container
+  scanner reads `dpkg`/`apk` databases from inside layer blobs, which a unified
+  text diff cannot patch, so the parser is genuinely the blocker rather than a
+  formality. `test_every_shipped_template_names_a_registered_scanner` is what
+  stops an unverifiable template creeping in.
+  *Raised: fix-it slice.*
+- **`dep-bump` proposes nothing on the shipped pack, and that is the gate
+  working.** All fifteen dependency entries added by ADR-0021 carry
+  `pqc_capable_verified: false`, and ADR-0022 refuses to propose a bump to an
+  unconfirmed floor -- a fix is a stronger claim than a score, so ADR-0017's
+  verified-fact rule binds harder here. `test_no_shipped_library_has_a_verified_floor_today`
+  pins the state. Turning a refusal into a fix is a RESEARCH task, not a code
+  task: confirm one library's post-quantum floor against upstream release
+  material, cite it, set the flag. The first entry verified is the first entry
+  that produces fixes.
+  *Raised: dep-bump slice, see [ADR-0022](docs/adr/0022-dep-bump-fix.md).*
+- **Lockfile regeneration after a `dep-bump` is MANUAL, and a lockfile-sourced
+  bump comes back unverified.** ECDAT never hand-edits `package-lock.json`,
+  `poetry.lock`, `Pipfile.lock`, `yarn.lock` or `go.sum`: a bumped version
+  beside its old integrity hash is a lockfile that fails on the next install.
+  So the diff edits the manifest and names the regenerate command
+  (`pip-compile` / `npm install` / `go mod tidy`). But Scanner B is
+  lockfile-preferred, so when a lock is present the re-scan still reads it,
+  still sees the old version, and the engine correctly reports `verified=False`
+  -- "the finding is still present". Where a resolved lockfile is the ONLY file
+  present, the template declines outright. Closing this needs either a resolver
+  ECDAT is allowed to run (it is not: offline, read-only) or a lockfile-aware
+  verification mode that can reason about a manifest edit the lock has not
+  caught up with. Related: the refusal the operator SEES in that case is the
+  engine's generic one -- *"the template did not fix what it claimed to fix"* --
+  which reads as a template bug when the real cause is the lockfile masking a
+  correct edit. `FixResult` has no way for a template to attach a "why this may
+  not verify" hint, and adding one touches `correlate/fixit/engine.py` and all
+  five templates.
+  *Raised: dep-bump slice.*
+- **The `dep-bump` EOL trigger is NOT built, and the pack cannot support it
+  yet.** ADR-0022 was framed to also fire on "the version is EOL with a
+  verified successor". `libraries.yaml`'s `eol` is an end-of-support **date**,
+  one per library, `null` on every entry -- so there is no version to compare,
+  and one date per library would make every version EOL at once including
+  versions already above the floor. Needs a pack schema change (a per-series
+  `eol`, or an `eol_version` beside the date) before the trigger means
+  anything. Not built rather than built wrong.
+  *Raised: dep-bump slice.*
+- **`dep-bump` edits three manifest formats.** `requirements.txt`,
+  `package.json`, `go.mod`. `pyproject.toml` is READ by Scanner B but not
+  bumpable -- a TOML-preserving edit is its own piece of work and a naive line
+  edit would reflow tables; it declines with that reason. `Cargo.toml`,
+  `pom.xml` and `build.gradle` are not read at all (ADR-0021 deferred Java and
+  Rust), so there is nothing to bump.
+  *Raised: dep-bump slice.*
+- **A fix template resolves the knowledge pack from the environment, not from
+  the `ScanContext`.** `FixTemplate.preconditions` takes no context and the
+  protocol was not widened for one template, so `dep-bump` reads
+  `ECDAT_KNOWLEDGE_DIR` (default `knowledge/`) exactly as every other entry
+  point does. In every real caller the scan and the fix resolve the same
+  directory; a caller that passes a `ScanContext` pointing elsewhere would get a
+  template reading a different pack from its own verifier. Widening the protocol
+  is the fix, and it touches all five templates.
+  *Raised: dep-bump slice.*
 - **Fixes are verified one at a time, and the loop is expensive.** One sandbox
   copy plus two scans per finding — negligible for config, ~3s per finding for
   source, because semgrep runs twice. Two verified diffs touching the same file
   are each proved ALONE; nothing proves they apply together or that the
-  combination is still clean. For the four shipped templates they touch
+  combination is still clean. For the five shipped templates they touch
   distinct lines, but that is a property of these templates rather than a
   guarantee. Wants batching (one sandbox, several independent fixes, one
   re-scan) and a combined-application check before it runs over an estate.

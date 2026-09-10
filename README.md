@@ -73,17 +73,22 @@ $ ecdat fix 32f584a0 --scanner config --sector bfsi --exposure internet
 +        ssl_ecdh_curve      X25519MLKEM768;
 ```
 
-Four templates ship — `nginx-weak-protocol`, `nginx-add-hybrid-group`,
-`openssl-cnf-groups`, `md5-to-sha256` — chosen by one rule: a template ships
-only where a **registered scanner can re-read the file it edits**. That rule is
-why `dep-bump` and `dockerfile-base-bump` are *not* here; see the limitations
-below.
+Five templates ship — `dep-bump`, `nginx-weak-protocol`,
+`nginx-add-hybrid-group`, `openssl-cnf-groups`, `md5-to-sha256` — chosen by one
+rule: a template ships only where a **registered scanner can re-read the file it
+edits**. That rule is why `dockerfile-base-bump` is *not* here, and why
+`dep-bump` only arrived once the dependency scanner existed to re-verify it; see
+the limitations below.
 
 The refusals are as much of the feature as the patches. `md5-to-sha256` fires
 only where MD5 is a checksum; over a password it declines and says why —
 SHA-256 there is a faster wrong answer, and the real fix is a memory-hard KDF.
 Where usage cannot be read from the call site at all, it declines rather than
-guessing.
+guessing. `dep-bump` refuses to bump to a version floor the knowledge pack has
+not *verified* against upstream release material — which today means it declines
+every library in the pack ([ADR-0022](docs/adr/0022-dep-bump-fix.md)). A fix is
+a stronger claim than a score, so ADR-0017's verified-fact rule binds hardest
+here.
 
 ---
 
@@ -391,11 +396,19 @@ before believing anything above:
   seven scanner families exist; a statically linked binary and a packet capture
   are still invisible. The dependency scanner landed in
   [ADR-0021](docs/adr/0021-deps-scanner.md) — Python, Node and Go.
-- **Fix templates are a starter set** — four templates over nginx,
-  `openssl.cnf` and Python MD5. `dockerfile-base-bump` is still absent because
-  nothing reads a Dockerfile, so its diff could be generated but never verified
-  by re-scan, and ECDAT does not ship a fix it cannot confirm. `dep-bump` is now
-  UNBLOCKED — the dependency scanner can re-verify it — and is the next slice.
+- **Fix templates are a starter set** — five templates over nginx,
+  `openssl.cnf`, Python MD5 and dependency manifests.
+  `dockerfile-base-bump` is still absent because nothing reads a Dockerfile, so
+  its diff could be generated but never verified by re-scan, and ECDAT does not
+  ship a fix it cannot confirm.
+- **`dep-bump` currently proposes nothing, by design.** It bumps
+  `requirements.txt`, `package.json` and `go.mod` to a *verified* post-quantum
+  floor, and every one of the fifteen dependency entries in the pack is still
+  provisional — so it declines them all with a reason. That is the honesty gate,
+  and clearing it is research, not code. It also never hand-edits a resolved
+  lockfile (a bumped version beside a stale integrity hash is a broken install),
+  so the diff says to regenerate, and a bump proposed beside a lockfile comes
+  back **unverified** until someone does.
 - **A fix is verified alone.** Two diffs touching one file are each proved on
   their own; nothing proves they apply together. The loop also costs a sandbox
   copy and two scans per finding, which is why it is opt-in rather than part of

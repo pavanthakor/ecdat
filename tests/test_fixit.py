@@ -854,6 +854,7 @@ def test_shipped_template_ids_are_unique_and_stable() -> None:
     ids = [t.id for t in DEFAULT_TEMPLATES]
     assert ids == sorted(set(ids))
     assert set(ids) == {
+        "dep-bump",
         "md5-to-sha256",
         "nginx-add-hybrid-group",
         "nginx-weak-protocol",
