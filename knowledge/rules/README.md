@@ -133,9 +133,32 @@ nothing when the value is assigned earlier:
 - pattern: hashlib.new("md5", ...)
 ```
 
+`metavariable-pattern` is the mechanism to reach a propagated value **while
+keeping the metavariable bound**, which a bare literal branch does not — and a
+rule with `capture:` needs the binding:
+
+```yaml
+- patterns:
+    - pattern: jwt.encode(..., algorithm=$ALG, ...)
+    - metavariable-pattern:          # evaluated against the PROPAGATED value
+        metavariable: $ALG
+        pattern-either:
+          - pattern: '"RS256"'
+```
+
+Note that a `pattern-regex:` *inside* `metavariable-pattern` has the same hole
+as `metavariable-regex` — only a real `pattern:` reaches the propagated value.
+
 So a rule whose algorithm is a short closed vocabulary should carry **both**:
-the literal branches for propagation reach, the regex branch for spellings the
-literals do not enumerate (`MD5`, `Md5`). Measured in ADR-0026 STEP 0.
+the `metavariable-pattern` branch for propagation reach, and the regex branch
+for spellings the enumeration does not cover (`Md5`). Measured in ADR-0026
+STEP 0 and ADR-0027.
+
+**This is enforced.** `tests/test_dataflow.py` fails any Python rule that
+classifies a value passed to a call using `metavariable-regex` alone. A regex
+over a variable NAME is exempt and listed by rule id; a metavariable bound as an
+attribute suffix (`ssl.$PROTO`) is not an argument position and needs no
+exemption.
 
 What propagation does NOT do in the OSS build: it does not follow a class or
 attribute reference. `algo = algorithms.AES` then `algo(key)` is invisible.

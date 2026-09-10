@@ -43,3 +43,16 @@ def page_size() -> int:
 def build_label(tenant: str) -> bytes:
     """Concatenation that is not key material -- it reaches no cipher."""
     return b"tenant-" + tenant.encode() + b"-label"
+
+
+def sign_with_an_unlisted_algorithm(claims: dict, key: str) -> str:
+    """A JOSE algorithm none of the four family rules claims.
+
+    EdDSA is a real `alg` value (RFC 8037) and no rule in this pack covers it.
+    The propagation-aware classification must not become a catch-all: a rule
+    that fired here would be reporting an algorithm it has no note for.
+    """
+    import jwt
+
+    alg = "EdDSA"
+    return jwt.encode(claims, key, algorithm=alg)

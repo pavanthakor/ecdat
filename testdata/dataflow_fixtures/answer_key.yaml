@@ -86,6 +86,40 @@ known_limits:
       otherwise.
 
 # ---------------------------------------------------------------------------
+# CONST-PROP REACH (ADR-0027): rules whose classification must see through a
+# propagated constant, not only a literal at the call site.
+#
+# `py-ssl-weak-protocol` is deliberately absent. It matches `ssl.$PROTO` -- the
+# constant ITSELF, wherever it appears -- so it already reports the propagated
+# case at the assignment line and never had this gap. ADR-0027 measured that
+# rather than assuming it, and a test pins the behaviour.
+# ---------------------------------------------------------------------------
+const_prop_reach:
+  - fixture: must_fire/df_jwt_propagated.py
+    rule_id: py-jwt-rsa
+    algorithm: RSA
+    count: 1
+    why: '`alg = "RS256"` then `jwt.encode(..., algorithm=alg)`.'
+  - fixture: must_fire/df_jwt_propagated.py
+    rule_id: py-jwt-ecdsa
+    algorithm: ECDSA
+    count: 1
+    why: 'A module-level `SIGNING_ALG = "ES256"`.'
+  - fixture: must_fire/df_jwt_propagated.py
+    rule_id: py-jwt-hmac
+    algorithm: HMAC
+    count: 1
+    why: '`alg = "HS256"` then passed by keyword.'
+  - fixture: must_fire/df_jwt_propagated.py
+    rule_id: py-jwt-none
+    algorithm: none
+    count: 1
+    why: >-
+      `alg = "none"` -- the one that matters most. RFC 8725 Sec. 3.1 requires
+      `none` to be rejected, and a token signer that selects it through a
+      variable was completely invisible.
+
+# ---------------------------------------------------------------------------
 # MISS-CLASS 2 and the weak-RNG blind spot: findings the dataflow rules ADD
 # ---------------------------------------------------------------------------
 findings:

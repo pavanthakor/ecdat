@@ -408,14 +408,41 @@
   `testdata/dataflow_fixtures/must_not_fire/constprop_limit.py` pins that with
   a test that FAILS if a semgrep upgrade starts catching it, so the limit
   cannot go stale.
-  Second, and more actionable: propagation applies to the PATTERN, not to the
-  capture, so a rule written as `hashlib.new($ALG, ...)` plus a
-  `metavariable-regex` sees the source text `algo` and never the propagated
-  value. Twelve Python rules are written that way. The five digest rules and
-  two MAC rules now carry literal branches as well; **`py-ssl-weak-protocol`
-  and the four `py-jwt-*` rules still do not**, and miss propagated constants
-  for the same reason. Mechanical, and owed.
-  *Raised: dataflow slice.*
+  Second: propagation applies to the PATTERN, not to the capture, so a rule
+  written as `hashlib.new($ALG, ...)` plus a `metavariable-regex` sees the
+  source text `algo` and never the propagated value.
+  ~~Twelve Python rules are written that way... the four `py-jwt-*` rules still
+  do not.~~ **Resolved for Python** by
+  [ADR-0027](docs/adr/0027-const-prop-reach.md): every value-classifying rule
+  now carries a `metavariable-pattern` branch, which IS evaluated against the
+  propagated value and (unlike a bare literal branch) keeps the metavariable
+  bound so `capture:` still works. `py-ssl-weak-protocol` turned out never to
+  have had the gap -- it matches `ssl.$PROTO`, the constant itself, so a
+  protocol behind a variable is already reported at the assignment -- and a
+  test pins that so a tidy-up cannot introduce one.
+  A CONTRACT TEST now fails any Python rule that classifies a value passed to a
+  call using `metavariable-regex` alone, so the class of bug cannot come back.
+  *Raised: dataflow slice. Resolved (Python): const-prop-reach slice.*
+- **The const-prop contract test covers PYTHON only.** Go, JS/TS and Java use
+  the same `metavariable-regex` style in several rules -- the Java pack alone
+  has it in every `Cipher.getInstance($T)` and `Signature.getInstance($T)`
+  rule -- and have the same hole: a transformation string assigned to a
+  variable and then passed is missed. The test is one glob away from covering
+  them, but those packs were not audited or rewritten in that slice, so the
+  gap is real and unmeasured outside Python.
+  *Raised: const-prop-reach slice, see
+  [ADR-0027](docs/adr/0027-const-prop-reach.md).*
+- **`params` carries the VARIABLE NAME on a propagated path, not the resolved
+  value.** `metavariable-pattern` constrains a binding without rewriting it, so
+  a JWT algorithm selected through `SIGNING_ALG = "ES256"` reports
+  `params.alg = "SIGNING_ALG"`. The `algorithm` field carries the
+  classification, which is what the CBOM and the policy engine read, so this
+  costs a display detail rather than a decision -- but a report that showed the
+  captured value would be showing a name. Also means `_is_resolved` reads the
+  site as configurable, which for a settings-driven algorithm is arguably
+  correct and is not currently distinguished from the ADR-0026 annotation's
+  evidence-backed verdict.
+  *Raised: const-prop-reach slice.*
 - **The configurability annotation joins on `(path, line)`, and `configurable`
   is still binary.** The join is exact for the call sites here -- the taint
   sink and the pattern match are the same line -- but a sink on a different

@@ -23,23 +23,33 @@ rules:
         computing does not change the verdict -- this is a today problem, not a
         2030 problem. Replace with SHA-256 or SHA-3.
       flags: [weak]
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `algo = "md5"` followed by `hashlib.new(algo, ...)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship. The metavariable-pattern branch enumerates spellings;
+    # the metavariable-regex branch is case-insensitive and does not. The union
+    # is wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
     pattern-either:
       - pattern: hashlib.md5(...)
+      - patterns:
+          - pattern: hashlib.new($ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"md5"'
+                - pattern: '"MD5"'
       - patterns:
           - pattern: hashlib.new($ALG, ...)
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:md5)["']$
-    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
-    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
-    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
-    # Semgrep's constant propagation works on the PATTERN, not the capture, so
-    # spelling the literal out is what reaches a value assigned earlier.
-    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
-    # one covers spellings (MD5, Md5) the literals do not.
-      - pattern: hashlib.new("md5", ...)
-      - pattern: hashlib.new('md5', ...)
-
   - id: py-hashlib-sha1
     languages: [python]
     severity: ERROR
@@ -54,23 +64,35 @@ rules:
         disallowed for signature generation by NIST SP 800-131A Rev.2. Grover is
         irrelevant next to the classical break. Replace with SHA-256.
       flags: [weak]
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `algo = "sha1"` followed by `hashlib.new(algo, ...)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship. The metavariable-pattern branch enumerates spellings;
+    # the metavariable-regex branch is case-insensitive and does not. The union
+    # is wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
     pattern-either:
       - pattern: hashlib.sha1(...)
       - patterns:
           - pattern: hashlib.new($ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"sha1"'
+                - pattern: '"SHA1"'
+                - pattern: '"sha-1"'
+                - pattern: '"SHA-1"'
+      - patterns:
+          - pattern: hashlib.new($ALG, ...)
           - metavariable-regex:
               metavariable: $ALG
-              regex: ^["'](?i:sha1|sha-1)["']$
-    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
-    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
-    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
-    # Semgrep's constant propagation works on the PATTERN, not the capture, so
-    # spelling the literal out is what reaches a value assigned earlier.
-    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
-    # one covers spellings (MD5, Md5) the literals do not.
-      - pattern: hashlib.new("sha1", ...)
-      - pattern: hashlib.new('sha1', ...)
-
+              regex: ^["'](?i:sha1)["']$
   - id: py-hashlib-sha256
     languages: [python]
     severity: INFO
@@ -85,23 +107,35 @@ rules:
         ~128 bits, which remains adequate; NIST requires no migration. Detected
         as a control so the inventory shows what is already correct.
       flags: [control]
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `algo = "sha256"` followed by `hashlib.new(algo, ...)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship. The metavariable-pattern branch enumerates spellings;
+    # the metavariable-regex branch is case-insensitive and does not. The union
+    # is wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
     pattern-either:
       - pattern: hashlib.sha256(...)
       - patterns:
           - pattern: hashlib.new($ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"sha256"'
+                - pattern: '"SHA256"'
+                - pattern: '"sha-256"'
+                - pattern: '"SHA-256"'
+      - patterns:
+          - pattern: hashlib.new($ALG, ...)
           - metavariable-regex:
               metavariable: $ALG
-              regex: ^["'](?i:sha256|sha-256)["']$
-    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
-    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
-    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
-    # Semgrep's constant propagation works on the PATTERN, not the capture, so
-    # spelling the literal out is what reaches a value assigned earlier.
-    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
-    # one covers spellings (MD5, Md5) the literals do not.
-      - pattern: hashlib.new("sha256", ...)
-      - pattern: hashlib.new('sha256', ...)
-
+              regex: ^["'](?i:sha256)["']$
   - id: py-hashlib-sha384
     languages: [python]
     severity: INFO
@@ -115,23 +149,35 @@ rules:
         FIPS 180-4 approved; CNSA 2.0 requires SHA-384 or better for national
         security systems. No migration required.
       flags: [control]
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `algo = "sha384"` followed by `hashlib.new(algo, ...)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship. The metavariable-pattern branch enumerates spellings;
+    # the metavariable-regex branch is case-insensitive and does not. The union
+    # is wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
     pattern-either:
       - pattern: hashlib.sha384(...)
       - patterns:
           - pattern: hashlib.new($ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"sha384"'
+                - pattern: '"SHA384"'
+                - pattern: '"sha-384"'
+                - pattern: '"SHA-384"'
+      - patterns:
+          - pattern: hashlib.new($ALG, ...)
           - metavariable-regex:
               metavariable: $ALG
-              regex: ^["'](?i:sha384|sha-384)["']$
-    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
-    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
-    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
-    # Semgrep's constant propagation works on the PATTERN, not the capture, so
-    # spelling the literal out is what reaches a value assigned earlier.
-    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
-    # one covers spellings (MD5, Md5) the literals do not.
-      - pattern: hashlib.new("sha384", ...)
-      - pattern: hashlib.new('sha384', ...)
-
+              regex: ^["'](?i:sha384)["']$
   - id: py-hashlib-sha512
     languages: [python]
     severity: INFO
@@ -144,19 +190,32 @@ rules:
       quantum_note: >-
         FIPS 180-4 approved. No migration required.
       flags: [control]
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `algo = "sha512"` followed by `hashlib.new(algo, ...)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship. The metavariable-pattern branch enumerates spellings;
+    # the metavariable-regex branch is case-insensitive and does not. The union
+    # is wider than either, and the two agree on every identifying field, so a
+    # site matching both carries ONE identity and the normaliser folds it.
     pattern-either:
       - pattern: hashlib.sha512(...)
       - patterns:
           - pattern: hashlib.new($ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"sha512"'
+                - pattern: '"SHA512"'
+                - pattern: '"sha-512"'
+                - pattern: '"SHA-512"'
+      - patterns:
+          - pattern: hashlib.new($ALG, ...)
           - metavariable-regex:
               metavariable: $ALG
-              regex: ^["'](?i:sha512|sha-512)["']$
-    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
-    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
-    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
-    # Semgrep's constant propagation works on the PATTERN, not the capture, so
-    # spelling the literal out is what reaches a value assigned earlier.
-    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
-    # one covers spellings (MD5, Md5) the literals do not.
-      - pattern: hashlib.new("sha512", ...)
-      - pattern: hashlib.new('sha512', ...)
+              regex: ^["'](?i:sha512)["']$

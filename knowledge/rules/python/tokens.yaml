@@ -27,14 +27,61 @@ rules:
         Replace with ML-DSA (FIPS 204) once a JOSE registration exists; until
         then this is a track-and-plan item.
       flags: [quantum-vulnerable]
-    patterns:
-      - pattern-either:
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `alg = "RS256"` followed by `jwt.encode(claims, key, algorithm=alg)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship; see the note in hashes.yaml for why the union is
+    # kept rather than one replacing the other.
+    pattern-either:
+      - patterns:
           - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"RS256"'
+                - pattern: '"RS384"'
+                - pattern: '"RS512"'
+                - pattern: '"PS256"'
+                - pattern: '"PS384"'
+                - pattern: '"PS512"'
+      - patterns:
           - pattern: jwt.encode(..., algorithms=[$ALG], ...)
-      - metavariable-regex:
-          metavariable: $ALG
-          regex: ^["'](RS|PS)(256|384|512)["']$
-
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"RS256"'
+                - pattern: '"RS384"'
+                - pattern: '"RS512"'
+                - pattern: '"PS256"'
+                - pattern: '"PS384"'
+                - pattern: '"PS512"'
+      - patterns:
+          - pattern: jwt.decode(..., algorithms=[$ALG], ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"RS256"'
+                - pattern: '"RS384"'
+                - pattern: '"RS512"'
+                - pattern: '"PS256"'
+                - pattern: '"PS384"'
+                - pattern: '"PS512"'
+      - patterns:
+          - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](RS|PS)(256|384|512)["']$
+      - patterns:
+          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](RS|PS)(256|384|512)["']$
   - id: py-jwt-ecdsa
     languages: [python]
     severity: WARNING
@@ -51,14 +98,55 @@ rules:
         Deprecated after 2030, disallowed after 2035 (NIST IR 8547). Replace
         with ML-DSA (FIPS 204).
       flags: [quantum-vulnerable]
-    patterns:
-      - pattern-either:
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `alg = "ES256"` followed by `jwt.encode(claims, key, algorithm=alg)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship; see the note in hashes.yaml for why the union is
+    # kept rather than one replacing the other.
+    pattern-either:
+      - patterns:
           - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"ES256"'
+                - pattern: '"ES256K"'
+                - pattern: '"ES384"'
+                - pattern: '"ES512"'
+      - patterns:
           - pattern: jwt.encode(..., algorithms=[$ALG], ...)
-      - metavariable-regex:
-          metavariable: $ALG
-          regex: ^["']ES(256|256K|384|512)["']$
-
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"ES256"'
+                - pattern: '"ES256K"'
+                - pattern: '"ES384"'
+                - pattern: '"ES512"'
+      - patterns:
+          - pattern: jwt.decode(..., algorithms=[$ALG], ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"ES256"'
+                - pattern: '"ES256K"'
+                - pattern: '"ES384"'
+                - pattern: '"ES512"'
+      - patterns:
+          - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["']ES(256|256K|384|512)["']$
+      - patterns:
+          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["']ES(256|256K|384|512)["']$
   - id: py-jwt-hmac
     languages: [python]
     severity: INFO
@@ -76,14 +164,52 @@ rules:
         a shared secret must be distributed to every verifier, and RFC 8725
         Sec. 2.1 warns about algorithm confusion with RS*.
       flags: [symmetric]
-    patterns:
-      - pattern-either:
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `alg = "HS256"` followed by `jwt.encode(claims, key, algorithm=alg)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship; see the note in hashes.yaml for why the union is
+    # kept rather than one replacing the other.
+    pattern-either:
+      - patterns:
           - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"HS256"'
+                - pattern: '"HS384"'
+                - pattern: '"HS512"'
+      - patterns:
           - pattern: jwt.encode(..., algorithms=[$ALG], ...)
-      - metavariable-regex:
-          metavariable: $ALG
-          regex: ^["']HS(256|384|512)["']$
-
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"HS256"'
+                - pattern: '"HS384"'
+                - pattern: '"HS512"'
+      - patterns:
+          - pattern: jwt.decode(..., algorithms=[$ALG], ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"HS256"'
+                - pattern: '"HS384"'
+                - pattern: '"HS512"'
+      - patterns:
+          - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["']HS(256|384|512)["']$
+      - patterns:
+          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["']HS(256|384|512)["']$
   - id: py-jwt-none
     languages: [python]
     severity: ERROR
@@ -100,10 +226,49 @@ rules:
         that any party can forge (RFC 7518 Sec. 3.6, RFC 8725 Sec. 3.1). This
         is a critical authentication defect, unrelated to quantum risk.
       flags: [weak, critical]
-    patterns:
-      - pattern-either:
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `alg = "none"` followed by `jwt.encode(claims, key, algorithm=alg)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship; see the note in hashes.yaml for why the union is
+    # kept rather than one replacing the other.
+    pattern-either:
+      - patterns:
           - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"none"'
+                - pattern: '"None"'
+                - pattern: '"NONE"'
+      - patterns:
           - pattern: jwt.encode(..., algorithms=[$ALG], ...)
-      - metavariable-regex:
-          metavariable: $ALG
-          regex: ^["'](?i:none)["']$
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"none"'
+                - pattern: '"None"'
+                - pattern: '"NONE"'
+      - patterns:
+          - pattern: jwt.decode(..., algorithms=[$ALG], ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"none"'
+                - pattern: '"None"'
+                - pattern: '"NONE"'
+      - patterns:
+          - pattern: jwt.encode(..., algorithm=$ALG, ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](?i:none)["']$
+      - patterns:
+          - pattern: jwt.encode(..., algorithms=[$ALG], ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: ^["'](?i:none)["']$

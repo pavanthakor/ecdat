@@ -20,24 +20,32 @@ rules:
         key is still fine. The problem here is classical -- MD5 is retired
         (NIST SP 800-131A Rev.2). Replace with HMAC-SHA-256.
       flags: [weak]
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `digest = "md5"` followed by `hmac.new(k, m, digestmod=digest)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship; see the note in hashes.yaml for why the union is
+    # kept rather than one replacing the other.
     pattern-either:
       - pattern: hmac.new(..., hashlib.md5, ...)
       - pattern: hmac.new(..., digestmod=hashlib.md5, ...)
       - patterns:
           - pattern: hmac.new(..., digestmod=$ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"md5"'
+                - pattern: '"MD5"'
+      - patterns:
+          - pattern: hmac.new(..., digestmod=$ALG, ...)
           - metavariable-regex:
               metavariable: $ALG
               regex: ^["'](?i:md5)["']$
-    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
-    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
-    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
-    # Semgrep's constant propagation works on the PATTERN, not the capture, so
-    # spelling the literal out is what reaches a value assigned earlier.
-    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
-    # one covers spellings (MD5, Md5) the literals do not.
-      - pattern: hmac.new(..., digestmod="md5")
-      - pattern: hmac.new(..., digestmod='md5')
-
   - id: py-hmac-sha1
     languages: [python]
     severity: WARNING
@@ -52,20 +60,31 @@ rules:
         key margin; the classical retirement of SHA-1 is the binding reason to
         move. Replace with HMAC-SHA-256.
       flags: [weak]
+    # PROPAGATION-AWARE MATCHING (ADR-0027).
+    #
+    # `metavariable-pattern` is evaluated against the PROPAGATED value, so
+    # `digest = "sha1"` followed by `hmac.new(k, m, digestmod=digest)` is caught.
+    # `metavariable-regex` cannot do that: it tests the SOURCE TEXT bound to
+    # the metavariable, which is the variable's NAME whenever the value was
+    # assigned earlier -- so the site is silently missed while the
+    # literal-at-call-site form is reported normally.
+    #
+    # Both branches ship; see the note in hashes.yaml for why the union is
+    # kept rather than one replacing the other.
     pattern-either:
       - pattern: hmac.new(..., hashlib.sha1, ...)
       - pattern: hmac.new(..., digestmod=hashlib.sha1, ...)
       - patterns:
           - pattern: hmac.new(..., digestmod=$ALG, ...)
+          - metavariable-pattern:
+              metavariable: $ALG
+              pattern-either:
+                - pattern: '"sha1"'
+                - pattern: '"SHA1"'
+                - pattern: '"sha-1"'
+                - pattern: '"SHA-1"'
+      - patterns:
+          - pattern: hmac.new(..., digestmod=$ALG, ...)
           - metavariable-regex:
               metavariable: $ALG
-              regex: ^["'](?i:sha1|sha-1)["']$
-    # CONST-PROP REACH (ADR-0026). The `metavariable-regex` branch above only
-    # sees the SOURCE TEXT at the call site, so `algo = "md5"` then
-    # `hashlib.new(algo, ...)` binds $ALG to `algo` and the regex fails.
-    # Semgrep's constant propagation works on the PATTERN, not the capture, so
-    # spelling the literal out is what reaches a value assigned earlier.
-    # Measured in ADR-0026's STEP 0; both branches are kept because the regex
-    # one covers spellings (MD5, Md5) the literals do not.
-      - pattern: hmac.new(..., digestmod="sha1")
-      - pattern: hmac.new(..., digestmod='sha1')
+              regex: ^["'](?i:sha1)["']$

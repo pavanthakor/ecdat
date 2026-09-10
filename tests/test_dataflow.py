@@ -47,6 +47,7 @@ with (FIXTURE_ROOT / "answer_key.yaml").open(encoding="utf-8") as _handle:
 CONFIGURABILITY: list[dict[str, Any]] = ANSWERS["configurability"]
 CONST_PROP: list[dict[str, Any]] = ANSWERS["constant_propagation"]
 KNOWN_LIMITS: list[dict[str, Any]] = ANSWERS["known_limits"]
+CONST_PROP_REACH: list[dict[str, Any]] = ANSWERS["const_prop_reach"]
 FINDINGS: dict[str, list[dict[str, Any]]] = ANSWERS["findings"]
 DECOYS: list[str] = ANSWERS["decoys"]
 
@@ -342,9 +343,15 @@ def test_the_python_pack_still_scores_perfectly_on_its_own_fixtures(
     with capsys.disabled():
         print(result.report("PYTHON (regression check)"))
 
-    assert result.recall >= 0.9, f"recall fell to {result.recall:.1%}: {result.missed}"
+    # EXACT, not the pack's own >= 0.9 threshold. This is a regression guard,
+    # and a rewrite that quietly dropped two detections would sail through a
+    # 90% floor -- which is exactly what happened while ADR-0027 was being
+    # written: converting the MAC rules lost the positional
+    # `hmac.new(..., hashlib.md5, ...)` branch and the score went to 39/41
+    # while every assertion still passed.
+    assert result.recall == 1.0, f"the existing pack lost detections: {result.missed}"
     assert result.precision == 1.0, (
-        f"a dataflow rule fired on the existing pack's fixtures: {result.spurious}"
+        f"a new rule fired on the existing pack's fixtures: {result.spurious}"
     )
 
 
@@ -427,3 +434,181 @@ def test_dataflow_recall_and_precision(findings: list[Finding], capsys: Any) -> 
     assert recall >= 0.9, f"recall {recall:.1%}; missed {missed}"
     assert precision == 1.0, f"{decoy_hits} finding(s) on the dataflow decoys"
     assert correct == corrections, "a configurable-flag correction did not hold"
+
+
+# ---------------------------------------------------------------------------
+# CONST-PROP REACH -- ADR-0027
+#
+# ADR-0026 fixed the digest and MAC rules and left the rest. These tests close
+# the gap and, more importantly, stop it being reintroduced.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "case",
+    CONST_PROP_REACH,
+    ids=[f"{c['rule_id']}" for c in CONST_PROP_REACH],
+)
+def test_classification_sees_through_a_propagated_constant(
+    case: dict[str, Any], findings: list[Finding]
+) -> None:
+    """`alg = "RS256"` then `jwt.encode(..., algorithm=alg)` must be reported.
+
+    The literal-at-call-site form always worked. This is the form that did not,
+    and it is the one a settings-driven codebase actually writes.
+    """
+    hits = [
+        f
+        for f in _for(findings, case["fixture"])
+        if rule_id_of(f) == case["rule_id"] and f.algorithm == case["algorithm"]
+    ]
+    assert len(hits) == case["count"], (
+        f"{case['rule_id']} matched {len(hits)} of {case['count']} propagated "
+        f"sites in {case['fixture']} -- {case['why']}"
+    )
+
+
+def test_the_ssl_protocol_rule_never_had_this_gap(
+    context: ScanContext, tmp_path: Path
+) -> None:
+    """Measured, not assumed -- and pinned so nobody 'fixes' it into one.
+
+    `py-ssl-weak-protocol` matches `ssl.$PROTO`: the constant ITSELF, wherever
+    it appears. So a protocol assigned to a variable is already reported at the
+    ASSIGNMENT, and the rule needs no propagation to see it. Rewriting it to
+    classify a value passed to `SSLContext(...)` would ADD a gap, because OSS
+    const-prop does not follow an attribute reference (ADR-0026).
+    """
+    source = tmp_path / "ssl_propagated.py"
+    source.write_text(
+        "import ssl\n\n\n"
+        "def context():\n"
+        "    proto = ssl.PROTOCOL_TLSv1_1\n"
+        "    return ssl.SSLContext(proto)\n",
+        encoding="utf-8",
+    )
+    target = Target(kind="directory", ref=str(tmp_path), system="ssl-prop")
+    hits = [
+        f
+        for f in SourceScanner().scan(target, context)
+        if rule_id_of(f) == "py-ssl-weak-protocol"
+    ]
+    assert hits, "py-ssl-weak-protocol missed a protocol constant behind a variable"
+    assert hits[0].params.get("version") == "TLSv1_1"
+
+
+def test_a_jose_algorithm_no_rule_claims_is_not_reported(
+    findings: list[Finding],
+) -> None:
+    """Propagation-aware classification must not become a catch-all.
+
+    EdDSA (RFC 8037) is a real `alg` value with no rule and no quantum note in
+    this pack. A rule that fired on it would be reporting an algorithm it
+    cannot say anything about.
+    """
+    assert _for(findings, "must_not_fire/decoys.py") == []
+
+
+# ---------------------------------------------------------------------------
+# THE CONTRACT TEST -- the durable half of ADR-0027
+# ---------------------------------------------------------------------------
+
+
+def test_no_python_rule_classifies_a_passed_value_with_metavariable_regex_alone() -> (
+    None
+):
+    """The gap ADR-0026 found, made impossible to reintroduce.
+
+    `metavariable-regex` tests the SOURCE TEXT bound to a metavariable. When
+    the metavariable is bound to a value PASSED to a call -- `algorithm=$ALG`,
+    `getInstance($T)`, `[$ALG]` -- the source text is the variable's name
+    whenever the value was assigned earlier, so the regex silently fails and
+    the site is never reported. `metavariable-pattern` is evaluated against the
+    PROPAGATED value and does not have that hole.
+
+    Matching the constant itself is fine and is why this test looks at argument
+    position rather than banning `metavariable-regex` outright:
+    `py-ssl-weak-protocol` binds `$PROTO` in `ssl.$PROTO`, which is an
+    attribute suffix and not a passed value, and it reports the propagated case
+    at the assignment.
+
+    Name-scoping is fine too: a regex over a VARIABLE NAME (`py-weak-random-secret`)
+    is asking about the name, and propagation has nothing to do with it. Those
+    are listed explicitly rather than pattern-matched, so adding one is a
+    deliberate act.
+    """
+    import re
+
+    import yaml
+
+    # Rules whose metavariable-regex tests a NAME rather than a value.
+    # Propagation is irrelevant to them by construction, and listing them
+    # explicitly means adding one is a deliberate act rather than a
+    # pattern that quietly widens.
+    name_scoped = {"py-weak-random-secret"}
+
+    #: `$VAR` in an argument position: after `(`, `,`, `=` or `[`.
+    argument_position = re.compile(r"[(\[,=]\s*\$[A-Z_][A-Z0-9_]*")
+
+    offenders: list[tuple[str, str]] = []
+    for path in sorted(Path("knowledge/rules/python").glob("*.yaml")):
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for rule in document["rules"]:
+            rule_id = str(rule["id"])
+            if rule_id in name_scoped:
+                continue
+            nodes = _flatten(rule)
+            regexed = {
+                str(node["metavariable-regex"]["metavariable"])
+                for node in nodes
+                if isinstance(node, dict) and "metavariable-regex" in node
+            }
+            if not regexed:
+                continue
+            # A metavariable that ALSO carries a metavariable-pattern
+            # constraint is covered: that branch is evaluated against the
+            # propagated value, and keeping the regex branch beside it only
+            # widens the union.
+            propagation_aware = {
+                str(node["metavariable-pattern"]["metavariable"])
+                for node in nodes
+                if isinstance(node, dict) and "metavariable-pattern" in node
+            }
+            for pattern in _pattern_strings(rule):
+                for match in argument_position.finditer(pattern):
+                    metavar = match.group(0).lstrip("([,= \t")
+                    if metavar in regexed and metavar not in propagation_aware:
+                        offenders.append((rule_id, pattern.strip()))
+
+    assert offenders == [], (
+        "these rules classify a value PASSED to a call using metavariable-regex "
+        "alone, so a propagated constant is silently missed (ADR-0027). Add a "
+        "metavariable-pattern constraint on the same metavariable -- it is "
+        "evaluated against the propagated value: "
+        f"{sorted(set(offenders))}"
+    )
+
+
+def _flatten(node: Any) -> list[Any]:
+    """Every mapping and sequence member anywhere inside a rule."""
+    found: list[Any] = []
+    if isinstance(node, dict):
+        found.append(node)
+        for value in node.values():
+            found.extend(_flatten(value))
+    elif isinstance(node, list):
+        for value in node:
+            found.extend(_flatten(value))
+    return found
+
+
+def _pattern_strings(rule: Any) -> list[str]:
+    """Every `pattern:` / `pattern-inside:` string in a rule."""
+    keys = {"pattern", "pattern-inside", "pattern-not", "pattern-not-inside"}
+    return [
+        str(value)
+        for node in _flatten(rule)
+        if isinstance(node, dict)
+        for key, value in node.items()
+        if key in keys and isinstance(value, str)
+    ]
