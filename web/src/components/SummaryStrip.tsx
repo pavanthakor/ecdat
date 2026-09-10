@@ -1,23 +1,14 @@
 /**
  * The strip a reader lands on: what is in this estate, and how bad is it.
  *
- * Every number here comes off the DENORMALISED scan row (ADR-0016) rather than
- * from counting the CBOM in the browser. Two reasons: the row is what the
- * store recorded at scan time, so the strip cannot disagree with the document
- * it summarises; and counting an estate-sized document per render is the
- * O(scans x document) mistake the API stopped making.
+ * Every number comes off the DENORMALISED scan row (ADR-0016) rather than from
+ * counting the CBOM in the browser — the row is what the store recorded, so
+ * the strip cannot disagree with the document it summarises.
+ *
+ * The score distribution is a labelled bar chart with an axis, not a row of
+ * floating bars. Bars without a scale are decoration: a reader cannot tell
+ * whether a tall one means five artefacts or fifty.
  */
-import { Boxes, GitCompareArrows, Layers, TriangleAlert } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-
 import type { Artefact, Band, ScanSummary } from "@/api/types";
 import { BANDS } from "@/api/types";
 import { BAND_STYLE, cn } from "@/lib/format";
@@ -27,45 +18,33 @@ interface Props {
   artefacts: Artefact[];
 }
 
-const BAND_FILL: Record<Band, string> = {
-  Critical: "#f43f5e",
-  High: "#f59e0b",
-  Medium: "#eab308",
-  Low: "#475569",
-};
-
 function Metric({
   label,
   value,
   sub,
-  icon: Icon,
   tone,
 }: {
   label: string;
   value: string | number;
   sub?: string;
-  icon: typeof Boxes;
   tone?: string;
 }) {
   return (
-    <div className="flex items-start gap-2.5 border-r border-line px-4 py-2.5 last:border-r-0">
-      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-faint" aria-hidden />
-      <div className="min-w-0">
-        <div className="text-2xs uppercase tracking-widest text-ink-faint">
-          {label}
-        </div>
-        <div
-          className={cn(
-            "font-mono text-xl leading-tight tabular-nums text-ink",
-            tone,
-          )}
-        >
-          {value}
-        </div>
-        {sub ? (
-          <div className="mt-0.5 truncate text-2xs text-ink-faint">{sub}</div>
-        ) : null}
+    <div className="px-4 py-2.5">
+      <div className="text-2xs uppercase tracking-widest text-ink-faint">{label}</div>
+      <div
+        className={cn(
+          "font-mono text-xl leading-tight tabular-nums text-ink",
+          tone,
+        )}
+      >
+        {value}
       </div>
+      {sub ? (
+        <div className="mt-0.5 truncate text-2xs text-ink-faint" title={sub}>
+          {sub}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -75,14 +54,13 @@ function Metric({
  *
  * `null` means the row predates the column and we cannot say what ran; `[]`
  * means we can, and nothing did (ADR-0016). Rendering both as "none" would
- * turn "never looked for binaries" into "binaries were clean", which is the
- * exact confusion the column was added to end.
+ * turn "never looked for binaries" into "binaries were clean".
  */
 function coverageLabel(scanners: ScanSummary["scanners_ran"]): {
   value: string;
   sub: string;
 } {
-  if (scanners === null) return { value: "unknown", sub: "not recorded for this scan" };
+  if (scanners === null) return { value: "—", sub: "not recorded for this scan" };
   if (scanners.length === 0) return { value: "0", sub: "no scanner ran" };
   return {
     value: String(scanners.length),
@@ -101,18 +79,16 @@ export function SummaryStrip({ scan, artefacts }: Props) {
   );
   const coverage = coverageLabel(scan.scanners_ran);
 
-  // Score distribution in 10-point buckets, coloured by the band each bucket
-  // falls in -- so the shape of the estate is readable at a glance without a
-  // legend.
+  // Ten-point buckets, coloured by the band each falls in. Built from the
+  // artefacts currently loaded so it tracks a rescore.
   const buckets = Array.from({ length: 10 }, (_, index) => ({
-    label: `${index * 10}-${index * 10 + 9}`,
     floor: index * 10,
     count: 0,
   }));
   for (const artefact of artefacts) {
-    const index = Math.min(9, Math.floor(artefact.score / 10));
-    buckets[index].count += 1;
+    buckets[Math.min(9, Math.floor(artefact.score / 10))].count += 1;
   }
+  const peak = Math.max(1, ...buckets.map((b) => b.count));
   const bucketBand = (floor: number): Band =>
     floor >= 80 ? "Critical" : floor >= 60 ? "High" : floor >= 40 ? "Medium" : "Low";
 
@@ -123,13 +99,11 @@ export function SummaryStrip({ scan, artefacts }: Props) {
           label="Artefacts"
           value={scan.component_count}
           sub={`${scan.target.kind} · ${scan.target.ref}`}
-          icon={Boxes}
         />
         <Metric
           label="Max score"
           value={scan.max_score}
           sub={`${counts.Critical ?? 0} critical · ${counts.High ?? 0} high`}
-          icon={TriangleAlert}
           tone={scan.max_score >= 80 ? "text-critical" : undefined}
         />
         <Metric
@@ -142,30 +116,22 @@ export function SummaryStrip({ scan, artefacts }: Props) {
                 : "all views agree"
               : Object.keys(scan.drift_counts).join(" · ")
           }
-          icon={GitCompareArrows}
           tone={driftTotal > 0 ? "text-high" : undefined}
         />
-        <Metric
-          label="Scanners"
-          value={coverage.value}
-          sub={coverage.sub}
-          icon={Layers}
-        />
+        <Metric label="Scanners" value={coverage.value} sub={coverage.sub} />
       </div>
 
-      <div className="grid grid-cols-1 gap-px border-t border-line bg-line lg:grid-cols-[1fr_20rem]">
-        <div className="bg-panel px-4 py-3">
+      <div className="grid grid-cols-1 divide-y divide-line border-t border-line lg:grid-cols-[1fr_24rem] lg:divide-x lg:divide-y-0">
+        <div className="px-4 py-3">
           <div className="mb-2 flex items-baseline justify-between">
             <span className="text-2xs uppercase tracking-widest text-ink-faint">
               Band distribution
             </span>
-            <span className="font-mono text-2xs text-ink-faint">
-              {total} scored
+            <span className="font-mono text-2xs tabular-nums text-ink-faint">
+              {total}
             </span>
           </div>
-          {/* A segmented bar rather than a chart: four values at this density
-              read better as exact pixel widths than as a plotted series. */}
-          <div className="flex h-2.5 w-full overflow-hidden border border-line">
+          <div className="flex h-2 w-full overflow-hidden">
             {BANDS.map((band) => {
               const count = counts[band] ?? 0;
               if (count === 0) return null;
@@ -183,8 +149,8 @@ export function SummaryStrip({ scan, artefacts }: Props) {
             {BANDS.map((band) => (
               <span key={band} className="flex items-center gap-1.5 text-2xs">
                 <span className={cn("h-2 w-2", BAND_STYLE[band].dot)} />
-                <span className="text-ink-dim">{band}</span>
-                <span className="font-mono tabular-nums text-ink">
+                <span className="text-ink-faint">{band}</span>
+                <span className="font-mono tabular-nums text-ink-dim">
                   {counts[band] ?? 0}
                 </span>
               </span>
@@ -192,41 +158,48 @@ export function SummaryStrip({ scan, artefacts }: Props) {
           </div>
         </div>
 
-        <div className="bg-panel px-4 py-3">
-          <div className="mb-1 text-2xs uppercase tracking-widest text-ink-faint">
-            Score distribution
+        <div className="px-4 py-3">
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-2xs uppercase tracking-widest text-ink-faint">
+              Score distribution
+            </span>
+            <span className="font-mono text-2xs tabular-nums text-ink-faint">
+              peak {peak}
+            </span>
           </div>
-          <div className="h-[52px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={buckets}
-                margin={{ top: 2, right: 0, bottom: 0, left: 0 }}
-                barCategoryGap={2}
+          {/* A baseline and end labels, so a bar's height means something. */}
+          <div className="flex h-8 items-end gap-px border-b border-line">
+            {buckets.map((bucket) => (
+              <div
+                key={bucket.floor}
+                title={`score ${bucket.floor}–${bucket.floor + 9}: ${bucket.count} ${
+                  bucket.count === 1 ? "artefact" : "artefacts"
+                }`}
+                className="group flex flex-1 items-end"
+                style={{ height: "100%" }}
               >
-                <XAxis dataKey="floor" hide />
-                <YAxis hide />
-                <Tooltip
-                  cursor={{ fill: "rgba(148,163,184,0.08)" }}
-                  contentStyle={{
-                    background: "#0b1220",
-                    border: "1px solid #1e293b",
-                    borderRadius: 0,
-                    fontSize: 11,
-                    padding: "4px 8px",
-                  }}
-                  labelFormatter={(floor) => `score ${floor}–${Number(floor) + 9}`}
-                  formatter={(value: number) => [value, "components"]}
+                <div
+                  className={cn(
+                    "w-full transition-opacity group-hover:opacity-80",
+                    bucket.count === 0
+                      ? "h-px bg-line"
+                      : BAND_STYLE[bucketBand(bucket.floor)].dot,
+                  )}
+                  style={
+                    bucket.count === 0
+                      ? undefined
+                      : { height: `${(bucket.count / peak) * 100}%` }
+                  }
                 />
-                <Bar dataKey="count" isAnimationActive={false}>
-                  {buckets.map((bucket) => (
-                    <Cell
-                      key={bucket.floor}
-                      fill={BAND_FILL[bucketBand(bucket.floor)]}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1 flex justify-between font-mono text-[10px] tabular-nums text-ink-faint">
+            <span>0</span>
+            <span>40</span>
+            <span>60</span>
+            <span>80</span>
+            <span>100</span>
           </div>
         </div>
       </div>

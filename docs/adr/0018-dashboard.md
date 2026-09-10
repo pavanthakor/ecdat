@@ -100,22 +100,70 @@ verified rules on the same component.
 
 ### 6. Data-dense, not decorative
 
-30px rows, 1px borders, square corners, monospace and tabular numerals for every
-technical value (bom-ref, endpoint, deadline, score) so columns align and can be
-scanned vertically. Four saturated colours in the whole application, all of them
-bands.
+Refined in the polish pass against how real security consoles (Wiz, Snyk,
+Semgrep, Datadog) actually present a findings table:
 
-No gradients, no oversized cards, no centred hero, no emoji. The reference is a
-security console someone works in for eight hours, not a landing page.
+* **Severity is an edge marker, not a fill.** Critical and High rows carry a
+  2px left border; Medium and Low carry a transparent one so the gutter stays
+  aligned. A background fill washes out the row's own content and stacks badly
+  when several are adjacent — an edge lets the eye run down the left margin
+  without competing with anything in the cells.
+* **Hairline separators, no zebra striping.** Striping encodes nothing and
+  fights the severity accent for attention.
+* **Numbers right-aligned and tabular.** Scores and deadlines line up on their
+  digits, so a column is scanned rather than read.
+* **The artefact name is the strongest thing in its row**; the bom-ref beside
+  it is 10px muted mono, because it is an address, not a label.
+* **No inline explainers.** The Mosca explanation moved into an `(i)` affordance.
+  A console that narrates its own widgets on the main view reads as a tutorial;
+  the people who use one daily already know, and the people who do not can
+  hover.
+* **Context is quiet.** Sector/exposure/data-class are muted label + value
+  pairs in the top bar, not highlighted text — they are context, not alerts.
+* **A live consequence readout** beside the slider, recomputed from the
+  artefacts ON SCREEN rather than from `scan.band_counts`. Reading the row
+  would freeze the headline numbers at the stored horizon while the table
+  beneath them changed.
+* **Three empty states, not one.** Nothing selected / scan found nothing /
+  filters exclude everything — and only the third offers an action. Offering
+  "clear filters" to somebody whose scan genuinely found no cryptography sends
+  them after a control that cannot help.
+* **Skeleton rows, never a flash of empty**, so the table keeps its shape
+  through a scan change or a rescore.
+* **An auditable footer**: scanned date, engine versions from
+  `engine_versions` (ADR-0017), and how many facts are provisional.
 
-### 7. Tests cover data logic, not layout
+Compact rows, hairline borders, square corners, and monospace tabular numerals
+for every technical value (bom-ref, endpoint, deadline, score) so columns align
+and can be scanned vertically.
 
-49 Vitest tests over parsing, filtering, sorting, the rescore flow and the
+Four saturated colours in the whole application, all of them bands. There is no
+accent token: interaction affordances (slider, focus rings) use the slate ramp,
+so a coloured pixel always means severity. The single exception is documented
+where it sits — `+`/`-` in a rendered diff, which is a git convention rather
+than a severity claim.
+
+No gradients, no glow, no oversized cards, no centred hero, no emoji, and no
+icon that is not doing work. The reference is a security console someone works
+in for eight hours, not a landing page.
+
+### 7. One field added to the API, for the footer
+
+`ScanSummary` gained `engine_versions` and `engine_warning` — already columns on
+the row since ADR-0017, simply not exposed. The footer needs them to say which
+engine produced the view a reader is looking at. A tool that can name the
+version behind a conclusion is one somebody can audit; one that cannot is
+asking to be trusted.
+
+### 8. Tests cover data logic and interaction, not layout
+
+68 Vitest tests over parsing, filtering, sorting, the rescore flow and the
 provenance rendering rule. Layout is not tested.
 
 The split is by *failure visibility*: a column in the wrong place is obvious in
 a screenshot; a filter that silently drops rows, a rescore that leaves a stale
-table, and a provisional fact rendered as verified are not.
+table, a readout wired to the stored row instead of the live one, and a
+provisional fact rendered as verified are not.
 
 **Every fixture is a real document.** `cbom_z11.json` and `cbom_z5.json` are the
 same estate before and after an actual `POST /scans/{id}/rescore`;
@@ -155,9 +203,12 @@ parser against the shape one imagined, which is always the shape that works.
   are built and tested against a real merged fixture, and will show nothing
   against a scan the console can currently load. A "scan a system, not a target"
   entry point is owed.
-- **The bundle is 619KB (183KB gzipped)**, most of it Recharts, in one chunk.
-  Fine over localhost; wants a manual chunk split before it is served over
-  anything slower.
+- ~~The bundle is 619KB, most of it Recharts.~~ **242KB (78KB gzipped)** after
+  the polish pass. The score distribution became a labelled div-based bar chart
+  with a baseline and axis end-labels — at ten buckets that is more precise than
+  a charting library and needs no dependency — so Recharts was removed. Slice 2's
+  roadmap timeline and agility gauge can add it back in one command if they
+  genuinely need it.
 - **`web/dist/` is git-ignored**, so a fresh clone needs `make web` once before
   `make serve` shows anything. The API returns a 503 naming the exact command
   rather than a bare 404, but it is still a step that can be forgotten.

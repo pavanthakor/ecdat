@@ -478,3 +478,16 @@ def test_the_spa_route_reports_a_missing_build_rather_than_404ing(
 
     assert response.status_code == 503
     assert "make web" in response.json()["detail"]
+
+
+def test_the_scan_summary_carries_the_engine_that_produced_it(
+    client: TestClient,
+) -> None:
+    """The console footer says which engine a reader is looking at (ADR-0017)."""
+    scan_id = post_scan_id(client, scanners=["source"])
+
+    body = client.get(f"/scans/{scan_id}").json()
+
+    assert body["engine_versions"]["ecdat"]
+    assert body["engine_versions"]["source"]["pinned"]
+    assert body["engine_warning"] is None

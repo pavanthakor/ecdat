@@ -138,11 +138,30 @@
   mismatch path kept non-fatal — but it is a real cost for anyone who shares an
   environment with another semgrep user.
   *Raised: verified-fact slice.*
+- **A derived row records no engine, so its footer says "engine not
+  recorded".** A rescore runs no scanner, so `save_rescore` writes no
+  `engine_versions` -- literally true of the row, and slightly misleading about
+  the artefacts it shows, which DID come from an engine. The console defaults
+  to the `kind: "scan"` row so the normal path is unaffected; selecting a
+  rescore row from the picker shows the honest-but-thin line. Either inherit
+  the parent's engine on a derived row, or have the footer follow
+  `parent_scan_id`.
+  *Raised: dashboard polish.*
+- **The console bundle dropped to 242KB (78KB gzipped)** when the score
+  distribution became a labelled div bar chart and Recharts was removed. Slice
+  2's roadmap timeline, agility gauge and drift graph may want a charting
+  library back; at ten buckets, divs were more precise and needed no
+  dependency.
+  *Raised: dashboard polish.*
 - **Dashboard slice 2 is owed.** Slice 1 shipped the core console (ADR-0018):
   app shell + scan selector, the risk summary strip off the denormalised row,
   the sortable/filterable inventory table, the Mosca slider driving the real
   rescore endpoint, and the drill-down drawer with evidence, fired rules, drift
-  and the verified/provisional distinction. **Still owed:** the India roadmap
+  and the verified/provisional distinction. A polish pass then took it to
+  production density: severity as a left-edge accent, right-aligned tabular
+  figures, hairline separators, quiet metadata chips, an (i) affordance instead
+  of inline explainers, a live band readout beside the slider, skeleton rows,
+  three distinct empty states, and an auditable footer. **Still owed:** the India roadmap
   timeline, the crypto-agility gauge, a fixes view that can trigger a fix pass
   and show its verified diffs as a review queue, and a drift graph. The fix
   data is already parsed and the drawer renders a verified diff when a

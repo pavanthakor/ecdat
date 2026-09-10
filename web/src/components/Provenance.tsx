@@ -13,8 +13,6 @@
  * a tooltip. A caveat that needs a hover is a caveat that will be missed on a
  * projector.
  */
-import { AlertTriangle, ShieldCheck } from "lucide-react";
-
 import type { Artefact } from "@/api/types";
 import { cn } from "@/lib/format";
 
@@ -49,11 +47,6 @@ export function ProvenanceBadge({ artefact }: { artefact: Artefact }) {
         isProvisional ? PROVISIONAL : VERIFIED,
       )}
     >
-      {isProvisional ? (
-        <AlertTriangle className="h-3 w-3" aria-hidden />
-      ) : (
-        <ShieldCheck className="h-3 w-3 text-emerald-400/80" aria-hidden />
-      )}
       {isProvisional ? "Provisional" : "Verified"}
     </span>
   );

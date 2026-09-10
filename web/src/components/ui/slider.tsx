@@ -17,12 +17,12 @@ export const Slider = React.forwardRef<
     {...props}
   >
     <SliderPrimitive.Track className="relative h-1 w-full grow bg-line">
-      <SliderPrimitive.Range className="absolute h-full bg-accent" />
+      <SliderPrimitive.Range className="absolute h-full bg-ink-dim" />
     </SliderPrimitive.Track>
     <SliderPrimitive.Thumb
       className={cn(
-        "block h-4 w-2 border border-accent bg-ground",
-        "transition-colors hover:bg-accent/20 focus-visible:ring-1 focus-visible:ring-accent",
+        "block h-4 w-2 border border-ink-dim bg-ink-dim",
+        "transition-colors hover:bg-ink focus-visible:ring-1 focus-visible:ring-ink-dim",
         "disabled:pointer-events-none disabled:opacity-50",
       )}
     />

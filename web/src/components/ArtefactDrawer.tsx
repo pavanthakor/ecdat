@@ -7,8 +7,6 @@
  * do about it. Provenance rides on the score section, because that is where a
  * reader is deciding whether to believe a number.
  */
-import { FileCode2, ShieldAlert } from "lucide-react";
-
 import type { Artefact } from "@/api/types";
 import { BAND_STYLE, cn } from "@/lib/format";
 import { FactList, ProvenanceBadge } from "./Provenance";
@@ -96,10 +94,6 @@ export function ArtefactDrawer({ artefact, onClose }: Props) {
                 className="border border-line bg-panel px-2.5 py-2"
               >
                 <div className="flex items-center gap-2">
-                  <FileCode2
-                    className="h-3 w-3 shrink-0 text-ink-faint"
-                    aria-hidden
-                  />
                   <span className="truncate font-mono text-2xs text-ink">
                     {occurrence.locator}
                   </span>
@@ -128,10 +122,7 @@ export function ArtefactDrawer({ artefact, onClose }: Props) {
                   key={`${drift.kind}-${index}`}
                   className="border border-high/40 bg-high/5 px-2.5 py-2"
                 >
-                  <div className="flex items-center gap-2">
-                    <ShieldAlert className="h-3 w-3 shrink-0 text-high" aria-hidden />
-                    <span className="font-mono text-2xs text-high">{drift.kind}</span>
-                  </div>
+                  <span className="font-mono text-2xs text-high">{drift.kind}</span>
                   <div className="mt-1.5 grid grid-cols-2 gap-2 text-2xs">
                     <div>
                       <span className="text-ink-faint">declared </span>
@@ -242,7 +233,7 @@ export function ArtefactDrawer({ artefact, onClose }: Props) {
               className={cn(
                 "border px-2.5 py-2",
                 artefact.fix.verified
-                  ? "border-emerald-500/40 bg-emerald-500/5"
+                  ? "border-line bg-raised"
                   : "border-dashed border-ink-faint/60",
               )}
             >
@@ -253,7 +244,7 @@ export function ArtefactDrawer({ artefact, onClose }: Props) {
                 <span
                   className={cn(
                     "text-2xs uppercase tracking-wide",
-                    artefact.fix.verified ? "text-emerald-400" : "text-ink-faint",
+                    artefact.fix.verified ? "text-ink-dim" : "text-ink-faint",
                   )}
                 >
                   {artefact.fix.verified ? "verified" : "not verified"}
@@ -268,13 +259,13 @@ export function ArtefactDrawer({ artefact, onClose }: Props) {
                     <div
                       key={index}
                       className={
+                        // +/- in a diff is a universal convention, not a
+                        // severity claim; the hunk header stays neutral.
                         line.startsWith("+")
                           ? "text-emerald-400"
                           : line.startsWith("-")
                             ? "text-critical"
-                            : line.startsWith("@@")
-                              ? "text-accent"
-                              : "text-ink-faint"
+                            : "text-ink-faint"
                       }
                     >
                       {line}

@@ -22,7 +22,9 @@ export default {
         ink: "#e2e8f0", // slate-200
         "ink-dim": "#94a3b8", // slate-400
         "ink-faint": "#64748b", // slate-500
-        accent: "#38bdf8", // sky-400, used ONLY for interaction affordances
+        // NO accent colour. Interaction affordances use the slate ramp, so
+        // the four band colours below are the only saturated pixels in the
+        // application and a coloured pixel always means severity.
         // Bands. The ONLY saturated colours in the console, so a red pixel
         // always means the same thing.
         critical: "#f43f5e",

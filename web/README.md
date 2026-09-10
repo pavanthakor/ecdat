@@ -1,7 +1,7 @@
 # ECDAT console (`web/`)
 
 The dashboard: a dark SOC-style console over the CBOM the scanners produce.
-React + Vite + TypeScript, Tailwind, Radix primitives, Recharts, lucide-react.
+React + Vite + TypeScript, Tailwind, Radix primitives, lucide-react.
 
 ## Build it before the demo
 
@@ -78,7 +78,7 @@ imagined, which is always the shape that works.
 
 ## What is tested
 
-Data logic only — 49 tests. Filtering that silently drops rows, a rescore that
+Data logic and interaction only — 68 tests. Filtering that silently drops rows, a rescore that
 leaves a stale table, and a provisional fact rendered as a verified one are all
 invisible in a screenshot review. Column order is not.
 
@@ -86,3 +86,8 @@ invisible in a screenshot review. Column order is not.
 * `state/inventory.test.ts` — band/view/drift filters, sorting, and the debounced
   rescore round trip against real before/after documents.
 * `components/Provenance.test.tsx` — the verified/provisional rendering RULE.
+* `state/presentation.test.ts` — the live band readout, the three empty states,
+  and the auditable footer line.
+* `components/console.test.tsx` — those two at the DOM level, plus the severity
+  row accent: the live readout is driven through the real slider and must
+  follow the rescored document.

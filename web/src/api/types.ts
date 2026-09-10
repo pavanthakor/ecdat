@@ -50,6 +50,10 @@ export interface ScanSummary {
   sector: string | null;
   exposure: string | null;
   z_years: number | null;
+  /** Which engine produced the scan (ADR-0017). `null` on an older row. */
+  engine_versions: Record<string, unknown> | null;
+  /** Set when an installed engine differed from the pinned one. */
+  engine_warning: string | null;
 }
 
 /** A raw CycloneDX property. Names REPEAT -- `ecdat:actions` appears once per action. */

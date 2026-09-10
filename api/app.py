@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -150,6 +150,12 @@ class ScanSummary(BaseModel):
     sector: str | None
     exposure: str | None
     z_years: int | None
+    #: Which engine produced this scan (ADR-0017), so the console footer can
+    #: say what a reader is looking at. `null` on a row written before the
+    #: column existed.
+    engine_versions: dict[str, Any] | None
+    #: Set when an installed engine differed from the pinned one.
+    engine_warning: str | None
 
 
 @asynccontextmanager
@@ -251,6 +257,8 @@ def _summarise(scan: store.Scan) -> ScanSummary:
         sector=scan.sector,
         exposure=scan.exposure,
         z_years=scan.z_years,
+        engine_versions=scan.engine_versions,
+        engine_warning=scan.engine_warning,
     )
 
 

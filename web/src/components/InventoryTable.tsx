@@ -1,18 +1,28 @@
 /**
- * The inventory: the centrepiece, and the thing that makes this read as a
- * security console rather than a report.
+ * The inventory: the centrepiece, and what makes this read as a security
+ * console rather than a report.
  *
- * Dense on purpose. Row height is 30px, borders are 1px, and every technical
- * value -- bom-ref, endpoint, deadline, score -- is monospaced and tabular so
- * a column of them lines up and can be scanned vertically. A reader looking
- * for the worst thing in an estate should find it without scrolling.
+ * Density decisions, taken from how these tables actually get used:
+ *
+ * * **A 2px left border on Critical and High rows**, not a background fill. A
+ *   fill washes out the row's own content and stacks badly when several are
+ *   adjacent; an edge marker lets the eye find severity down the left gutter
+ *   without competing with anything in the cells.
+ * * **Hairline separators, no zebra striping.** Striping encodes nothing, and
+ *   it fights the severity accent for the reader's attention.
+ * * **Numbers right-aligned and tabular.** Scores and dates line up on their
+ *   digits, so a column can be scanned vertically instead of read.
+ * * **The artefact name is the strongest thing in its row.** The bom-ref beside
+ *   it is smaller, monospaced and muted -- it is an address, not a label.
  */
 import { ArrowDown, ArrowUp, GitCompareArrows } from "lucide-react";
 
 import type { Artefact, Band, View } from "@/api/types";
 import { BANDS, VIEWS } from "@/api/types";
 import { BAND_STYLE, cn, shortLocator, shortRef } from "@/lib/format";
+import type { EmptyState } from "@/state/presentation";
 import type { Filters, Sort, SortColumn } from "@/state/inventory";
+import { SkeletonRows } from "./Skeleton";
 
 interface Props {
   rows: Artefact[];
@@ -20,15 +30,20 @@ interface Props {
   sort: Sort;
   filters: Filters;
   selected: string | null;
+  loading: boolean;
+  emptyState: EmptyState | null;
   onSort: (column: SortColumn) => void;
   onFilters: (filters: Filters) => void;
   onSelect: (artefact: Artefact) => void;
+  onClearFilters: () => void;
 }
 
-const VIEW_STYLE: Record<string, string> = {
-  declared: "text-sky-300/90 border-sky-400/30 bg-sky-400/5",
-  shipped: "text-violet-300/90 border-violet-400/30 bg-violet-400/5",
-  observed: "text-emerald-300/90 border-emerald-400/30 bg-emerald-400/5",
+/** The severity gutter. Only the two bands worth interrupting a scan for. */
+const ROW_ACCENT: Record<Band, string> = {
+  Critical: "border-l-2 border-l-critical",
+  High: "border-l-2 border-l-high",
+  Medium: "border-l-2 border-l-transparent",
+  Low: "border-l-2 border-l-transparent",
 };
 
 function BandPill({ band }: { band: Band }) {
@@ -51,12 +66,10 @@ function Chip({
   active,
   onClick,
   children,
-  className,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
-  className?: string;
 }) {
   return (
     <button
@@ -66,9 +79,8 @@ function Chip({
       className={cn(
         "border px-2 py-0.5 text-2xs transition-colors",
         active
-          ? "border-accent/60 bg-accent/10 text-accent"
-          : "border-line bg-panel text-ink-dim hover:border-line-soft hover:text-ink",
-        className,
+          ? "border-ink-dim bg-raised text-ink"
+          : "border-line bg-panel text-ink-faint hover:border-line-soft hover:text-ink-dim",
       )}
     >
       {children}
@@ -82,14 +94,19 @@ function toggle<T>(values: T[], value: T): T[] {
     : [...values, value];
 }
 
-const COLUMNS: { key: SortColumn; label: string; className?: string }[] = [
-  { key: "name", label: "Artefact", className: "w-[26%]" },
+const COLUMNS: {
+  key: SortColumn;
+  label: string;
+  className?: string;
+  align?: "right";
+}[] = [
+  { key: "name", label: "Artefact", className: "w-[28%]" },
   { key: "view", label: "View", className: "w-[8%]" },
   { key: "band", label: "Band", className: "w-[9%]" },
-  { key: "score", label: "Score", className: "w-[6%] text-right" },
-  { key: "usage", label: "Usage", className: "w-[10%]" },
-  { key: "endpoint", label: "Endpoint / location", className: "w-[27%]" },
-  { key: "deadline", label: "Deadline", className: "w-[10%]" },
+  { key: "score", label: "Score", className: "w-[6%]", align: "right" },
+  { key: "usage", label: "Usage", className: "w-[9%]" },
+  { key: "endpoint", label: "Location", className: "w-[28%]" },
+  { key: "deadline", label: "Deadline", className: "w-[10%]", align: "right" },
 ];
 
 export function InventoryTable({
@@ -98,20 +115,24 @@ export function InventoryTable({
   sort,
   filters,
   selected,
+  loading,
+  emptyState,
   onSort,
   onFilters,
   onSelect,
+  onClearFilters,
 }: Props) {
   return (
     <section className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-panel px-4 py-2">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-line bg-panel px-4 py-2">
         <input
           value={filters.query}
           onChange={(e) => onFilters({ ...filters, query: e.target.value })}
-          placeholder="Filter by name, bom-ref, endpoint, file…"
+          placeholder="Filter artefacts…"
+          aria-label="Filter artefacts"
           className={cn(
-            "h-7 w-64 border border-line bg-ground px-2 text-xs text-ink",
-            "placeholder:text-ink-faint focus:border-accent/60 focus:outline-none",
+            "h-7 w-56 border border-line bg-ground px-2 text-xs text-ink",
+            "placeholder:text-ink-faint focus:border-ink-faint focus:outline-none",
           )}
         />
         <div className="flex items-center gap-1">
@@ -150,13 +171,10 @@ export function InventoryTable({
           active={filters.driftOnly}
           onClick={() => onFilters({ ...filters, driftOnly: !filters.driftOnly })}
         >
-          <span className="flex items-center gap-1">
-            <GitCompareArrows className="h-3 w-3" aria-hidden />
-            Drift only
-          </span>
+          Drift only
         </Chip>
-        <span className="ml-auto font-mono text-2xs text-ink-faint">
-          {rows.length === total ? `${total}` : `${rows.length} / ${total}`} shown
+        <span className="ml-auto font-mono text-2xs tabular-nums text-ink-faint">
+          {rows.length === total ? total : `${rows.length} / ${total}`}
         </span>
       </div>
 
@@ -170,7 +188,8 @@ export function InventoryTable({
                   <th
                     key={column.key}
                     className={cn(
-                      "border-b border-line px-3 py-1.5 text-left font-medium",
+                      "border-b border-line px-3 py-1.5 font-medium",
+                      column.align === "right" ? "text-right" : "text-left",
                       column.className,
                     )}
                   >
@@ -185,9 +204,9 @@ export function InventoryTable({
                       {column.label}
                       {active ? (
                         sort.direction === "desc" ? (
-                          <ArrowDown className="h-3 w-3" aria-hidden />
+                          <ArrowDown className="h-2.5 w-2.5" aria-hidden />
                         ) : (
-                          <ArrowUp className="h-3 w-3" aria-hidden />
+                          <ArrowUp className="h-2.5 w-2.5" aria-hidden />
                         )
                       ) : null}
                     </button>
@@ -197,101 +216,113 @@ export function InventoryTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((artefact) => {
-              const isSelected = artefact.bomRef === selected;
-              const location =
-                artefact.endpoint ??
-                (artefact.occurrences[0]
-                  ? shortLocator(artefact.occurrences[0].locator)
-                  : "—");
-              return (
-                <tr
-                  key={artefact.bomRef}
-                  onClick={() => onSelect(artefact)}
-                  className={cn(
-                    "cursor-pointer border-b border-line-soft transition-colors",
-                    isSelected ? "bg-accent/10" : "hover:bg-raised/70",
-                  )}
-                >
-                  <td className="px-3 py-1.5">
-                    <div className="flex items-baseline gap-2">
-                      <span className="truncate font-medium text-ink">
-                        {artefact.name}
-                      </span>
-                      <span className="shrink-0 font-mono text-2xs text-ink-faint">
-                        {shortRef(artefact.bomRef)}
-                      </span>
-                      {artefact.drift.length > 0 ? (
-                        <GitCompareArrows
-                          className="h-3 w-3 shrink-0 text-high"
-                          aria-label="drift"
-                        />
-                      ) : null}
-                      {artefact.provisional ? (
-                        <span className="shrink-0 border border-dashed border-ink-faint/60 px-1 text-[9px] uppercase tracking-wide text-ink-faint">
-                          prov
-                        </span>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <span
-                      className={cn(
-                        "border px-1.5 py-px text-2xs",
-                        VIEW_STYLE[artefact.view] ??
-                          "border-line text-ink-dim bg-panel",
-                      )}
-                    >
-                      {artefact.view}
-                    </span>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <BandPill band={artefact.band} />
-                  </td>
-                  <td
+            {loading ? (
+              <SkeletonRows columns={COLUMNS.length} rows={12} />
+            ) : (
+              rows.map((artefact) => {
+                const isSelected = artefact.bomRef === selected;
+                const location =
+                  artefact.endpoint ??
+                  (artefact.occurrences[0]
+                    ? shortLocator(artefact.occurrences[0].locator)
+                    : "—");
+                return (
+                  <tr
+                    key={artefact.bomRef}
+                    onClick={() => onSelect(artefact)}
+                    data-band={artefact.band}
                     className={cn(
-                      "px-3 py-1.5 text-right font-mono tabular-nums",
-                      BAND_STYLE[artefact.band].text,
+                      "cursor-pointer border-b border-line-soft transition-colors",
+                      ROW_ACCENT[artefact.band],
+                      isSelected ? "bg-raised" : "hover:bg-raised/60",
                     )}
                   >
-                    {artefact.score}
-                  </td>
-                  <td className="px-3 py-1.5 text-ink-dim">{artefact.usage}</td>
-                  <td className="px-3 py-1.5">
-                    <span className="block truncate font-mono text-2xs text-ink-dim">
-                      {location}
-                    </span>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <span
+                    <td className="px-3 py-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="truncate text-xs font-medium text-ink">
+                          {artefact.name}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] text-ink-faint">
+                          {shortRef(artefact.bomRef)}
+                        </span>
+                        {artefact.drift.length > 0 ? (
+                          <GitCompareArrows
+                            className="h-3 w-3 shrink-0 text-high"
+                            aria-label="drift"
+                          />
+                        ) : null}
+                        {artefact.provisional ? (
+                          <span
+                            title="Some of this verdict rests on an unverified fact"
+                            className="shrink-0 border border-dashed border-ink-faint/60 px-1 text-[9px] uppercase tracking-wide text-ink-faint"
+                          >
+                            prov
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-3 py-1">
+                      <span className="text-2xs text-ink-dim">{artefact.view}</span>
+                    </td>
+                    <td className="px-3 py-1">
+                      <BandPill band={artefact.band} />
+                    </td>
+                    <td
                       className={cn(
-                        "font-mono text-2xs",
-                        artefact.deadlineProvisional
-                          ? "text-ink-faint line-through decoration-dotted"
-                          : "text-ink-dim",
+                        "px-3 py-1 text-right font-mono tabular-nums",
+                        BAND_STYLE[artefact.band].text,
                       )}
-                      title={
-                        artefact.deadlineProvisional
-                          ? "Provisional: this deadline comes from a rule nobody has confirmed against its source"
-                          : undefined
-                      }
                     >
-                      {artefact.deadline ?? "—"}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
+                      {artefact.score}
+                    </td>
+                    <td className="px-3 py-1 text-ink-dim">{artefact.usage}</td>
+                    <td className="px-3 py-1">
+                      <span className="block truncate font-mono text-[10px] text-ink-dim">
+                        {location}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1 text-right">
+                      <span
+                        className={cn(
+                          "font-mono text-[10px] tabular-nums",
+                          artefact.deadlineProvisional
+                            ? "text-ink-faint line-through decoration-dotted"
+                            : "text-ink-dim",
+                        )}
+                        title={
+                          artefact.deadlineProvisional
+                            ? "Provisional: this deadline comes from a rule nobody has confirmed against its source"
+                            : undefined
+                        }
+                      >
+                        {artefact.deadline ?? "—"}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
-        {rows.length === 0 ? (
-          <div className="px-4 py-10 text-center text-xs text-ink-faint">
-            No artefact matches these filters.
-            {filters.driftOnly ? (
-              <span className="mt-1 block">
-                Drift needs all three views in one document; a single-target scan
-                has only one.
-              </span>
+
+        {!loading && emptyState ? (
+          <div
+            data-testid="empty-state"
+            data-empty-kind={emptyState.kind}
+            className="mx-auto max-w-md px-4 py-16 text-center"
+          >
+            <p className="text-xs font-medium text-ink-dim">{emptyState.title}</p>
+            <p className="mt-1.5 text-2xs leading-relaxed text-ink-faint">
+              {emptyState.detail}
+            </p>
+            {emptyState.action === "clear-filters" ? (
+              <button
+                type="button"
+                onClick={onClearFilters}
+                className="mt-3 border border-line bg-panel px-2.5 py-1 text-2xs text-ink-dim transition-colors hover:border-ink-faint hover:text-ink"
+              >
+                Clear filters
+              </button>
             ) : null}
           </div>
         ) : null}
