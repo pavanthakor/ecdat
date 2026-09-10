@@ -237,7 +237,9 @@ def test_js_recall_and_precision(findings: list[Finding], capsys: Any) -> None:
     with capsys.disabled():
         print(result.report("JS/TS"))
 
-    assert result.recall >= 0.9, (
+    # == 1.0, not a floor: ADR-0027's lesson, and since ADR-0030 this key also
+    # scores the weak-RNG taint fixtures.
+    assert result.recall == 1.0, (
         f"JS recall {result.recall:.1%}; missed {result.missed}"
     )
     assert result.precision == 1.0, (
