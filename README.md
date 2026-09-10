@@ -237,14 +237,14 @@ rescore_scan_id=29844d83 parent_scan_id=d3bd3e3d z_years=30 max_score=10
 ```
 
 `--sector`, `--data-class` and `--exposure` are the context that decides
-severity: the same RSA-2048 scores **80/Critical** in a BFSI system holding
-sovereign data on the internet, **78/High** with personal data, and
-**45/Medium** in an internal lab holding public data. Criticality comes from
-context, never from tuning a number — and, since
-[ADR-0017](docs/adr/0017-verified-facts.md), never from a fact nobody checked:
-those 80 points are quantum 40 + Mosca 30 + exposure 10, all verified. The
-India DST deadline is displayed alongside them and scores zero until somebody
-confirms it against the published roadmap.
+severity: the same RSA-2048 scores **98/Critical** in a BFSI system holding
+personal data on the internet, and **45/Medium** in an internal lab holding
+public data. Criticality comes from context, never from tuning a number — and,
+since [ADR-0017](docs/adr/0017-verified-facts.md), never from a fact nobody
+checked. Those 98 points are quantum 40 + Mosca 28 + criticality 20 +
+exposure 10, and every rule behind them names the document and section it was
+confirmed against. Criticality stays reachable from quantum + Mosca + exposure
+alone, so the band never *depends* on the roadmap pack.
 
 A scored component, abbreviated from a real run:
 
@@ -261,14 +261,11 @@ A scored component, abbreviated from a real run:
   },
   "properties": [
     { "name": "ecdat:view",            "value": "declared" },
-    { "name": "ecdat:band",            "value": "High" },
-    { "name": "ecdat:score",           "value": "78" },
+    { "name": "ecdat:band",            "value": "Critical" },
+    { "name": "ecdat:score",           "value": "98" },
     { "name": "ecdat:quantum_status",  "value": "broken" },
-    { "name": "ecdat:deadline",        "value": "2028-12-31" },
-    { "name": "ecdat:deadline_provisional", "value": "true" },
-    { "name": "ecdat:provisional",     "value": "true" },
-    { "name": "ecdat:provisional_rule","value": "dst-cii-priority-migration" },
-    { "name": "ecdat:category_score",  "value": "criticality=0" },
+    { "name": "ecdat:deadline",        "value": "2027-12-31" },
+    { "name": "ecdat:category_score",  "value": "criticality=20" },
     { "name": "ecdat:category_score",  "value": "quantum=40" },
     { "name": "ecdat:fired_rules",     "value": "quantum-shor-broken-asymmetric,dst-cii-priority-migration,..." },
     { "name": "ecdat:x_years",         "value": "25" },
@@ -347,18 +344,18 @@ before believing anything above:
 - **Observed findings carry no endpoint.** A uprobe sees a process, not a
   listening socket, so an observed handshake joins every declared endpoint in a
   system. Unattributable drift is printed as such, scored neither way.
-- **Unverified facts are structurally unscoreable, and some are still
-  unverified.** Every policy rule and library floor carries `verified` +
-  `source`, and **the engine adds nothing to a score from an unverified rule**
-  ([ADR-0017](docs/adr/0017-verified-facts.md)). The India DST deadlines and
-  assurance mapping were supplied verbatim and never checked against the
-  published roadmap, so all four rules are `verified: false`: they still show
-  their labels, deadlines and actions — marked *provisional* — and contribute
-  zero points. **This cost the headline demo number:** the same RSA-2048 in a
-  BFSI/internet/Personal context was 98/Critical and is 78/High, because 20 of
-  those points came from an unchecked fact. Criticality is still reachable from
-  quantum + Mosca + exposure alone. Confirming each fact and flipping its flag
-  restores the score with no code change — that is the point of the mechanism.
+- **Unverified facts are structurally unscoreable — and the DST facts are now
+  verified.** Every policy rule and library floor carries `verified` + `source`,
+  and **the engine adds nothing to a score from an unverified rule**
+  ([ADR-0017](docs/adr/0017-verified-facts.md)). That gate briefly cost the
+  headline demo 20 points, because the India DST deadlines had never been
+  checked. They have since been confirmed against the published roadmap
+  (document, URL and section on every rule), so they score again — and
+  confirming them was a data edit, not a code change. The confirmation also
+  found a real error: the CII sector list had four entries where the roadmap
+  gives seven, so assets in government, strategic and transport estates had
+  been silently under-scoring. **Still unverified:** the GnuTLS, libgcrypt and
+  NSS post-quantum floors, which stay unscored until upstream NEWS is checked.
 - **Policy packs are signed with a committed DEV key.** It proves a pack was
   built by this repo's tooling and nothing about who approved it. Production key
   management is deferred.

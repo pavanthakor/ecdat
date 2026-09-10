@@ -140,33 +140,79 @@ added to the `Scanner` protocol: most plugins are pure Python and have no
 external engine to pin. Versions are collected from the scanners that *ran*, not
 the offered set — a skipped source scanner did not involve semgrep.
 
-## What this cost, measured
+## What this cost, and what confirming it gave back
 
-This is the number the slice exists to surface, so it is recorded here rather
-than in a commit message.
+The mechanism landed with every DST fact demoted, and the cost was immediate
+and measurable: the demo's headline component — RSA-2048, hard-coded, BFSI,
+internet-facing, Personal data — **dropped from 98/Critical to 78/High**,
+because `criticality` went from 20 to 0. **20% of a Critical verdict had been
+resting on a fact nobody had looked up.**
 
-The demo's headline component — RSA-2048, hard-coded, BFSI, internet-facing,
-Personal data — **was 98/Critical and is now 78/High.**
+The roadmap was then read (2026-09-10) and every fact confirmed, so the same
+component is **98/Critical again — and no code changed between those two
+states.** Confirming a fact is a data edit and a `make sign-packs`, which is
+the property the mechanism exists to have.
 
-| category | before | after |
-|---|---|---|
-| quantum | 40 | 40 |
-| mosca | 28 | 28 |
-| exposure | 10 | 10 |
-| **criticality** | **20** | **0** |
-| **total** | **98 (Critical)** | **78 (High)** |
+| category | originally | demoted | confirmed |
+|---|---|---|---|
+| quantum | 40 | 40 | 40 |
+| mosca | 28 | 28 | 28 |
+| exposure | 10 | 10 | 10 |
+| **criticality** | **20** | **0** | **20** |
+| **total** | 98 Critical | **78 High** | **98 Critical** |
 
-**20% of a Critical verdict was resting on a fact nobody had looked up.** The
-2028-12-31 deadline is still displayed, marked provisional, with the two rules
-that produced it named in `ecdat:provisional_rule`.
+`test_confirming_the_dst_facts_restored_the_twenty_points` pins the round trip.
 
-Criticality remains reachable without any DST fact: quantum 40 + mosca 30 +
-exposure 10 = 80, for a Sovereign-classified asset. The headline guard
-`test_the_same_algorithm_is_critical_or_medium_by_context` was rebased onto that
-case and now additionally asserts `criticality == 0`, so it proves the band
-comes from three checked facts and no unchecked one.
-`test_the_personal_case_is_now_high_because_dst_demoted` pins the 78 explicitly,
-so the cost is a tested fact rather than a memory.
+## The DST facts, as confirmed
+
+**Primary source**, cited on every rule by document, URL and section:
+
+> DST/NQM, *"Report on Quantum-Safe Ecosystem in India: Roadmap to Quantum
+> Resiliency"*, May 2026.
+> <https://dst.gov.in/sites/default/files/Quantum-Safe-Ecosystem-in-India.pdf>
+
+| rule | fact | section | scores |
+|---|---|---|---|
+| `dst-cii-foundations-inventory` | CII foundations & cryptographic inventory by **2027-12-31** | Sec. 9.0 | 0 (milestone) |
+| `dst-cii-priority-migration` | CII high-priority migration by **2028-12-31** | Sec. 9.0 | 20 `criticality` |
+| `dst-full-adoption` | Full adoption, all sectors, by **2029-12-31** | Sec. 9.0 | 0 |
+| `dst-aes-128-uplift` | AES-128 → AES-256 symmetric uplift | Sec. 9.0 | 0 |
+| `dst-assurance-software-l2a` | **L2A = software security assurance** | Sec. 6.0 / Annexure B Table 1 | 0 |
+
+### A correction the confirmation found
+
+The first encoding listed **four** CII sectors: defence, power, telecom, BFSI.
+The roadmap gives **seven**: government, strategic, defence, power, telecom,
+transport, BFSI. Reading the source is what found it.
+
+This was the *silent* kind of error. A wrong deadline is at least visible in
+the output; a missing sector produced no error anywhere — an asset in a
+government or transport estate simply fell through to `sector: other`, never
+fired the CII rule, and under-scored by 20 points with nothing to indicate it.
+
+`core.scanner.Sector` was widened to match (and `policy.apply`, `cli.py`,
+`api/app.py` with it). **A sector a pack names that a `Target` cannot carry is
+a dead rule branch** — the closed `Literal` meant three of the seven would have
+been unmatchable, and the correction decorative.
+`test_every_roadmap_cii_sector_is_expressible_and_scores` parametrises over all
+seven and asserts each both constructs a `Target` and earns the 20 points.
+
+### A consequence worth stating
+
+Adding the 2027 milestone moves the reported `ecdat:deadline` for CII assets
+from 2028-12-31 to **2027-12-31**, because that field is documented as *the
+earliest any rule demands* and the foundations milestone genuinely is earlier.
+The 2028 migration date is still carried in the action text of the rule it
+belongs to. This is arguably the more useful headline: the first obligation a
+CII operator faces is to have an inventory, and a CBOM is what discharges it.
+
+### Still unverified
+
+`knowledge/libraries.yaml`: the GnuTLS, libgcrypt and NSS `pqc_capable_from`
+floors remain `verified: false` with `FILL:` markers, because upstream NEWS has
+not been checked. They stay unscored, which is the mechanism working as
+intended on the facts that genuinely remain open. OpenSSL 3.5.0 is verified
+against its release announcement and CHANGES.md.
 
 ## Consequences
 
@@ -185,22 +231,21 @@ so the cost is a tested fact rather than a memory.
 
 **Costs and limits, stated plainly.**
 
-- **The demo number went down**, and the India-roadmap pillar currently
-  contributes labels and deadlines rather than score. That is the correct state
-  of affairs and it is temporary: it is one afternoon with the published roadmap
-  away from being restored. It should be said out loud in any demo — the pack
-  demonstrates the *mechanism* for roadmap compliance, and the specific dates
-  await confirmation.
+- **The demo number went down and then came back**, which is the strongest
+  evidence the mechanism does what it claims. It also means the DST pack's 20
+  points now rest on one person having read one PDF once — see the next point.
 - **`verified: true` is an assertion by whoever edits the pack.** Nothing checks
   that the `source` string describes a real document, or that the person read
   it. The gate raises the cost of an unchecked fact from "say nothing" to "write
   a specific false citation and sign the pack"; it does not make lying
   impossible. A second reviewer, or a verification date and verifier identity
   per fact, would be the next increment.
-- **`dst-aes-128-uplift` is marked unverified too**, though its substance
-  (Grover halves AES-128) is verified elsewhere. Its primary citation is the DST
-  symmetric-uplift guidance, which is unchecked like the rest of the pack. It
-  scores 0 either way, so the conservative default costs nothing.
+- **The confirmation itself is unwitnessed.** One person read the roadmap on
+  2026-09-10 and wrote down the sections. Nothing records WHO, and nothing lets
+  a second reader countersign. For a pack that now contributes 20 points to
+  every CII verdict, a verifier identity and date per fact is the obvious next
+  increment — and it needs the production signing story (ADR-0007) to mean
+  anything, since the dev key proves only that this repo's tooling signed it.
 - **Pinning semgrep exactly will cause friction.** A `pip install -r` on a
   machine with a different semgrep now downgrades it. That is the intended
   trade: reproducibility over convenience, with the mismatch path kept

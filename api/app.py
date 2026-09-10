@@ -65,7 +65,16 @@ class TargetIn(BaseModel):
     data_class: str | None = None
     #: Which sector this target serves. Drives the DST roadmap's earlier
     #: critical-information-infrastructure deadline.
-    sector: Literal["defence", "power", "telecom", "bfsi", "other"] = "other"
+    sector: Literal[
+        "government",
+        "strategic",
+        "defence",
+        "power",
+        "telecom",
+        "transport",
+        "bfsi",
+        "other",
+    ] = "other"
     #: How reachable the target is. Feeds blast-radius prioritisation.
     exposure: Literal["internet", "internal", "build", "unknown"] = "unknown"
     #: Years until a cryptographically relevant quantum computer. A global
@@ -264,7 +273,19 @@ class FixIn(BaseModel):
     """
 
     scanners: list[str] | None = None
-    sector: Literal["defence", "power", "telecom", "bfsi", "other"] | None = None
+    sector: (
+        Literal[
+            "government",
+            "strategic",
+            "defence",
+            "power",
+            "telecom",
+            "transport",
+            "bfsi",
+            "other",
+        ]
+        | None
+    ) = None
     exposure: Literal["internet", "internal", "build", "unknown"] | None = None
     z_years: int | None = Field(default=None, ge=0, le=100)
 

@@ -107,14 +107,18 @@
   of a large legacy database slower than every open after it. Fine at current
   scale; wants batching if a database ever holds thousands of scans.
   *Raised: store migration.*
-- **`verified: true` is an assertion by whoever edits the pack.** Nothing
-  checks that a rule's `source` names a real document, or that anybody read it.
-  ADR-0017 raises the cost of an unchecked fact from "say nothing" to "write a
-  specific false citation and sign the pack" — it does not make lying
-  impossible. A verification DATE and verifier identity per fact, plus a second
-  reviewer, is the next increment; it needs the production signing story
-  (ADR-0007's dev-key entry above) to mean anything.
-  *Raised: verified-fact slice.*
+- **`verified: true` is an assertion by whoever edits the pack, and the DST
+  confirmation is UNWITNESSED.** Nothing checks that a rule's `source` names a
+  real document, or that anybody read it; nothing records WHO confirmed it or
+  WHEN, and nothing lets a second reader countersign. One person read the
+  roadmap on 2026-09-10 and wrote down the sections, and the DST pack now
+  contributes 20 points to every CII verdict on that basis. ADR-0017 raises the
+  cost of an unchecked fact from "say nothing" to "write a specific false
+  citation and sign the pack" — it does not make lying impossible. A verifier
+  identity and verification date per fact, plus a second reviewer, is the
+  obvious next increment; it needs the production signing story (the dev-key
+  entry above) to mean anything.
+  *Raised: verified-fact slice. Sharpened: DST confirmation.*
 - **Provisional status is not surfaced in the dashboard.** `ecdat:provisional`,
   `ecdat:provisional_rule` and `ecdat:deadline_provisional` are on the
   components and the API serves them, but no view says "this deadline is
@@ -194,17 +198,16 @@
   image will want a spooled temporary file under `ctx.scratch_dir`.
   *Raised: Scanner C slice.*
 - **GnuTLS and libgcrypt PQC capability is unverified — MECHANISM BUILT,
-  values await human confirmation.** `knowledge/libraries.yaml` entries now
-  carry `pqc_capable_verified` and `pqc_capable_source`, and
-  `_is_pqc_capable()` returns `None` for an unverified floor — so filling in a
-  plausible version WITHOUT confirming it produces no `pqc_capable` parameter
-  at all, rather than a drift verdict nobody checked (ADR-0017). GnuTLS,
-  libgcrypt and NSS are `verified: false` with `FILL:` markers naming the
-  upstream NEWS file that would settle each; OpenSSL 3.5.0 is `verified: true`
-  against its release announcement and CHANGES.md, which is the one the drift
-  demo depends on.
-  **REMAINING WORK IS A DATA FILL:** confirm each floor against upstream NEWS,
-  then set the version and the flag together.
+  values STILL await confirmation.** The one remaining data fill. Entries carry
+  `pqc_capable_verified` / `pqc_capable_source`, and `_is_pqc_capable()`
+  returns `None` for an unverified floor, so a version filled in WITHOUT a
+  confirmed source produces no `pqc_capable` parameter rather than a drift
+  verdict nobody checked (ADR-0017). GnuTLS, libgcrypt and NSS are
+  `verified: false` with `FILL:` markers naming the upstream NEWS that would
+  settle each; OpenSSL 3.5.0 is verified against its release announcement and
+  CHANGES.md, which is the one the drift demo depends on.
+  **REMAINING WORK:** check GnuTLS NEWS (3.8.x), libgcrypt NEWS (1.11) and the
+  Mozilla NSS release notes, then set the version and the flag together.
   *Raised: Scanner C slice. Mechanism: verified-fact slice, see
   [ADR-0017](docs/adr/0017-verified-facts.md).*
 - **`libssl3` and `libcrypto3` are inventoried as two components.** They are
@@ -261,23 +264,26 @@
   Acceptable while `quantum` is the only pack defining the field; revisit if a
   second pack wants its own status vocabulary.
   *Raised: policy engine slice.*
-- **The India DST deadlines and assurance mapping are unverified —
-  MECHANISM BUILT, values await human confirmation.** No longer a scoring risk:
-  ADR-0017 gives every rule a `verified` flag and **the engine adds nothing to
-  a score from an unverified rule**. All four DST rules are `verified: false`,
-  so the 2028-12-31 CII deadline, the 2029-12-31 full-adoption deadline, the
-  CII sector list and the `assurance:L2A` mapping now contribute labels,
-  deadlines and actions — each marked provisional — and ZERO points.
-  **Measured cost:** the demo's headline RSA-2048 (BFSI/internet/Personal) went
-  from 98/Critical to 78/High, because `criticality` dropped from 20 to 0.
-  20% of a Critical verdict had been resting on an unchecked fact.
-  **REMAINING WORK IS A DATA FILL, not code:** look each fact up in the
-  published DST/NQM roadmap, replace the `FILL:` marker in that rule's
-  `source` with the document, version and section confirmed, set
-  `verified: true`, and run `make sign-packs`. Hardware, key-management and CA
-  assurance levels remain deliberately absent rather than guessed.
-  *Raised: mosca/DST/NIST slice. Mechanism: verified-fact slice, see
-  [ADR-0017](docs/adr/0017-verified-facts.md).*
+- ~~**The India DST deadlines and assurance mapping are unverified.**~~
+  **Resolved.** The roadmap was read (2026-09-10) and every DST fact confirmed
+  against the primary source — DST/NQM *"Report on Quantum-Safe Ecosystem in
+  India: Roadmap to Quantum Resiliency"*, May 2026,
+  <https://dst.gov.in/sites/default/files/Quantum-Safe-Ecosystem-in-India.pdf>
+  — with the document, URL and section on every rule: Sec. 9.0 for the 2027
+  foundations/inventory, 2028 CII migration and 2029 full-adoption dates, the
+  seven CII sectors and the AES uplift; Sec. 6.0 / Annexure B Table 1 for
+  L2A = software security assurance. They score again, and **no code changed**
+  to make that happen (ADR-0017).
+  **The confirmation found a real error:** the CII sector list had FOUR entries
+  and the roadmap gives SEVEN — government, strategic and transport were
+  missing. That was the silent kind of mistake: those targets fell through to
+  `sector: other`, never fired the CII rule, and under-scored by 20 points with
+  nothing to indicate it. `core.scanner.Sector` was widened to match, since a
+  sector a pack names that a `Target` cannot carry is a dead rule branch.
+  Hardware, key-management and CA assurance levels remain deliberately absent
+  rather than guessed.
+  *Raised: mosca/DST/NIST slice. Mechanism: verified-fact slice. Confirmed:
+  2026-09-10, see [ADR-0017](docs/adr/0017-verified-facts.md).*
 - **The Y (migration time) model is crude.** `Y = 3 years, +2 if hard-coded` is
   a two-value heuristic derived from one bit of information. Real migration time
   depends on blast radius, test coverage, deployment cadence, vendor

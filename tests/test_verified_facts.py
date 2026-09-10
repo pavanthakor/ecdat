@@ -48,13 +48,33 @@ DEV_PRIVATE_KEY = Path("policy/keys/dev/pack-signing.key")
 PACK_DIR = Path("policy/packs")
 KNOWLEDGE_DIR = Path("knowledge")
 
-#: The four DST facts that were never checked against the published roadmap.
-UNVERIFIED_DST_RULES = frozenset(
+#: The DST facts, now CONFIRMED against the primary source (see ADR-0017).
+#: The roadmap was looked up, each rule carries the document and section it was
+#: checked against, and they score again -- which is what the mechanism was
+#: built to make possible without a code change.
+VERIFIED_DST_RULES = frozenset(
     {
+        "dst-cii-foundations-inventory",
         "dst-cii-priority-migration",
         "dst-full-adoption",
+        "dst-aes-128-uplift",
         "dst-assurance-software-l2a",
     }
+)
+
+#: The primary source every DST fact is now cited to.
+DST_SOURCE = "Quantum-Safe Ecosystem in India"
+
+#: The CII sector list as the roadmap actually gives it. The first encoding
+#: omitted government, strategic and transport.
+CII_SECTORS = (
+    "government",
+    "strategic",
+    "defence",
+    "power",
+    "telecom",
+    "transport",
+    "bfsi",
 )
 
 
@@ -290,17 +310,119 @@ def rules_of(packs: list[Pack]) -> dict[str, Any]:
     return {rule.id: rule for pack in packs for rule in pack.rules}
 
 
-def test_the_unchecked_dst_facts_are_marked_unverified(packs: list[Pack]) -> None:
-    """These were supplied verbatim, never checked against the published text."""
-    rules = rules_of(packs)
-    for rule_id in UNVERIFIED_DST_RULES:
-        assert rules[rule_id].verified is False, rule_id
-
-
-def test_every_unverified_rule_says_what_to_check_it_against(
+def test_the_dst_facts_are_now_verified_against_the_primary_source(
     packs: list[Pack],
 ) -> None:
-    """A demoted fact carries a FILL marker, so the work is not lost."""
+    """The mechanism's payoff: a data fill, no code change, and they score.
+
+    Each rule names the published roadmap PDF and the section it was confirmed
+    against, so the claim is auditable rather than asserted.
+    """
+    rules = rules_of(packs)
+    for rule_id in VERIFIED_DST_RULES:
+        rule = rules[rule_id]
+        assert rule.verified is True, rule_id
+        assert rule.source is not None
+        assert DST_SOURCE in rule.source, rule_id
+        assert "dst.gov.in" in rule.source, rule_id
+        assert "Section" in rule.source, rule_id
+
+
+def test_no_shipped_policy_rule_is_still_unverified(packs: list[Pack]) -> None:
+    """Every fact in every pack has now been looked up."""
+    unverified = sorted(r.id for r in rules_of(packs).values() if not r.verified)
+
+    assert unverified == []
+
+
+def test_the_cii_sector_list_matches_the_roadmap(packs: list[Pack]) -> None:
+    """The correction: government, strategic and transport were missing.
+
+    A sector the roadmap names and ECDAT omits is a CII operator whose assets
+    quietly score lower than they should -- the omission is silent in exactly
+    the way a wrong deadline is not.
+    """
+    rule = rules_of(packs)["dst-cii-priority-migration"]
+
+    assert set(rule.when["sector"]["in"]) == set(CII_SECTORS)
+
+
+@pytest.mark.parametrize("sector", CII_SECTORS)
+def test_every_roadmap_cii_sector_is_expressible_and_scores(
+    packs: list[Pack], sector: str
+) -> None:
+    """A sector in the pack that a Target cannot carry is a dead rule branch.
+
+    `Sector` is a closed Literal, so widening the pack's list without widening
+    the vocabulary would leave three of the seven unmatchable.
+    """
+    from core.scanner import Target
+
+    target = Target(kind="repo", ref="/srv/x", sector=sector)  # type: ignore[arg-type]
+    assert target.sector == sector
+
+    scored = json.loads(
+        apply_policy(
+            json.dumps({"components": [rsa_component()]}),
+            packs,
+            inputs=ScoreInputs(
+                data_class="Personal",
+                sector=sector,
+                exposure="internet",
+                knowledge_dir=KNOWLEDGE_DIR,
+            ),
+        )
+    )
+    values = {p["name"]: p["value"] for p in scored["components"][0]["properties"]}
+    categories = dict(
+        entry.split("=", 1)
+        for entry in [
+            p["value"]
+            for p in scored["components"][0]["properties"]
+            if p["name"] == "ecdat:category_score"
+        ]
+    )
+
+    assert categories["criticality"] == "20", sector
+    assert values["ecdat:band"] == "Critical", sector
+
+
+def test_a_non_cii_sector_still_does_not_get_the_criticality_points(
+    packs: list[Pack],
+) -> None:
+    """The widened list must not have become "everything"."""
+    scored = json.loads(
+        apply_policy(
+            json.dumps({"components": [rsa_component()]}),
+            packs,
+            inputs=ScoreInputs(
+                data_class="Personal",
+                sector="other",
+                exposure="internet",
+                knowledge_dir=KNOWLEDGE_DIR,
+            ),
+        )
+    )
+    categories = dict(
+        entry.split("=", 1)
+        for entry in [
+            p["value"]
+            for p in scored["components"][0]["properties"]
+            if p["name"] == "ecdat:category_score"
+        ]
+    )
+
+    assert categories["criticality"] == "0"
+
+
+def test_any_unverified_rule_would_say_what_to_check_it_against(
+    packs: list[Pack],
+) -> None:
+    """Holds vacuously today; the invariant outlives the current pack set.
+
+    The next unconfirmed fact somebody adds must carry its FILL marker, and
+    this is what will say so.
+    """
     for rule in rules_of(packs).values():
         if rule.verified:
             continue
@@ -338,8 +460,10 @@ def test_shor_broken_rsa_still_scores_forty(packs: list[Pack]) -> None:
     assert verdict.categories.get("quantum") == 40
 
 
-def test_the_dst_deadline_is_still_shown_but_provisional(packs: list[Pack]) -> None:
-    """The demo still says 2028-12-31 -- it just no longer scores on it."""
+def test_the_dst_deadline_now_scores_because_it_is_verified(
+    packs: list[Pack],
+) -> None:
+    """The round trip closes: confirmed fact -> live score, no code change."""
     component = rsa_component()
     scored = json.loads(
         apply_policy(
@@ -357,25 +481,25 @@ def test_the_dst_deadline_is_still_shown_but_provisional(packs: list[Pack]) -> N
     for prop in scored["components"][0]["properties"]:
         values.setdefault(prop["name"], []).append(prop["value"])
 
-    assert values["ecdat:deadline"] == ["2028-12-31"]
-    assert values["ecdat:provisional"] == ["true"]
-    assert "dst-cii-priority-migration" in values["ecdat:provisional_rule"]
-    assert values["ecdat:deadline_provisional"] == ["true"]
-    # The criticality category contributed nothing, because every rule in it is
-    # currently unverified.
+    # The EARLIEST roadmap obligation on a CII asset is the 2027 foundations
+    # and inventory milestone, not the 2028 migration one.
+    assert values["ecdat:deadline"] == ["2027-12-31"]
+    assert "ecdat:provisional" not in values
+    assert "ecdat:deadline_provisional" not in values
     categories = dict(
         entry.split("=", 1) for entry in values.get("ecdat:category_score", [])
     )
-    assert categories.get("criticality", "0") == "0"
+    assert categories["criticality"] == "20"
 
 
-def test_criticality_is_still_reachable_without_any_dst_fact(
+def test_criticality_is_reachable_without_any_dst_fact(
     packs: list[Pack],
 ) -> None:
-    """quantum 40 + mosca 30 + exposure 10 = 80. Critical, with DST scoring nil.
+    """quantum 40 + mosca 30 + exposure 10 = 80. Critical with NO DST points.
 
-    This is the claim the demotion has to survive: the band must come from
-    facts we actually checked.
+    Kept from the demotion slice deliberately. The DST facts score again, but
+    the band must never DEPEND on them: `sector: other` gets no criticality
+    points and must still reach Critical on the three checked dimensions.
     """
     scored = json.loads(
         apply_policy(
@@ -383,14 +507,23 @@ def test_criticality_is_still_reachable_without_any_dst_fact(
             packs,
             inputs=ScoreInputs(
                 data_class="Sovereign",
-                sector="bfsi",
+                sector="other",
                 exposure="internet",
                 knowledge_dir=KNOWLEDGE_DIR,
             ),
         )
     )
     values = {p["name"]: p["value"] for p in scored["components"][0]["properties"]}
+    categories = dict(
+        entry.split("=", 1)
+        for entry in [
+            p["value"]
+            for p in scored["components"][0]["properties"]
+            if p["name"] == "ecdat:category_score"
+        ]
+    )
 
+    assert categories["criticality"] == "0"
     assert values["ecdat:band"] == "Critical"
     assert int(values["ecdat:score"]) >= 80
 

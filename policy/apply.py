@@ -54,7 +54,17 @@ __all__ = [
     "verdict_properties",
 ]
 
-Sector = Literal["defence", "power", "telecom", "bfsi", "other"]
+#: Mirrors core.scanner.Sector; the seven roadmap CII sectors plus `other`.
+Sector = Literal[
+    "government",
+    "strategic",
+    "defence",
+    "power",
+    "telecom",
+    "transport",
+    "bfsi",
+    "other",
+]
 Exposure = Literal["internet", "internal", "build", "unknown"]
 
 #: Z -- years until a cryptographically relevant quantum computer.

@@ -36,8 +36,24 @@ TargetKind = Literal["repo", "directory", "image", "host", "endpoint", "spool"]
 
 #: Which part of the estate this target belongs to. Drives the India DST
 #: roadmap's critical-information-infrastructure deadlines, which are earlier
-#: for defence, power, telecom and BFSI than for everything else.
-Sector = Literal["defence", "power", "telecom", "bfsi", "other"]
+#: for critical information infrastructure than for everything else.
+#:
+#: The seven CII sectors are the roadmap's own list (DST/NQM "Report on
+#: Quantum-Safe Ecosystem in India", May 2026, Sec. 9.0). ECDAT's first
+#: encoding carried only four of them; government, strategic and transport were
+#: missing, which silently under-scored every asset in those sectors. A sector
+#: the roadmap names and this vocabulary omits is not a gap somebody notices --
+#: the target simply falls through to `other` and the CII rule never fires.
+Sector = Literal[
+    "government",
+    "strategic",
+    "defence",
+    "power",
+    "telecom",
+    "transport",
+    "bfsi",
+    "other",
+]
 
 #: How reachable this target is. Feeds blast-radius prioritisation: the same
 #: algorithm on an internet-facing service is collectable today in a way the

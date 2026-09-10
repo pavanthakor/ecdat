@@ -53,7 +53,16 @@ TARGET_KINDS: tuple[TargetKind, ...] = (
     "spool",
 )
 
-SECTORS: tuple[Sector, ...] = ("defence", "power", "telecom", "bfsi", "other")
+SECTORS: tuple[Sector, ...] = (
+    "government",
+    "strategic",
+    "defence",
+    "power",
+    "telecom",
+    "transport",
+    "bfsi",
+    "other",
+)
 EXPOSURES: tuple[Exposure, ...] = ("internet", "internal", "build", "unknown")
 
 

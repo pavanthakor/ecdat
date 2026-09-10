@@ -5,34 +5,34 @@
 # pillar -- India roadmap compliance -- something a scan can answer.
 #
 # ---------------------------------------------------------------------------
-# VERIFICATION STATUS -- every rule in this pack is currently PROVISIONAL
+# VERIFICATION STATUS -- CONFIRMED against the primary source (2026-09-10)
 # ---------------------------------------------------------------------------
-# The DEADLINES (2028-12-31 for critical information infrastructure,
-# 2029-12-31 for full adoption), the CII sector list, and the L2A assurance
-# label were supplied to ECDAT as roadmap requirements and encoded verbatim.
-# They have NOT been checked line by line against the published DST/NQM roadmap
-# text. They are structurally right -- a phased CII-first migration with a
-# later full-adoption date is exactly the shape such roadmaps take -- but
-# "structurally right" is not "confirmed".
+# Every rule in this pack is `verified: true` and cites the published roadmap
+# by document, URL and section:
 #
-# THIS IS NOW MECHANICAL, NOT ADVISORY (ADR-0017). Every rule below carries
-# `verified: false`, and the engine adds NOTHING to a score from an unverified
-# rule. So this pack currently contributes:
+#   DST/NQM "Report on Quantum-Safe Ecosystem in India: Roadmap to Quantum
+#   Resiliency", May 2026
+#   https://dst.gov.in/sites/default/files/Quantum-Safe-Ecosystem-in-India.pdf
 #
-#   * its labels, deadlines and actions -- DISPLAYED, each marked provisional;
-#   * exactly ZERO points.
+#   Sec. 9.0  -- the phased timetable (2027 foundations/inventory, 2028
+#                high-priority CII migration, 2029 full adoption), the seven
+#                CII sectors, and the AES-128 -> AES-256 symmetric uplift.
+#   Sec. 6.0 / Annexure B Table 1 -- assurance level L2A = software security
+#                assurance.
 #
-# The `criticality` category therefore reports 0 while this file stands as it
-# is. That cost the demo's headline component 20 of its 98 points -- it is
-# 78/High rather than 98/Critical -- which is the correct number, and a
-# measure of how much was resting on an unchecked fact.
+# CORRECTION MADE ON CONFIRMATION. The first encoding of the CII sector list
+# had four entries (defence, power, telecom, BFSI). The roadmap gives SEVEN:
+# government, strategic, defence, power, telecom, transport and BFSI. Reading
+# the source is what found it, and the omission was the silent kind -- an asset
+# in a government or transport estate simply fell through to `other` and never
+# fired the CII rule, so it under-scored with no error anywhere. `Sector` in
+# core/scanner.py was widened to match; a sector this pack names that a Target
+# cannot carry is a dead rule branch.
 #
-# TO RESTORE SCORING: look each fact up in the published roadmap, replace the
-# `FILL:` marker in that rule's `source` with the document, version and
-# section confirmed, set `verified: true`, and re-sign the pack
-# (`make sign-packs`). No code change is needed; the mechanism is what gates
-# the fact. Tracked in PUNCHLIST as a data-fill task.
-#
+# These rules therefore SCORE again (ADR-0017): the engine adds a contribution
+# only from a verified rule, and confirming the facts is what turned them back
+# on -- no code change, exactly as the mechanism intends.
+
 # ASSURANCE LEVELS. Only the software mapping is encoded (library / module /
 # service -> L2A). Hardware, key-management and certificate-authority assurance
 # levels are deliberately ABSENT rather than guessed: an invented assurance
@@ -57,8 +57,11 @@ rules:
   # second pass, after the quantum pack has decided. See ADR-0008.
   - id: dst-cii-priority-migration
     when:
+      # The roadmap's own seven CII sectors (Sec. 9.0). The first encoding of
+      # this pack carried only four: government, strategic and transport were
+      # missing, which silently under-scored every asset in them.
       sector:
-        in: [defence, power, telecom, bfsi]
+        in: [government, strategic, defence, power, telecom, transport, bfsi]
       quantum_status: broken
     effect:
       score: 20
@@ -70,14 +73,46 @@ rules:
         ahead of the general timetable. The CII deadline is 2028-12-31, a full
         year before general full adoption.
     citation: >-
-      DST/NQM roadmap (May 2026): quantum-vulnerable cryptography in critical
-      information infrastructure -- defence, power, telecom and BFSI -- carries
-      the earlier 2028 migration deadline.
-    verified: false
+      DST/NQM roadmap (May 2026) Sec. 9.0: quantum-vulnerable cryptography in
+      critical information infrastructure -- government, strategic, defence,
+      power, telecom, transport and BFSI -- carries the earlier 2028
+      high-priority migration deadline.
+    verified: true
     source: >-
-      FILL: confirm against the published DST / National Quantum Mission
-      post-quantum migration roadmap text, then set verified: true and replace
-      this marker with the document, version and section confirmed.
+      DST/NQM "Report on Quantum-Safe Ecosystem in India: Roadmap to Quantum
+      Resiliency", May 2026,
+      https://dst.gov.in/sites/default/files/Quantum-Safe-Ecosystem-in-India.pdf,
+      Section 9.0
+
+  # The EARLIEST obligation on a CII operator, and the one ECDAT itself
+  # discharges: you cannot migrate what you have not inventoried. Scores 0 --
+  # it is a milestone, not extra risk in the asset -- but it dates the work.
+  - id: dst-cii-foundations-inventory
+    when:
+      sector:
+        in: [government, strategic, defence, power, telecom, transport, bfsi]
+      quantum_status: broken
+    effect:
+      score: 0
+      category: criticality
+      deadline: 2027-12-31
+      labels: [CII, dst-cii-foundations]
+      action: >-
+        Critical information infrastructure: cryptographic discovery and
+        inventory foundations must be complete by 2027-12-31, a year before the
+        high-priority migration deadline. A CBOM for this system is the
+        deliverable that discharges it.
+    citation: >-
+      DST/NQM roadmap (May 2026) Sec. 9.0: the phased timetable places
+      foundations and cryptographic inventory for critical information
+      infrastructure at end-2027, ahead of the 2028 high-priority migration
+      milestone.
+    verified: true
+    source: >-
+      DST/NQM "Report on Quantum-Safe Ecosystem in India: Roadmap to Quantum
+      Resiliency", May 2026,
+      https://dst.gov.in/sites/default/files/Quantum-Safe-Ecosystem-in-India.pdf,
+      Section 9.0
 
   - id: dst-full-adoption
     when:
@@ -93,11 +128,12 @@ rules:
     citation: >-
       DST/NQM roadmap (May 2026): full adoption of post-quantum cryptography
       across all sectors by end-2029.
-    verified: false
+    verified: true
     source: >-
-      FILL: confirm against the published DST / National Quantum Mission
-      post-quantum migration roadmap text, then set verified: true and replace
-      this marker with the document, version and section confirmed.
+      DST/NQM "Report on Quantum-Safe Ecosystem in India: Roadmap to Quantum
+      Resiliency", May 2026,
+      https://dst.gov.in/sites/default/files/Quantum-Safe-Ecosystem-in-India.pdf,
+      Section 9.0
 
   - id: dst-aes-128-uplift
     when:
@@ -115,11 +151,12 @@ rules:
     citation: >-
       DST/NQM roadmap (May 2026) symmetric-key uplift guidance; NIST IR 8547
       ipd Sec. 3 for the Grover halving; FIPS 197 for the key sizes.
-    verified: false
+    verified: true
     source: >-
-      FILL: confirm against the published DST / National Quantum Mission
-      post-quantum migration roadmap text, then set verified: true and replace
-      this marker with the document, version and section confirmed.
+      DST/NQM "Report on Quantum-Safe Ecosystem in India: Roadmap to Quantum
+      Resiliency", May 2026,
+      https://dst.gov.in/sites/default/files/Quantum-Safe-Ecosystem-in-India.pdf,
+      Section 9.0
 
   - id: dst-assurance-software-l2a
     when:
@@ -133,8 +170,9 @@ rules:
       DST/NQM roadmap (May 2026) assurance-level mapping for software
       cryptographic assets. Only the software mapping is encoded; hardware,
       key-management and CA levels are deliberately not guessed.
-    verified: false
+    verified: true
     source: >-
-      FILL: confirm against the published DST / National Quantum Mission
-      post-quantum migration roadmap text, then set verified: true and replace
-      this marker with the document, version and section confirmed.
+      DST/NQM "Report on Quantum-Safe Ecosystem in India: Roadmap to Quantum
+      Resiliency", May 2026,
+      https://dst.gov.in/sites/default/files/Quantum-Safe-Ecosystem-in-India.pdf,
+      Section 6.0 / Annexure B Table 1

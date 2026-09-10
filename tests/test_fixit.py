@@ -54,14 +54,15 @@ BFSI: dict[str, Any] = {
     "exposure": "internet",
 }
 
-#: The context in which an introduced RSA-2048 genuinely reaches Critical.
+#: The context in which an introduced RSA-2048 reaches Critical WITHOUT relying
+#: on the India DST pack.
 #:
-#: `pii` used to be enough: it scored 98, of which 20 came from the India DST
-#: pack. ADR-0017 demoted those unverified facts to zero, so `pii` now lands at
-#: 78/High and would no longer exercise the new-Critical rejection at all. A
-#: 50-year data lifetime reaches 80 on quantum 40 + mosca 30 + exposure 10 --
-#: three checked facts. The blast-radius gate is unchanged; what changed is
-#: that fewer things are Critical now, which is the whole point of the gate.
+#: `pii` would work today -- it scores 98, of which 20 come from DST. But that
+#: makes the blast-radius test depend on a roadmap pack whose facts have
+#: already been demoted once (ADR-0017) and could be again if the roadmap is
+#: revised. A 50-year data lifetime reaches 80 on quantum 40 + mosca 30 +
+#: exposure 10, all standards facts, so this test keeps exercising the gate
+#: whatever happens to the DST pack.
 SOVEREIGN: dict[str, Any] = {**BFSI, "data_class": "Sovereign"}
 
 
