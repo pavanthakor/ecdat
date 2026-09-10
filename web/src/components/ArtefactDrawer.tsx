@@ -6,15 +6,27 @@
  * claim), WHY it scored what it did, whether the views DISAGREE, and what to
  * do about it. Provenance rides on the score section, because that is where a
  * reader is deciding whether to believe a number.
+ *
+ * The fix comes from the artefact itself on a `kind: "fix"` row, or from
+ * `GET /scans/{id}/fixes` otherwise. "Not loaded", "failed to load" and "no
+ * fix proposed" are three different sentences here, never one.
  */
-import type { Artefact } from "@/api/types";
+import type { Artefact, FixEntry } from "@/api/types";
 import { BAND_STYLE, cn } from "@/lib/format";
+import { hrefFor } from "@/lib/router";
+import { targetOf } from "@/state/metrics";
 import { FactList, ProvenanceBadge } from "./Provenance";
 import { Sheet, SheetContent } from "./ui/sheet";
+
+export type FixLookup =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "loaded"; entry: FixEntry | null };
 
 interface Props {
   artefact: Artefact | null;
   onClose: () => void;
+  fixLookup?: FixLookup;
 }
 
 function Section({
@@ -39,20 +51,71 @@ function Section({
   );
 }
 
-export function ArtefactDrawer({ artefact, onClose }: Props) {
+/** A rendered unified diff. `+`/`-` colour is git's convention, not severity. */
+export function DiffBlock({ diff }: { diff: string }) {
+  return (
+    <pre className="mt-2 overflow-x-auto border border-line bg-ground p-2 font-mono text-2xs leading-relaxed">
+      {diff.split("\n").map((line, index) => (
+        <div
+          key={index}
+          className={
+            line.startsWith("+++") || line.startsWith("---")
+              ? "text-ink-dim"
+              : line.startsWith("+")
+                ? "text-emerald-400"
+                : line.startsWith("-")
+                  ? "text-critical"
+                  : "text-ink-faint"
+          }
+        >
+          {line || " "}
+        </div>
+      ))}
+    </pre>
+  );
+}
+
+function FixBlock({ fix }: { fix: NonNullable<Artefact["fix"]> }) {
+  return (
+    <div
+      className={cn(
+        "border px-2.5 py-2",
+        fix.verified ? "border-line bg-raised" : "border-dashed border-ink-faint/60",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-2xs text-ink">{fix.template}</span>
+        <span
+          className={cn(
+            "text-2xs uppercase tracking-wide",
+            fix.verified ? "text-ink-dim" : "text-ink-faint",
+          )}
+        >
+          {fix.verified ? "verified" : "not verified"}
+        </span>
+      </div>
+      <p className="mt-1 text-2xs leading-relaxed text-ink-faint">{fix.reason}</p>
+      {fix.verified && fix.diff ? <DiffBlock diff={fix.diff} /> : null}
+    </div>
+  );
+}
+
+function configurableText(value: boolean | null): string {
+  if (value === null) return "not assessed";
+  return value ? "yes — by configuration" : "no — fixed in code";
+}
+
+export function ArtefactDrawer({ artefact, onClose, fixLookup }: Props) {
   if (!artefact) return null;
   const style = BAND_STYLE[artefact.band];
+  const lookedUp = fixLookup?.status === "loaded" ? fixLookup.entry : null;
+  const fix = artefact.fix ?? (lookedUp ? { ...lookedUp } : null);
 
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
       <SheetContent title={artefact.name} description={artefact.bomRef}>
         <div className="mb-5 flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "flex items-baseline gap-2 border px-2.5 py-1",
-              style.bg,
-            )}
-          >
+          <span className={cn("flex items-baseline gap-2 border px-2.5 py-1", style.bg)}>
             <span className={cn("font-mono text-lg tabular-nums", style.text)}>
               {artefact.score}
             </span>
@@ -70,18 +133,21 @@ export function ArtefactDrawer({ artefact, onClose }: Props) {
 
         <div className="mb-5 grid grid-cols-2 gap-px border border-line bg-line text-xs sm:grid-cols-3">
           {[
-            ["view", artefact.view],
+            ["views", artefact.views.join(", ")],
             ["asset type", artefact.assetType],
             ["usage", artefact.usage],
             ["primitive", artefact.primitive ?? "—"],
             ["endpoint", artefact.endpoint ?? "—"],
             ["coverage", artefact.coverageViews.join(", ") || "—"],
+            ["configurable", configurableText(artefact.configurable)],
+            ["pqc target", targetOf(artefact) ?? "no target labelled"],
+            ["deadline", artefact.deadline ?? "none"],
           ].map(([label, value]) => (
             <div key={label} className="bg-panel px-2.5 py-1.5">
-              <div className="text-2xs uppercase tracking-wide text-ink-faint">
-                {label}
+              <div className="text-2xs uppercase tracking-wide text-ink-faint">{label}</div>
+              <div className="truncate font-mono text-ink-dim" title={value}>
+                {value}
               </div>
-              <div className="truncate font-mono text-ink-dim">{value}</div>
             </div>
           ))}
         </div>
@@ -101,9 +167,7 @@ export function ArtefactDrawer({ artefact, onClose }: Props) {
                     {occurrence.scanner || occurrence.view}
                   </span>
                 </div>
-                <div className="mt-1 font-mono text-2xs text-ink-faint">
-                  {occurrence.detail}
-                </div>
+                <div className="mt-1 font-mono text-2xs text-ink-faint">{occurrence.detail}</div>
                 {occurrence.snippet ? (
                   <pre className="mt-1.5 overflow-x-auto border-l-2 border-line-soft bg-ground px-2 py-1 font-mono text-2xs text-ink-dim">
                     {occurrence.snippet}
@@ -120,22 +184,20 @@ export function ArtefactDrawer({ artefact, onClose }: Props) {
               {artefact.drift.map((drift, index) => (
                 <li
                   key={`${drift.kind}-${index}`}
-                  className="border border-high/40 bg-high/5 px-2.5 py-2"
+                  className="border-2 border-line bg-raised px-2.5 py-2"
                 >
-                  <span className="font-mono text-2xs text-high">{drift.kind}</span>
+                  <span className="font-mono text-2xs text-ink">{drift.kind}</span>
                   <div className="mt-1.5 grid grid-cols-2 gap-2 text-2xs">
                     <div>
                       <span className="text-ink-faint">declared </span>
                       <span className="font-mono text-ink">{drift.declared}</span>
                     </div>
                     <div>
-                      <span className="text-ink-faint">observed </span>
+                      <span className="text-ink-faint">compared </span>
                       <span className="font-mono text-ink">{drift.observed}</span>
                     </div>
                   </div>
-                  <p className="mt-1.5 text-2xs leading-relaxed text-ink-dim">
-                    {drift.cause}
-                  </p>
+                  <p className="mt-1.5 text-2xs leading-relaxed text-ink-dim">{drift.cause}</p>
                   {drift.evidence.length > 0 ? (
                     <ul className="mt-1.5 space-y-0.5">
                       {drift.evidence.map((entry) => (
@@ -227,55 +289,24 @@ export function ArtefactDrawer({ artefact, onClose }: Props) {
           </Section>
         ) : null}
 
-        {artefact.fix ? (
-          <Section title="Proposed fix">
-            <div
-              className={cn(
-                "border px-2.5 py-2",
-                artefact.fix.verified
-                  ? "border-line bg-raised"
-                  : "border-dashed border-ink-faint/60",
-              )}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-2xs text-ink">
-                  {artefact.fix.template}
-                </span>
-                <span
-                  className={cn(
-                    "text-2xs uppercase tracking-wide",
-                    artefact.fix.verified ? "text-ink-dim" : "text-ink-faint",
-                  )}
-                >
-                  {artefact.fix.verified ? "verified" : "not verified"}
-                </span>
-              </div>
-              <p className="mt-1 text-2xs leading-relaxed text-ink-faint">
-                {artefact.fix.reason}
-              </p>
-              {artefact.fix.diff ? (
-                <pre className="mt-2 overflow-x-auto border border-line bg-ground p-2 font-mono text-2xs leading-relaxed">
-                  {artefact.fix.diff.split("\n").map((line, index) => (
-                    <div
-                      key={index}
-                      className={
-                        // +/- in a diff is a universal convention, not a
-                        // severity claim; the hunk header stays neutral.
-                        line.startsWith("+")
-                          ? "text-emerald-400"
-                          : line.startsWith("-")
-                            ? "text-critical"
-                            : "text-ink-faint"
-                      }
-                    >
-                      {line}
-                    </div>
-                  ))}
-                </pre>
-              ) : null}
-            </div>
-          </Section>
-        ) : null}
+        <Section title="Proposed fix">
+          {fix ? (
+            <FixBlock fix={fix} />
+          ) : fixLookup?.status === "loading" ? (
+            <p className="text-2xs text-ink-faint">Loading fix results…</p>
+          ) : fixLookup?.status === "error" ? (
+            <p className="text-2xs text-ink-faint">
+              Fix results could not be loaded: {fixLookup.message}
+            </p>
+          ) : (
+            <p className="text-2xs leading-relaxed text-ink-faint">
+              No fix pass has proposed a change for this artefact.{" "}
+              <a href={hrefFor("fixes")} className="text-ink-dim underline">
+                Verified Fixes
+              </a>
+            </p>
+          )}
+        </Section>
       </SheetContent>
     </Sheet>
   );

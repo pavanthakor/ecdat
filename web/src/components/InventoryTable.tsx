@@ -14,14 +14,18 @@
  *   digits, so a column can be scanned vertically instead of read.
  * * **The artefact name is the strongest thing in its row.** The bom-ref beside
  *   it is smaller, monospaced and muted -- it is an address, not a label.
+ * * **Verified vs provisional is a border, not a colour** (ADR-0018): the Facts
+ *   column is solid for a verdict resting only on confirmed rules and dashed
+ *   for one that includes an unconfirmed (and therefore unscored) rule.
  */
 import { ArrowDown, ArrowUp, GitCompareArrows } from "lucide-react";
 
 import type { Artefact, Band, View } from "@/api/types";
 import { BANDS, VIEWS } from "@/api/types";
 import { BAND_STYLE, cn, shortLocator, shortRef } from "@/lib/format";
-import type { EmptyState } from "@/state/presentation";
 import type { Filters, Sort, SortColumn } from "@/state/inventory";
+import type { EmptyState } from "@/state/presentation";
+import { Tag } from "./Panel";
 import { SkeletonRows } from "./Skeleton";
 
 interface Props {
@@ -95,18 +99,21 @@ function toggle<T>(values: T[], value: T): T[] {
 }
 
 const COLUMNS: {
-  key: SortColumn;
+  key: string;
   label: string;
+  sort?: SortColumn;
   className?: string;
   align?: "right";
 }[] = [
-  { key: "name", label: "Artefact", className: "w-[28%]" },
-  { key: "view", label: "View", className: "w-[8%]" },
-  { key: "band", label: "Band", className: "w-[9%]" },
-  { key: "score", label: "Score", className: "w-[6%]", align: "right" },
-  { key: "usage", label: "Usage", className: "w-[9%]" },
-  { key: "endpoint", label: "Location", className: "w-[28%]" },
-  { key: "deadline", label: "Deadline", className: "w-[10%]", align: "right" },
+  { key: "name", label: "Artefact", sort: "name", className: "w-[25%]" },
+  { key: "view", label: "View", sort: "view", className: "w-[7%]" },
+  { key: "band", label: "Band", sort: "band", className: "w-[8%]" },
+  { key: "score", label: "Score", sort: "score", className: "w-[5%]", align: "right" },
+  { key: "usage", label: "Usage", sort: "usage", className: "w-[8%]" },
+  { key: "endpoint", label: "Endpoint · location", sort: "endpoint", className: "w-[22%]" },
+  { key: "deadline", label: "Deadline", sort: "deadline", className: "w-[9%]", align: "right" },
+  { key: "drift", label: "Drift", className: "w-[6%]" },
+  { key: "facts", label: "Facts", className: "w-[10%]" },
 ];
 
 export function InventoryTable({
@@ -183,7 +190,7 @@ export function InventoryTable({
           <thead className="sticky top-0 z-10">
             <tr className="bg-raised">
               {COLUMNS.map((column) => {
-                const active = sort.column === column.key;
+                const active = column.sort !== undefined && sort.column === column.sort;
                 return (
                   <th
                     key={column.key}
@@ -193,23 +200,29 @@ export function InventoryTable({
                       column.className,
                     )}
                   >
-                    <button
-                      type="button"
-                      onClick={() => onSort(column.key)}
-                      className={cn(
-                        "inline-flex items-center gap-1 text-2xs uppercase tracking-widest transition-colors",
-                        active ? "text-ink" : "text-ink-faint hover:text-ink-dim",
-                      )}
-                    >
-                      {column.label}
-                      {active ? (
-                        sort.direction === "desc" ? (
-                          <ArrowDown className="h-2.5 w-2.5" aria-hidden />
-                        ) : (
-                          <ArrowUp className="h-2.5 w-2.5" aria-hidden />
-                        )
-                      ) : null}
-                    </button>
+                    {column.sort ? (
+                      <button
+                        type="button"
+                        onClick={() => onSort(column.sort as SortColumn)}
+                        className={cn(
+                          "inline-flex items-center gap-1 text-2xs uppercase tracking-widest transition-colors",
+                          active ? "text-ink" : "text-ink-faint hover:text-ink-dim",
+                        )}
+                      >
+                        {column.label}
+                        {active ? (
+                          sort.direction === "desc" ? (
+                            <ArrowDown className="h-2.5 w-2.5" aria-hidden />
+                          ) : (
+                            <ArrowUp className="h-2.5 w-2.5" aria-hidden />
+                          )
+                        ) : null}
+                      </button>
+                    ) : (
+                      <span className="text-2xs uppercase tracking-widest text-ink-faint">
+                        {column.label}
+                      </span>
+                    )}
                   </th>
                 );
               })}
@@ -245,20 +258,6 @@ export function InventoryTable({
                         <span className="shrink-0 font-mono text-[10px] text-ink-faint">
                           {shortRef(artefact.bomRef)}
                         </span>
-                        {artefact.drift.length > 0 ? (
-                          <GitCompareArrows
-                            className="h-3 w-3 shrink-0 text-high"
-                            aria-label="drift"
-                          />
-                        ) : null}
-                        {artefact.provisional ? (
-                          <span
-                            title="Some of this verdict rests on an unverified fact"
-                            className="shrink-0 border border-dashed border-ink-faint/60 px-1 text-[9px] uppercase tracking-wide text-ink-faint"
-                          >
-                            prov
-                          </span>
-                        ) : null}
                       </div>
                     </td>
                     <td className="px-3 py-1">
@@ -277,7 +276,10 @@ export function InventoryTable({
                     </td>
                     <td className="px-3 py-1 text-ink-dim">{artefact.usage}</td>
                     <td className="px-3 py-1">
-                      <span className="block truncate font-mono text-[10px] text-ink-dim">
+                      <span
+                        className="block truncate font-mono text-[10px] text-ink-dim"
+                        title={artefact.endpoint ? "endpoint" : "first sighting — no endpoint recorded"}
+                      >
                         {location}
                       </span>
                     </td>
@@ -297,6 +299,30 @@ export function InventoryTable({
                       >
                         {artefact.deadline ?? "—"}
                       </span>
+                    </td>
+                    <td className="px-3 py-1">
+                      {artefact.drift.length > 0 ? (
+                        <span className="inline-flex items-center gap-1 font-mono text-[10px] text-ink">
+                          <GitCompareArrows className="h-3 w-3" aria-label="drift" />
+                          {artefact.drift.length}
+                        </span>
+                      ) : (
+                        <span className="text-ink-faint">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1">
+                      {artefact.provisional ? (
+                        <Tag
+                          variant="provisional"
+                          title="Some of this verdict rests on an unverified fact, which scored 0"
+                        >
+                          Provisional
+                        </Tag>
+                      ) : (
+                        <Tag variant="verified" title="Every rule behind this verdict cites a checked source">
+                          Verified
+                        </Tag>
+                      )}
                     </td>
                   </tr>
                 );

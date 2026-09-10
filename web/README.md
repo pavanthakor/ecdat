@@ -1,7 +1,10 @@
-# ECDAT console (`web/`)
+# Q-orbit console (`web/`)
 
-The dashboard: a dark SOC-style console over the CBOM the scanners produce.
-React + Vite + TypeScript, Tailwind, Radix primitives, lucide-react.
+**Q-orbit — Security Console**: ECDAT's dashboard, a dark SOC-style console
+over the CBOM the scanners produce. React + Vite + TypeScript, Tailwind, Radix
+primitives, lucide-react. [ADR-0018](../docs/adr/0018-dashboard.md) is the
+first slice; [ADR-0031](../docs/adr/0031-qorbit-dashboard.md) is the full
+console and its honesty rule.
 
 ## Build it before the demo
 
@@ -57,27 +60,68 @@ against the dev proxy and against the built bundle with no configuration.
 
 No CDN, anywhere:
 
-* **Fonts are vendored.** Inter and JetBrains Mono come from `@fontsource`,
-  which ships the `woff2` files inside `node_modules`; Vite copies them into
-  `dist/assets`. Nothing is fetched from Google Fonts at runtime.
-* **No external scripts or stylesheets.** `dist/index.html` references exactly
-  two hashed local assets.
+* **Fonts are vendored.** Space Grotesk (the interface) and JetBrains Mono
+  (bom-refs, locators, endpoints, diffs) come from `@fontsource`, which ships
+  the `woff2` files inside `node_modules`; Vite copies them into `dist/assets`.
+  Nothing is fetched from Google Fonts at runtime.
+* **No external scripts or stylesheets.** `dist/index.html` references two
+  hashed local assets, and the favicon is an inline `data:` URI.
 * **Same-origin API only.** `src/api/client.ts` has no configurable base URL —
   the console can only talk to the server that served it.
+* **Hash routes.** Screens live at `#/scans`, `#/drift`, … because FastAPI
+  mounts the API at `/` as well as `/api`: a console path of `/scans` would be
+  answered by the API's JSON on reload.
 
 This matters because ECDAT is meant for air-gapped estates. A dashboard that
 phones out for a stylesheet is broken in the one environment the tool exists
 for.
 
+## The honesty rule
+
+Every number on screen is a **stored value**, a **count** of stored facts, or a
+**ratio** of two counts with both shown. Anything else renders **"Not
+computed"** with its reason — never a zero, never a placeholder bar.
+`state/metrics.ts` returns `Measured<T>`; `components/Honest.tsx` is the only
+thing that renders one. ADR-0031 §2 lists, screen by screen, what is real today
+and what says it is not computed.
+
+## Screens
+
+| Group | Route | Screen |
+|---|---|---|
+| Analyze | `#/overview` | metric cards, CRQC-horizon slider (live rescore), risk distribution, histogram, priority queue, coverage pulse |
+| | `#/scans` | scan history off the denormalised rows; **New scan** |
+| | `#/inventory` | the table, filters and drill-down (`?ref=<bom-ref>` opens a drawer, `?q=` filters) |
+| | `#/risk-analysis` | honest placeholder — not computed by the backend |
+| | `#/drift` | Declared → Shipped → Observed per drift finding |
+| Plan | `#/roadmap` | deadline Gantt; undated artefacts listed, not placed |
+| | `#/fixes` | the verified-fix queue from `GET /scans/{id}/fixes` |
+| | `#/agility` | configurable share (real); key store and protocol (not computed) |
+| Report | `#/coverage` | scanner cards and the visibility matrix |
+| | `#/reports` | the three PDFs and the offline export formats |
+| | `#/compare` | `GET /scans/{a}/compare/{b}`, joined on bom-ref |
+| | `#/settings` | read-only facts about this console |
+
+The user menu in the top bar is **cosmetic** until authentication lands.
+
 ## Layout
 
 ```
 src/
-  api/       types.ts    the REAL wire shapes (written against captured responses)
-             parse.ts    CBOM -> the rows the console renders
-             client.ts   typed fetch, same-origin, no base URL
-  state/     inventory.ts  filters, sort, and the Mosca rescore round trip
-  components/  SummaryStrip, InventoryTable, ArtefactDrawer, Provenance, ui/
+  api/        types.ts    the REAL wire shapes (written against captured responses)
+              parse.ts    CBOM -> the rows the console renders
+              client.ts   typed fetch, same-origin, no base URL
+  lib/        router.ts   hash routes, the nav table
+              format.ts   band colours, dates, short refs
+  state/      inventory.ts     filters, sort, and the Mosca rescore round trip
+              metrics.ts       every derived number, as Measured<T>
+              presentation.ts  live band counts, empty states, footer line
+              remote.ts        per-screen loaders; errors stay local
+  components/ shell/      Logo (the Q-orbit mark), Sidebar, TopBar, UserMenu
+              Honest.tsx  MetricCard / NotComputed / EmptyPanel
+              Panel.tsx   ScreenHeader, Panel, Button, Tag
+              InventoryTable, ArtefactDrawer, NewScanDialog, Provenance, ui/
+  screens/    one file per route
   test/fixtures/  real documents from real scans — see below
 ```
 
@@ -100,16 +144,26 @@ imagined, which is always the shape that works.
 
 ## What is tested
 
-Data logic and interaction only — 68 tests. Filtering that silently drops rows, a rescore that
-leaves a stale table, and a provisional fact rendered as a verified one are all
-invisible in a screenshot review. Column order is not.
+Data logic and interaction — 126 tests. Filtering that silently drops rows, a
+rescore that leaves a stale table, a provisional fact rendered as a verified
+one, and a metric nobody computed rendered as a number are all invisible in a
+screenshot review. Column order is not.
 
 * `api/parse.test.ts` — the real wire shapes parse into typed models.
-* `state/inventory.test.ts` — band/view/drift filters, sorting, and the debounced
-  rescore round trip against real before/after documents.
-* `components/Provenance.test.tsx` — the verified/provisional rendering RULE.
+* `state/inventory.test.ts` — filters, sorting, and the debounced rescore round
+  trip against real before/after documents.
+* `state/metrics.test.ts` — every derived number against real documents, and
+  every place it refuses to invent one.
 * `state/presentation.test.ts` — the live band readout, the three empty states,
   and the auditable footer line.
-* `components/console.test.tsx` — those two at the DOM level, plus the severity
-  row accent: the live readout is driven through the real slider and must
-  follow the rescored document.
+* `components/Provenance.test.tsx` — the verified/provisional rendering RULE.
+* `components/console.test.tsx` — empty states, the severity row accent, and
+  the live readout driven through the real slider.
+* `components/honesty.test.tsx` — **the honesty rule at the DOM level**: a
+  not-computed metric renders no digit; a computed zero renders "0"; agility,
+  drift, roadmap, fixes, compare and coverage each render their empty state
+  faithfully.
+* `screens/overview.test.tsx` — the slider re-scores the ORIGINAL scan once and
+  every Overview card follows the new document.
+* `lib/routing.test.tsx` — every nav entry, deep links, unknown routes, finding
+  links into the drawer, and the top-bar search.

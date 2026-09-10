@@ -5,11 +5,14 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // Inter for the interface; JetBrains Mono for anything a reader might
-        // need to compare character by character -- bom-refs, file:line
-        // locators, versions, diffs. Both self-hosted via @fontsource.
-        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
-        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
+        // Space Grotesk for the interface and headings; JetBrains Mono for
+        // anything a reader compares character by character -- bom-refs,
+        // file:line locators, endpoints, versions, diffs. A considered pairing:
+        // both are geometric-grotesque in construction, so the switch between
+        // prose and an address reads as a change of register, not of style.
+        // Both self-hosted via @fontsource; nothing is fetched at runtime.
+        sans: ['"Space Grotesk"', "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
       },
       colors: {
         // The console surface. Three steps of slate, not a gradient: a flat
@@ -22,15 +25,16 @@ export default {
         ink: "#e2e8f0", // slate-200
         "ink-dim": "#94a3b8", // slate-400
         "ink-faint": "#64748b", // slate-500
-        // NO accent colour. Interaction affordances use the slate ramp, so
-        // the four band colours below are the only saturated pixels in the
-        // application and a coloured pixel always means severity.
-        // Bands. The ONLY saturated colours in the console, so a red pixel
-        // always means the same thing.
-        critical: "#f43f5e",
+        // Bands. The only saturated colours in the DATA, so a red pixel in a
+        // table, chart or card always means the same thing.
+        critical: "#ef4444",
         high: "#f59e0b",
         medium: "#eab308",
         low: "#64748b",
+        // The Q-orbit mark, and nothing else (ADR-0031). Confined to the
+        // logo in the chrome, never beside a value, so it cannot be read as a
+        // High band.
+        brand: "#fbbf24",
       },
       fontSize: {
         "2xs": ["0.6875rem", { lineHeight: "1rem" }],

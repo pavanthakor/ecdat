@@ -1,9 +1,9 @@
 /* Self-hosted faces. @fontsource ships the woff2 files inside node_modules and
    Vite copies them into dist/assets -- nothing is fetched from a CDN at
    runtime, which is what keeps the console usable in an air-gapped estate. */
-@import "@fontsource/inter/400.css";
-@import "@fontsource/inter/500.css";
-@import "@fontsource/inter/600.css";
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
 
@@ -23,8 +23,7 @@
   }
 
   body {
-    @apply bg-ground text-ink antialiased;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    @apply bg-ground font-sans text-ink antialiased;
   }
 
   /* A console is read, not admired: tighten the default rhythm. */
@@ -46,6 +45,10 @@
   :focus-visible {
     @apply outline-none ring-1 ring-ink-dim ring-offset-0;
   }
+
+  input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
 }
 
 @layer components {
@@ -54,5 +57,9 @@
      (ADR-0017 -> ADR-0018). */
   .provisional {
     @apply border border-dashed border-ink-faint/50 bg-transparent text-ink-faint;
+  }
+
+  .eyebrow {
+    @apply text-2xs font-medium uppercase tracking-widest text-ink-faint;
   }
 }

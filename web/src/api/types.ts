@@ -126,6 +126,17 @@ export interface Artefact {
   bomRef: string;
   name: string;
   view: View | string;
+  /**
+   * EVERY view this artefact was sighted in -- `ecdat:view` repeats, one per
+   * view (ADR-0002). `view` keeps the first for the table's single column.
+   */
+  views: string[];
+  /**
+   * `ecdat:configurable` (ADR-0026): true when the algorithm is chosen by
+   * configuration, false when it is fixed in code, and NULL when no scanner
+   * made the determination. Null is "not assessed", never "hard-coded".
+   */
+  configurable: boolean | null;
   band: Band;
   score: number;
   assetType: string;
@@ -189,3 +200,93 @@ export interface DerivedCreated {
   parent_scan_id: string;
   kind: string;
 }
+
+/** `POST /scans` and `POST /systems/scan`. */
+export interface ScanCreated {
+  scan_id: string;
+  component_count: number;
+}
+
+export type TargetKind = "repo" | "directory" | "image" | "host" | "endpoint" | "spool";
+export type Sector =
+  | "government"
+  | "strategic"
+  | "defence"
+  | "power"
+  | "telecom"
+  | "transport"
+  | "bfsi"
+  | "other";
+export type Exposure = "internet" | "internal" | "build" | "unknown";
+
+/** The body of `POST /scans` -- `api.app.TargetIn`. */
+export interface TargetIn {
+  kind: TargetKind;
+  ref: string;
+  system?: string | null;
+  data_class?: string | null;
+  sector?: Sector;
+  exposure?: Exposure;
+  z_years?: number;
+  /** Omitted = every registered scanner; `[]` = none, honoured as such. */
+  scanners?: string[] | null;
+}
+
+/** The body of `POST /systems/scan` -- `api.app.SystemManifestIn`. */
+export interface SystemManifestIn {
+  system: string;
+  targets: { kind: string; ref: string }[];
+  sector?: string;
+  exposure?: string;
+  data_class?: string | null;
+  z_years?: number;
+}
+
+/** `GET /scans/{a}/compare/{b}` (ADR-0031) -- joined on bom-ref. */
+export interface CompareVerdict {
+  band: string | null;
+  score: number | null;
+  deadline: string | null;
+  quantum_status: string | null;
+}
+
+export interface CompareEntry {
+  bom_ref: string;
+  name: string;
+  band: string | null;
+  score: number | null;
+  deadline: string | null;
+}
+
+export interface CompareChange {
+  bom_ref: string;
+  name: string;
+  fields: string[];
+  before: CompareVerdict;
+  after: CompareVerdict;
+  evidence_added: string[];
+  evidence_removed: string[];
+}
+
+export interface CompareDrift {
+  bom_ref: string;
+  name: string;
+  kind: string;
+  declared: string;
+  observed: string;
+  cause: string;
+}
+
+export interface CompareResponse {
+  base: { id: string; kind: string; created_at: string; system: string | null };
+  head: { id: string; kind: string; created_at: string; system: string | null };
+  new: CompareEntry[];
+  resolved: CompareEntry[];
+  changed: CompareChange[];
+  drift_introduced: CompareDrift[];
+  drift_resolved: CompareDrift[];
+  unchanged: number;
+}
+
+/** The three PDFs `GET /scans/{id}/report/{kind}` renders (ADR-0020). */
+export type ReportKind = "executive" | "technical" | "coverage";

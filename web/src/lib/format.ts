@@ -44,3 +44,9 @@ export function formatDate(iso: string | null): string {
   if (!iso) return "—";
   return iso.slice(0, 10);
 }
+
+/** `2026-09-10T06:35:35.824Z` -> `2026-09-10 06:35 UTC`. Stored times are UTC. */
+export function formatDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+}

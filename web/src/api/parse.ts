@@ -161,11 +161,17 @@ function toArtefact(component: CbomComponent): Artefact {
   const band = one(properties, "ecdat:band");
   const crypto = component.cryptoProperties;
   const provisionalRules = all(properties, "ecdat:provisional_rule");
+  const view = one(properties, "ecdat:view") ?? "declared";
+  const views = all(properties, "ecdat:view");
+  const configurable = one(properties, "ecdat:configurable");
 
   return {
     bomRef: component["bom-ref"],
     name: component.name,
-    view: one(properties, "ecdat:view") ?? "declared",
+    view,
+    views: views.length > 0 ? views : [view],
+    // Absent is NOT false: no scanner made the call, so it is not assessed.
+    configurable: configurable === null ? null : configurable === "true",
     band: (band && BAND_SET.has(band) ? band : "Low") as Band,
     score: integer(properties, "ecdat:score") ?? 0,
     assetType: one(properties, "ecdat:asset_type") ?? crypto?.assetType ?? "unknown",

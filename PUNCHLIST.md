@@ -207,8 +207,18 @@
   2's roadmap timeline, agility gauge and drift graph may want a charting
   library back; at ten buckets, divs were more precise and needed no
   dependency.
+  **Update (ADR-0031):** none of them did. The Gantt, the agility gauge and the
+  histogram are divs and one SVG arc. The full twelve-screen console is 332KB
+  (102KB gzipped) with no charting library.
   *Raised: dashboard polish.*
-- **Dashboard slice 2 is owed.** Slice 1 shipped the core console (ADR-0018):
+- ~~**Dashboard slice 2 is owed.**~~ **Resolved** by the Q-orbit console
+  ([ADR-0031](docs/adr/0031-qorbit-dashboard.md)): the Migration Roadmap
+  deadline Gantt, the Crypto Agility gauge (configurable share real, key-store
+  and protocol shown as not computed), a Verified Fixes queue that can start a
+  fix pass and shows verified diffs only, and a Declared → Shipped → Observed
+  panel per drift finding. The drift "graph" shipped as that per-finding
+  panel, not as a node graph. Kept below for the record.
+  Slice 1 shipped the core console (ADR-0018):
   app shell + scan selector, the risk summary strip off the denormalised row,
   the sortable/filterable inventory table, the Mosca slider driving the real
   rescore endpoint, and the drill-down drawer with evidence, fired rules, drift
@@ -229,6 +239,9 @@
   its verified fix diffs one URL away on an unauthenticated port. No new hole,
   a bigger blast radius. Tracked with the API entry below, which remains the
   largest open item on this list.
+  **Update (ADR-0031):** the Q-orbit console's top-bar user menu is COSMETIC
+  until the Tier-3 auth work lands -- it opens, every entry is disabled, and it
+  says why in plain text rather than implying a session that does not exist.
   *Raised: dashboard slice 1.*
 - ~~**No stored scan carries drift, so the console's drift features show
   nothing on real data.**~~ **Resolved** by the system scan. `ecdat scan-system
@@ -1142,3 +1155,60 @@
   requirement; neither was caught earlier because the development venv had both
   by accident.
   *Raised and resolved: onboarding slice.*
+- **`scanners_ran` records the scanners OFFERED, not the ones that ran.**
+  `core/orchestrator.run_scan` stores `scanner_records(scanners)` -- every
+  scanner offered -- while its own ran / skipped / failed split goes only to the
+  `scan_completed` log line. Verified: a `minimal_repo` scan's row lists all six
+  ids, while the log says `binary`, `container` and `runtime-spool` were
+  skipped. So ADR-0016's promise is weaker than stated: null / `[]` / list does
+  separate "not recorded" from "none offered", but a LISTED scanner may never
+  have looked. The coverage PDF (`reports/coverage.py`) prints "— ran" for every
+  entry and therefore over-claims today. The console avoids the claim by saying
+  SELECTED, never "ran" (ADR-0031 §4), and leans on the per-scanner attributed
+  artefact count, which does prove a scanner looked.
+  **Fix:** persist the outcome (ran / skipped / failed, with the failure) on the
+  row, expose it on `ScanSummary`, and render it in the report and the Coverage
+  screen. `packs_applied` is likewise in the log and not exposed by the API.
+  *Raised: Q-orbit console slice (ADR-0031).*
+- **The coverage report's standing gap list is stale.** `reports/coverage.py`
+  `KNOWN_GAPS` still says Java source is not scanned and that binary scanners are
+  "designed, not built". The Java rules shipped in ADR-0024 and the binary
+  scanner in ADR-0025. The document that exists to state the tool's limits now
+  mis-states them, and a reader holding the PDF cannot tell. Deriving the
+  scanner-family line from the registry would stop it drifting again.
+  *Raised: Q-orbit console slice.*
+- **Crypto-agility sub-metrics are not computed.** The Agility screen's
+  configurable share is real (`ecdat:configurable`, ADR-0026). **Key store** —
+  whether key material is held in a key store, HSM or KMS rather than a file —
+  and **protocol negotiation** — whether an endpoint can change algorithms
+  without a release — are shown as *not computed*. Backend work would fill
+  them: key-custody detection (PKCS#11 configuration, Java KeyStore, cloud KMS
+  references), and a per-endpoint renegotiation fact from the config and TLS
+  scanners. *Raised: Q-orbit console slice.*
+- **Risk Analysis is a placeholder.** Cross-scan risk trend, business-impact
+  weighting and a blast-radius view are not computed, so the screen says so and
+  sends the reader to Inventory → Drift → Roadmap. Blast radius could start from
+  the correlator's peer data. *Raised: Q-orbit console slice.*
+- **No scan start time or duration is stored.** The row carries its save time
+  only, so the Scans screen's **Started** column says "not recorded". Arrives
+  naturally with the job model (ADR-0003). *Raised: Q-orbit console slice.*
+- **Drift has no "next check".** Nothing re-runs a scan on a schedule, so each
+  drift panel says *not scheduled — re-scan to re-check*. A monitoring job
+  (the eBPF agent in daemon mode, plus a periodic system scan) would give it a
+  date. *Raised: Q-orbit console slice.*
+- **There is no HTML report.** Reports are PDF only. The Reports screen shows
+  HTML as *not available*; CSV is a browser-side projection of the stored CBOM
+  (the Inventory's values), labelled as such rather than presented as a server
+  report. *Raised: Q-orbit console slice.*
+- **Compare cannot pair an artefact across a new sighting place.** The
+  bom-ref hashes the set of places an artefact was seen, so an artefact that
+  gains or loses a place reports as resolved + new rather than changed (a moved
+  LINE is fine -- positions are dropped). That is the identity's stated limit
+  and is shown on the Compare screen; a fuzzy pairing was deliberately not
+  built. *Raised: Q-orbit console slice.*
+- **The console was built without the design images and without a visual
+  check.** The screenshots the brief refers to never reached the repository or
+  the session, and no headless browser is installed on the build machine, so
+  the layout follows the brief's written description and no screenshot was
+  taken. Layout is untested by design (ADR-0018 §8). The fixup slice is the
+  first comparison against the design. *Raised: Q-orbit console slice.*

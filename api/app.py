@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -31,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from core import registry, store
+from core.compare import compare_documents
 from core.logs import configure_logging, get_logger
 from core.orchestrator import (
     UnknownScanError,
@@ -471,6 +473,96 @@ def create_rescore(scan_id: str, z_years: int | None = None) -> DerivedCreated:
 
     return DerivedCreated(
         scan_id=new_id, parent_scan_id=scan_id, kind=store.KIND_RESCORE
+    )
+
+
+# ---------------------------------------------------------------------------
+# Compare two stored scans (ADR-0031)
+# ---------------------------------------------------------------------------
+
+
+class ScanRefOut(BaseModel):
+    id: str
+    kind: str
+    created_at: datetime
+    system: str | None
+
+
+class VerdictOut(BaseModel):
+    band: str | None
+    score: int | None
+    deadline: str | None
+    quantum_status: str | None
+
+
+class CompareEntryOut(BaseModel):
+    bom_ref: str
+    name: str
+    band: str | None
+    score: int | None
+    deadline: str | None
+
+
+class CompareChangeOut(BaseModel):
+    bom_ref: str
+    name: str
+    #: Which of band/score/deadline/quantum_status/evidence differ.
+    fields: list[str]
+    before: VerdictOut
+    after: VerdictOut
+    evidence_added: list[str]
+    evidence_removed: list[str]
+
+
+class CompareDriftOut(BaseModel):
+    bom_ref: str
+    name: str
+    kind: str
+    declared: str
+    observed: str
+    cause: str
+
+
+class CompareOut(BaseModel):
+    base: ScanRefOut
+    head: ScanRefOut
+    new: list[CompareEntryOut]
+    resolved: list[CompareEntryOut]
+    changed: list[CompareChangeOut]
+    drift_introduced: list[CompareDriftOut]
+    drift_resolved: list[CompareDriftOut]
+    unchanged: int
+
+
+def _scan_ref(scan: store.Scan) -> ScanRefOut:
+    return ScanRefOut(
+        id=scan.id,
+        kind=scan.kind,
+        created_at=scan.created_at,
+        system=scan.target_system,
+    )
+
+
+@router.get("/scans/{scan_id}/compare/{other_id}")
+def compare_scans(scan_id: str, other_id: str) -> CompareOut:
+    """What changed from ``scan_id`` (base) to ``other_id`` (head).
+
+    Joined on the content-addressed bom-ref, so it is exact within what the
+    identity can join: a moved line is changed evidence, a new sighting place
+    is resolved + new (see ``core.compare``). Parses both stored documents --
+    a detail view, not a list, so ADR-0016's no-parse rule is not in play.
+    """
+    rows: list[store.Scan] = []
+    for wanted in (scan_id, other_id):
+        row = store.get_scan(wanted)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"no scan with id {wanted!r}")
+        rows.append(row)
+    base, head = rows
+
+    result = compare_documents(json.loads(base.cbom_json), json.loads(head.cbom_json))
+    return CompareOut.model_validate(
+        {**asdict(result), "base": _scan_ref(base), "head": _scan_ref(head)}
     )
 
 
