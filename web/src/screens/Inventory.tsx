@@ -25,6 +25,7 @@ import {
   type Sort,
   type SortColumn,
 } from "@/state/inventory";
+import { certaintyCountsOf } from "@/state/certainty";
 import { collectedViews, inventoryCsv } from "@/state/metrics";
 import { emptyStateOf } from "@/state/presentation";
 import { useRemote } from "@/state/remote";
@@ -57,6 +58,7 @@ export function InventoryScreen({
     [selectedRef, view.artefacts],
   );
   const driftCount = useMemo(() => view.artefacts.filter((a) => a.drift.length > 0).length, [view.artefacts]);
+  const certainty = useMemo(() => certaintyCountsOf(view.artefacts), [view.artefacts]);
   const collected = useMemo(() => collectedViews(view.artefacts), [view.artefacts]);
 
   const fixes = useRemote(scanId && selected ? `fixes:${scanId}` : null, () =>
@@ -129,6 +131,8 @@ export function InventoryScreen({
           }}
           filtersOpen={filtersOpen}
           driftCount={driftCount}
+          candidateCount={certainty.candidate}
+          confirmedCount={certainty.confirmed}
           caption={collected.length > 0 ? `${collected.join(", ")} collected` : undefined}
         />
       </div>

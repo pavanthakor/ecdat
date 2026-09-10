@@ -571,13 +571,29 @@
     `cipher.NewCTR` or AEAD nonces.
 
   *Raised: hard-coded-key precision slice.*
-- **The console does not show that a finding is a candidate.** The CBOM
-  carries `ecdat:confidence: 0.5` and `ecdat:param:candidate: True`.
-  `web/src/api/parse.ts` collects the param into `params`, but the Inventory
-  has no candidate badge or filter, and no screen reads a component's
-  `ecdat:confidence`. The PDFs are the same. An analyst reading the console
-  sees a low-confidence candidate as a finding like any other.
-  *Raised: hard-coded-key precision slice.*
+- ~~**The console does not show that a finding is a candidate.**~~ **Resolved
+  for the Inventory and its drawer** by the
+  [ADR-0031 addendum](docs/adr/0031-qorbit-dashboard.md). A finding below
+  confidence 1.0, or flagged a candidate, now gets three marks: a dashed
+  `candidate` tag, a lighter name, and its confidence written in the row. The
+  drawer shows the stored confidence, the verdict and the reason in words.
+  "Candidates" / "Confirmed" toggles separate the two kinds. None of this uses
+  colour: the band pill and the severity bar are unchanged, and a test asserts
+  that. *Raised: hard-coded-key precision slice. Resolved: candidate/confidence
+  display slice.*
+- **Candidates are marked only in the Inventory.** The Overview's lists, the
+  Roadmap, Drift, Agility and Compare still show an artefact without its
+  candidate treatment. The browser-side CSV export and the PDFs carry no
+  confidence and no candidate flag, so an exported candidate reads as a
+  confirmed finding. *Raised: candidate/confidence display slice.*
+- **"candidate" covers every finding below 1.0.** This is the rule as locked:
+  the tag marks a 0.6 unresolved-parameter finding, and every binary-scanner
+  finding (all below 1.0 by design, ADR-0025), as well as ADR-0034's entropy
+  candidates. In the captured JS-fixture scan, 5 of the 6 tagged components are
+  0.6 findings, not candidates. The drawer says why for each. If the table
+  should reserve the word for flagged candidates and use something like
+  "inferred" otherwise, that is a label change in `InventoryTable.tsx` and
+  `Provenance.tsx`. *Raised: candidate/confidence display slice.*
 - **The console and the coverage PDF do not read `ecdat:coverage:*` yet.** A
   scan whose every file failed to parse is honest in the stored document ("
   nothing could be parsed ... not a clean result") and still LOOKS empty in the

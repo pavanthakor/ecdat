@@ -16,12 +16,18 @@ import scansDoc from "@/test/fixtures/scans.json";
 
 import { parseCbom } from "@/api/parse";
 import type { Cbom } from "@/api/types";
-import { applyFilters, sortArtefacts, useScanView } from "./inventory";
+import { applyFilters, sortArtefacts, useScanView, type Filters } from "./inventory";
 
 const z11 = parseCbom(z11Doc as unknown as Cbom);
 const drifted = parseCbom(driftDoc as unknown as Cbom);
 
-const EMPTY = { bands: [], views: [], driftOnly: false, query: "" };
+const EMPTY: Filters = {
+  bands: [],
+  views: [],
+  driftOnly: false,
+  query: "",
+  certainty: "all",
+};
 
 afterEach(() => {
   vi.restoreAllMocks();

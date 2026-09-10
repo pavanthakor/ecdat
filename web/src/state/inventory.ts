@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getCbom, listScans, rescore } from "@/api/client";
 import { parseCbom } from "@/api/parse";
 import type { Artefact, Band, ScanSummary, View } from "@/api/types";
+import { certaintyOf } from "./certainty";
 
 /** Severity order. Bands must never sort alphabetically -- Low would beat Medium. */
 const BAND_RANK: Record<Band, number> = {
@@ -20,10 +21,19 @@ const BAND_RANK: Record<Band, number> = {
   Low: 0,
 };
 
+/** The candidates / confirmed toggle (ADR-0034). "all" is no constraint. */
+export type CertaintyFilter = "all" | "candidates" | "confirmed";
+
 export interface Filters {
   bands: Band[];
   views: (View | string)[];
   driftOnly: boolean;
+  /**
+   * Separates uncertain findings from confirmed ones. A row whose document
+   * recorded no confidence matches NEITHER toggle -- it is neither -- and is
+   * shown only under "all".
+   */
+  certainty: CertaintyFilter;
   query: string;
 }
 
@@ -45,6 +55,7 @@ export const NO_FILTERS: Filters = {
   bands: [],
   views: [],
   driftOnly: false,
+  certainty: "all",
   query: "",
 };
 
@@ -89,6 +100,12 @@ export function applyFilters(artefacts: Artefact[], filters: Filters): Artefact[
       return false;
     }
     if (filters.driftOnly && artefact.drift.length === 0) return false;
+    if (filters.certainty === "candidates" && certaintyOf(artefact) !== "candidate") {
+      return false;
+    }
+    if (filters.certainty === "confirmed" && certaintyOf(artefact) !== "confirmed") {
+      return false;
+    }
     return matchesQuery(artefact, filters.query);
   });
 }

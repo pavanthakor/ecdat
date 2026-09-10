@@ -15,10 +15,96 @@
  */
 import type { Artefact } from "@/api/types";
 import { cn } from "@/lib/format";
+import {
+  certaintyOf,
+  certaintyReason,
+  formatConfidence,
+  type Certainty,
+} from "@/state/certainty";
 
 const PROVISIONAL =
   "border border-dashed border-ink-faint/60 text-ink-faint bg-transparent";
 const VERIFIED = "border border-line bg-raised text-ink";
+/** Dotted: ADR-0031 §8's border for UNKNOWN -- neither solid nor dashed. */
+const UNKNOWN = "border border-dotted border-ink-faint/60 text-ink-faint bg-transparent";
+
+/**
+ * Certainty borrows provenance's vocabulary exactly (ADR-0034 on screen): a
+ * confirmed finding is solid like a verified fact, a candidate is dashed like
+ * a provisional one, and a confidence nobody recorded is dotted like any other
+ * unknown. Never a colour -- colour is severity.
+ */
+const CERTAINTY_STYLE: Record<Certainty, string> = {
+  candidate: PROVISIONAL,
+  confirmed: VERIFIED,
+  unrecorded: UNKNOWN,
+};
+
+const CERTAINTY_LABEL: Record<Certainty, string> = {
+  candidate: "Candidate",
+  confirmed: "Confirmed",
+  unrecorded: "Confidence not recorded",
+};
+
+const CERTAINTY_VERDICT: Record<Certainty, string> = {
+  candidate: "candidate — not confirmed",
+  confirmed: "confirmed",
+  unrecorded: "not recorded",
+};
+
+/** How sure the scanner was, stamped beside provenance in the drawer header. */
+export function CertaintyBadge({ artefact }: { artefact: Artefact }) {
+  const certainty = certaintyOf(artefact);
+  return (
+    <span
+      data-testid="certainty"
+      data-certainty={certainty}
+      title={certaintyReason(artefact)}
+      className={cn(
+        "inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-medium tracking-wide uppercase",
+        CERTAINTY_STYLE[certainty],
+      )}
+    >
+      {CERTAINTY_LABEL[certainty]}
+      {artefact.confidence !== null ? (
+        <span className="font-mono normal-case tabular-nums">
+          {formatConfidence(artefact.confidence)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * The drawer's confidence section: the stored value, the verdict, and the
+ * reason in words -- on the page, not in a tooltip.
+ */
+export function ConfidenceBlock({ artefact }: { artefact: Artefact }) {
+  const certainty = certaintyOf(artefact);
+  return (
+    <div>
+      <div
+        data-testid="confidence"
+        data-certainty={certainty}
+        className={cn(
+          "flex items-baseline justify-between px-2.5 py-2",
+          CERTAINTY_STYLE[certainty],
+        )}
+      >
+        <span className="font-mono text-sm tabular-nums">
+          {formatConfidence(artefact.confidence)}
+        </span>
+        <span className="text-2xs uppercase tracking-wide">{CERTAINTY_VERDICT[certainty]}</span>
+      </div>
+      <p
+        data-testid="certainty-reason"
+        className="mt-1.5 text-2xs leading-relaxed text-ink-faint"
+      >
+        {certaintyReason(artefact)}
+      </p>
+    </div>
+  );
+}
 
 function provisionalTitle(artefact: Artefact): string {
   return (

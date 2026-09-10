@@ -127,14 +127,17 @@ export function Tag({
   variant = "plain",
   className,
   title,
+  testId,
 }: {
   children: ReactNode;
   variant?: keyof typeof TAG;
   className?: string;
   title?: string;
+  testId?: string;
 }) {
   return (
     <span
+      data-testid={testId}
       title={title}
       className={cn(
         "inline-flex items-center whitespace-nowrap rounded-[3px] px-1.5 py-px font-mono text-[9.5px] font-medium uppercase tracking-wider",
@@ -152,6 +155,7 @@ export function BandBadge({ band }: { band: Band }) {
   const style = BAND_STYLE[band];
   return (
     <span
+      data-testid="band-pill"
       className={cn(
         "inline-flex items-center whitespace-nowrap rounded-[3px] border px-1.5 py-px font-mono text-[10px]",
         style.bg,

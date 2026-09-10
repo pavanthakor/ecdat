@@ -2,10 +2,12 @@
  * The drill-down: everything ECDAT knows about one artefact, and how it knows.
  *
  * The section order is the argument a reviewer actually makes: WHAT was found,
- * WHERE it was seen (evidence first -- a claim without receipts is not a
- * claim), WHY it scored what it did, whether the views DISAGREE, and what to
- * do about it. Provenance rides on the score section, because that is where a
- * reader is deciding whether to believe a number.
+ * HOW SURE the scanner was (ADR-0034 -- a candidate is shown, and marked, never
+ * presented as a confident finding), WHERE it was seen (evidence first -- a
+ * claim without receipts is not a claim), WHY it scored what it did, whether
+ * the views DISAGREE, and what to do about it. Provenance rides on the score
+ * section, because that is where a reader is deciding whether to believe a
+ * number.
  *
  * The fix comes from the artefact itself on a `kind: "fix"` row, or from
  * `GET /scans/{id}/fixes` otherwise. "Not loaded", "failed to load" and "no
@@ -15,7 +17,7 @@ import type { Artefact, FixEntry } from "@/api/types";
 import { BAND_STYLE, cn } from "@/lib/format";
 import { hrefFor } from "@/lib/router";
 import { targetOf } from "@/state/metrics";
-import { FactList, ProvenanceBadge } from "./Provenance";
+import { CertaintyBadge, ConfidenceBlock, FactList, ProvenanceBadge } from "./Provenance";
 import { Sheet, SheetContent } from "./ui/sheet";
 
 export type FixLookup =
@@ -118,7 +120,10 @@ export function ArtefactDrawer({ artefact, onClose, fixLookup }: Props) {
     <Sheet open onOpenChange={(open) => !open && onClose()}>
       <SheetContent title={artefact.name} description={artefact.bomRef}>
         <div className="mb-5 flex flex-wrap items-center gap-2">
-          <span className={cn("flex items-baseline gap-2 border px-2.5 py-1", style.bg)}>
+          <span
+            data-testid="band-chip"
+            className={cn("flex items-baseline gap-2 border px-2.5 py-1", style.bg)}
+          >
             <span className={cn("font-mono text-lg tabular-nums", style.text)}>
               {artefact.score}
             </span>
@@ -127,6 +132,7 @@ export function ArtefactDrawer({ artefact, onClose, fixLookup }: Props) {
             </span>
           </span>
           <ProvenanceBadge artefact={artefact} />
+          <CertaintyBadge artefact={artefact} />
           {artefact.quantumStatus ? (
             <span className="border border-line bg-raised px-2 py-0.5 text-2xs uppercase tracking-wide text-ink-dim">
               quantum: {artefact.quantumStatus}
@@ -154,6 +160,10 @@ export function ArtefactDrawer({ artefact, onClose, fixLookup }: Props) {
             </div>
           ))}
         </div>
+
+        <Section title="Confidence">
+          <ConfidenceBlock artefact={artefact} />
+        </Section>
 
         <Section title="Evidence" count={artefact.occurrences.length}>
           <ul className="space-y-1.5">

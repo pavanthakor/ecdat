@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import candidateDoc from "@/test/fixtures/cbom_candidate.json";
 import driftDoc from "@/test/fixtures/cbom_drift.json";
 import provisionalDoc from "@/test/fixtures/cbom_provisional.json";
 import z11Doc from "@/test/fixtures/cbom_z11.json";
@@ -23,13 +24,16 @@ import z5Doc from "@/test/fixtures/cbom_z5.json";
 import scansDoc from "@/test/fixtures/scans.json";
 
 import { parseCbom } from "./parse";
-import type { Cbom, ScanSummary } from "./types";
+import type { Artefact, Cbom, ScanSummary } from "./types";
 
 const z11 = parseCbom(z11Doc as unknown as Cbom);
 const z20 = parseCbom(z20Doc as unknown as Cbom);
 const z5 = parseCbom(z5Doc as unknown as Cbom);
 const drifted = parseCbom(driftDoc as unknown as Cbom);
 const provisional = parseCbom(provisionalDoc as unknown as Cbom);
+const candidates = parseCbom(candidateDoc as unknown as Cbom);
+
+const rulesOf = (artefact: Artefact) => artefact.occurrences.map((o) => o.detail);
 
 const byName = (list: typeof z11, name: string) => {
   const hit = list.find((a) => a.name === name);
@@ -178,6 +182,73 @@ describe("the verified / provisional distinction (ADR-0017)", () => {
     // alike would be hiding a 20-point difference.
     expect(byName(provisional, "RSA-2048").score).toBe(78);
     expect(byName(z11, "RSA-2048").score).toBe(98);
+  });
+});
+
+describe("per-finding confidence and the candidate flag (ADR-0034)", () => {
+  // `cbom_candidate.json` is `testdata/js_fixtures` scanned after ADR-0034: one
+  // 0.5 candidate, confirmed keys (one of them carrying a folded candidate
+  // occurrence), and four findings at 0.6 whose captured parameter was a
+  // variable name.
+
+  it("reads ecdat:confidence as a number on every component", () => {
+    expect(z11.every((a) => a.confidence === 1)).toBe(true);
+    expect(candidates.every((a) => typeof a.confidence === "number")).toBe(true);
+  });
+
+  it("reads the 0.5 candidate a real scan stored", () => {
+    const flagged = candidates.filter((a) => a.candidate);
+
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0].confidence).toBe(0.5);
+    // The wire spelling is Python's `str(True)`; the flag is read off it.
+    expect(flagged[0].params.candidate).toBe("True");
+    expect(rulesOf(flagged[0]).every((r) => r === "rule=js-hardcoded-key-candidate")).toBe(
+      true,
+    );
+  });
+
+  it("keeps a confirmed key confirmed when a candidate was folded into it", () => {
+    const folded = candidates.find(
+      (a) =>
+        rulesOf(a).includes("rule=js-hardcoded-key") &&
+        rulesOf(a).includes("rule=js-hardcoded-key-candidate"),
+    );
+
+    expect(folded?.confidence).toBe(1);
+    expect(folded?.candidate).toBe(false);
+  });
+
+  it("reads a finding whose parameter did not resolve at 0.6 -- below 1.0, not a candidate", () => {
+    const ecdsa = candidates.find((a) => rulesOf(a).includes("rule=js-jwt-ecdsa"));
+
+    expect(ecdsa?.confidence).toBe(0.6);
+    expect(ecdsa?.candidate).toBe(false);
+  });
+
+  it("reads an ABSENT confidence as null: not recorded is not certain", () => {
+    const [component] = (z11Doc as unknown as Cbom).components;
+    const stripped = {
+      ...component,
+      properties: (component.properties ?? []).filter((p) => p.name !== "ecdat:confidence"),
+    };
+    const [artefact] = parseCbom({ ...(z11Doc as unknown as Cbom), components: [stripped] });
+
+    expect(artefact.confidence).toBeNull();
+    expect(artefact.candidate).toBe(false);
+  });
+
+  it("reads an unparseable confidence as null rather than guessing a number", () => {
+    const [component] = (z11Doc as unknown as Cbom).components;
+    const garbled = {
+      ...component,
+      properties: (component.properties ?? []).map((p) =>
+        p.name === "ecdat:confidence" ? { ...p, value: "high" } : p,
+      ),
+    };
+    const [artefact] = parseCbom({ ...(z11Doc as unknown as Cbom), components: [garbled] });
+
+    expect(artefact.confidence).toBeNull();
   });
 });
 

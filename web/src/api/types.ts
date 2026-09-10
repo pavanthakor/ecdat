@@ -166,6 +166,18 @@ export interface Artefact {
   provisional: boolean;
   provisionalRules: string[];
   deadlineProvisional: boolean;
+  /**
+   * `ecdat:confidence` (ADR-0034): how sure the detector was, in [0, 1]. The
+   * normaliser keeps the most confident report when it merges sightings. NULL
+   * when the document records none -- "not recorded", never "certain".
+   */
+  confidence: number | null;
+  /**
+   * `ecdat:param:candidate` (ADR-0034): the rule itself called this a
+   * CANDIDATE for analyst review -- a key-ish name holding a high-entropy
+   * literal that was not seen reaching a crypto sink.
+   */
+  candidate: boolean;
   /** Fix-it results, present only on a `kind: "fix"` row (ADR-0015). */
   fix: {
     template: string;

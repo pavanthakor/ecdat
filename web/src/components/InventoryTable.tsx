@@ -9,15 +9,21 @@
  * * **Verified vs provisional is a shape**, not a colour: a filled dot or a
  *   dashed ring beside the name, and the word "provisional" in the sub-line --
  *   a caveat that needs a hover is a caveat that will be missed (ADR-0018).
- * * The filter bar is one search plus band and view selects and a drift-only
- *   toggle, as the design has it; the filter LOGIC is unchanged (inventory.ts).
+ * * **Candidate vs confirmed is the same vocabulary** (ADR-0034): a finding
+ *   below confidence 1.0, or flagged a candidate, gets a dashed "candidate"
+ *   tag, a lighter name, and its confidence in the sub-line. The severity bar
+ *   and the band pill are untouched -- a Low candidate is still Low.
+ * * The filter bar is one search plus band and view selects, a drift-only
+ *   toggle, and a candidates / confirmed pair; the filter LOGIC lives in
+ *   inventory.ts.
  */
 import { ArrowDown, ArrowUp, GitCompareArrows, ListFilter, Search } from "lucide-react";
 
 import type { Artefact, Band, View } from "@/api/types";
 import { BANDS, VIEWS } from "@/api/types";
 import { BAND_STYLE, cn, shortLocator, shortRef } from "@/lib/format";
-import type { Filters, Sort, SortColumn } from "@/state/inventory";
+import { certaintyOf, formatConfidence } from "@/state/certainty";
+import type { CertaintyFilter, Filters, Sort, SortColumn } from "@/state/inventory";
 import type { EmptyState } from "@/state/presentation";
 import { BandBadge, Tag } from "./Panel";
 import { SkeletonRows } from "./Skeleton";
@@ -38,12 +44,24 @@ interface Props {
   filtersOpen?: boolean;
   /** Artefacts with drift in the whole scan, shown on the drift toggle. */
   driftCount?: number;
+  /** Candidates and confirmed findings in the whole scan, shown on their toggles. */
+  candidateCount?: number;
+  confirmedCount?: number;
   /** A short fact appended to the row count, e.g. which views were collected. */
   caption?: string;
 }
 
 const SELECT =
   "h-10 rounded-md border border-line bg-ground px-3 text-[13px] text-ink focus:border-ink-faint focus:outline-none";
+
+const TOGGLE = "flex h-10 items-center gap-2 rounded-md border px-3 text-[13px] transition-colors";
+const TOGGLE_ON = "border-ink-dim bg-raised text-ink";
+const TOGGLE_OFF = "border-line text-ink-dim hover:text-ink";
+
+/** The marker the candidate treatment uses, drawn small: a dashed box. */
+const CANDIDATE_SWATCH = "h-2 w-3 shrink-0 rounded-[2px] border border-dashed border-ink-faint";
+/** Its confirmed counterpart: solid, like a verified fact. */
+const CONFIRMED_SWATCH = "h-2 w-3 shrink-0 rounded-[2px] border border-ink-dim";
 
 const COLUMNS: {
   key: string;
@@ -76,10 +94,16 @@ export function InventoryTable({
   onClearFilters,
   filtersOpen = true,
   driftCount,
+  candidateCount,
+  confirmedCount,
   caption,
 }: Props) {
   const band = filters.bands.length === 1 ? filters.bands[0] : "";
   const view = filters.views.length === 1 ? filters.views[0] : "";
+
+  /** The two certainty toggles are exclusive, and pressing the active one clears it. */
+  const toggleCertainty = (value: Exclude<CertaintyFilter, "all">) =>
+    onFilters({ ...filters, certainty: filters.certainty === value ? "all" : value });
 
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-line bg-panel">
@@ -125,15 +149,36 @@ export function InventoryTable({
             type="button"
             aria-pressed={filters.driftOnly}
             onClick={() => onFilters({ ...filters, driftOnly: !filters.driftOnly })}
-            className={cn(
-              "flex h-10 items-center gap-2 rounded-md border px-3 text-[13px] transition-colors",
-              filters.driftOnly ? "border-ink-dim bg-raised text-ink" : "border-line text-ink-dim hover:text-ink",
-            )}
+            className={cn(TOGGLE, filters.driftOnly ? TOGGLE_ON : TOGGLE_OFF)}
           >
             <GitCompareArrows className="h-4 w-4" aria-hidden />
             Drift only
             {driftCount !== undefined ? <span className="text-ink-faint">{driftCount}</span> : null}
           </button>
+          <div role="group" aria-label="Certainty" className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-pressed={filters.certainty === "candidates"}
+              onClick={() => toggleCertainty("candidates")}
+              title="Findings below confidence 1.0, or flagged as candidates (ADR-0034): shown, not confirmed"
+              className={cn(TOGGLE, filters.certainty === "candidates" ? TOGGLE_ON : TOGGLE_OFF)}
+            >
+              <span className={CANDIDATE_SWATCH} aria-hidden />
+              Candidates
+              {candidateCount !== undefined ? <span className="text-ink-faint">{candidateCount}</span> : null}
+            </button>
+            <button
+              type="button"
+              aria-pressed={filters.certainty === "confirmed"}
+              onClick={() => toggleCertainty("confirmed")}
+              title="Findings at confidence 1.0"
+              className={cn(TOGGLE, filters.certainty === "confirmed" ? TOGGLE_ON : TOGGLE_OFF)}
+            >
+              <span className={CONFIRMED_SWATCH} aria-hidden />
+              Confirmed
+              {confirmedCount !== undefined ? <span className="text-ink-faint">{confirmedCount}</span> : null}
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -151,6 +196,13 @@ export function InventoryTable({
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full border border-dashed border-ink-faint" aria-hidden /> Provisional
+          </span>
+          <span
+            data-testid="legend-candidate"
+            className="flex items-center gap-1.5"
+            title="Confidence below 1.0: shown, marked uncertain, never a confirmed finding"
+          >
+            <span className={CANDIDATE_SWATCH} aria-hidden /> Candidate
           </span>
         </span>
       </div>
@@ -198,6 +250,8 @@ export function InventoryTable({
             ) : (
               rows.map((artefact) => {
                 const isSelected = artefact.bomRef === selected;
+                const certainty = certaintyOf(artefact);
+                const uncertain = certainty === "candidate";
                 const location =
                   artefact.endpoint ??
                   (artefact.occurrences[0] ? shortLocator(artefact.occurrences[0].locator) : "—");
@@ -205,7 +259,9 @@ export function InventoryTable({
                   <tr
                     key={artefact.bomRef}
                     onClick={() => onSelect(artefact)}
+                    data-ref={artefact.bomRef}
                     data-band={artefact.band}
+                    data-certainty={certainty}
                     className={cn(
                       "cursor-pointer border-b border-line-soft transition-colors last:border-b-0",
                       isSelected ? "bg-raised" : "hover:bg-raised/50",
@@ -220,7 +276,17 @@ export function InventoryTable({
                         />
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <span className="truncate font-semibold text-ink">{artefact.name}</span>
+                            <span
+                              data-testid="artefact-name"
+                              className={cn(
+                                "truncate",
+                                // Weight, not colour: a candidate never reads as the
+                                // strongest thing in its row.
+                                uncertain ? "font-medium text-ink-dim" : "font-semibold text-ink",
+                              )}
+                            >
+                              {artefact.name}
+                            </span>
                             <span
                               title={
                                 artefact.provisional
@@ -232,10 +298,20 @@ export function InventoryTable({
                                 artefact.provisional ? "border border-dashed border-ink-faint" : "bg-ink-dim",
                               )}
                             />
+                            {uncertain ? (
+                              <Tag
+                                variant="provisional"
+                                testId="candidate-tag"
+                                title={`Candidate: confidence ${formatConfidence(artefact.confidence)}. Shown for review, not a confirmed finding (ADR-0034).`}
+                              >
+                                candidate
+                              </Tag>
+                            ) : null}
                           </div>
                           <div className="truncate text-[11px] text-ink-faint">
                             {artefact.primitive ?? artefact.assetType}
                             {artefact.provisional ? " · provisional" : ""}
+                            {uncertain ? ` · confidence ${formatConfidence(artefact.confidence)}` : ""}
                           </div>
                         </div>
                       </div>

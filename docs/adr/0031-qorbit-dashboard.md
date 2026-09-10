@@ -215,3 +215,60 @@ API is unauthenticated on localhost.
 - **CSV is generated in the browser** from the loaded CBOM. It is a projection
   of stored values, not a server report, and the Reports screen labels it that
   way.
+
+## Addendum (2026-09-10): candidate and confidence on screen (ADR-0034)
+
+ADR-0034 gave the source scanner a way to say "not sure": a **candidate** at
+`ecdat:confidence: 0.5` with `ecdat:param:candidate: True`, for a key-ish name
+holding a high-entropy literal that nobody saw reach a crypto sink. The console
+rendered it exactly like a 1.0 finding. That presented an uncertain claim as a
+confident one, in the Inventory, where a reviewer looks. The console now
+carries the doubt onto the screen, under §1's and §8's rules.
+
+**The rule.** An artefact gets the candidate treatment when its
+`ecdat:confidence` is below 1.0 OR it carries the `candidate` flag. Exactly
+1.0 with no flag is **confirmed**. If the document records no confidence, the
+artefact is **unrecorded**: neither. The console does not invent certainty or
+doubt for a missing property. The classification lives in `state/certainty.ts`.
+
+**Border, weight and a word, never colour.** The treatment reuses §8's
+provenance vocabulary exactly:
+
+| | Table row | Drawer |
+|---|---|---|
+| confirmed (1.0) | name full-weight; no marker | solid "Confirmed 1.0" badge; solid confidence block |
+| candidate (< 1.0, or flagged) | lighter name (`font-medium text-ink-dim`); a dashed `candidate` tag; `· confidence 0.5` in the sub-line | dashed "Candidate 0.5" badge; dashed block reading "candidate — not confirmed"; the reason in words |
+| unrecorded | no marker | dotted "Confidence not recorded" |
+
+The severity bar and the band pill are untouched. A Low candidate and a Low
+confirmed finding render identical band classes, and a Medium candidate keeps
+its Medium colour. `components/certainty.test.tsx` asserts both, and that no
+band-colour token appears on any candidate marker.
+
+**Why, in words.** The drawer states a reason for every certainty. A flagged
+candidate gets ADR-0034's reason: a high-entropy literal, not seen reaching a
+crypto sink, not confirmed key material. A finding below 1.0 for any other
+reason gets a sentence saying the scanner inferred part of it, through a
+heuristic technique or a parameter that did not resolve. The console does not
+know which of those it was, and the sentence does not claim to.
+
+**A filter.** "Candidates" and "Confirmed" toggles sit beside "Drift only".
+They are exclusive and each shows its count. An unrecorded row matches neither
+toggle and appears only under "all".
+
+**What the locked rule sweeps in.** Every finding below 1.0 wears the tag. In
+the captured `cbom_candidate.json` that is 6 of 37 components. ONE of them is
+an ADR-0034 candidate. The other five sit at 0.6 because their captured
+parameter was a variable name: a JWT `alg` behind a const, an AES suite behind a
+variable. Every binary-scanner finding is below 1.0 by design (ADR-0025), so a
+binary scan's findings carry the tag too. That is the rule as locked, and the
+drawer's reason keeps each one honest about why.
+
+**Limits** (PUNCHLIST):
+
+- The treatment covers the Inventory and its drawer only. The Overview's lists,
+  the Roadmap, Drift, Agility and Compare still list artefacts without it.
+- The CSV export and the PDFs carry neither the confidence nor the flag.
+- Nothing was visually reviewed. There is no headless browser on this machine,
+  so the human takes the screenshot.
+- Tests: 173 in Vitest (131 before this addendum).

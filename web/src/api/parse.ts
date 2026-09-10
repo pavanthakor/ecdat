@@ -54,6 +54,18 @@ function integer(properties: CbomProperty[], name: string): number | null {
   return Number.isNaN(value) ? null : value;
 }
 
+/**
+ * A stored probability, or null. Strict on purpose: a missing or garbled value
+ * is "not recorded", and `parseFloat` would read "0.5x" as 0.5 and "" as NaN
+ * silently -- a number the document never said.
+ */
+function probability(properties: CbomProperty[], name: string): number | null {
+  const raw = one(properties, name)?.trim();
+  if (raw === undefined || !/^\d+(?:\.\d+)?$/.test(raw)) return null;
+  const value = Number(raw);
+  return value >= 0 && value <= 1 ? value : null;
+}
+
 /** `criticality=20` -> `{category, score}`, ordered as the engine wrote them. */
 function categories(properties: CbomProperty[]): Artefact["categories"] {
   return all(properties, "ecdat:category_score").map((entry) => {
@@ -199,6 +211,9 @@ function toArtefact(component: CbomComponent): Artefact {
     provisional: one(properties, "ecdat:provisional") === "true",
     provisionalRules,
     deadlineProvisional: one(properties, "ecdat:deadline_provisional") === "true",
+    confidence: probability(properties, "ecdat:confidence"),
+    // Written by Python as `str(True)`; either spelling of true is the flag.
+    candidate: (one(properties, "ecdat:param:candidate") ?? "").toLowerCase() === "true",
     fix: fix(properties),
   };
 }
