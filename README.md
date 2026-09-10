@@ -234,6 +234,10 @@ FastAPI serves them. See [`web/README.md`](web/README.md).
 # a spool directory the agent wrote
 .venv/bin/python cli.py scan /tmp/ecdat-spool --kind spool --system payments
 
+# a whole SYSTEM — every target in one manifest, one correlated CBOM.
+# This is the one that finds DRIFT: a single-target scan never can.
+.venv/bin/python cli.py scan-system testdata/quantumbank/system.yaml
+
 # propose verified fixes for a stored scan — NEVER writes to the target
 .venv/bin/python cli.py fix <scan-id>
 .venv/bin/python cli.py fix <scan-id> --out patches/   # save verified .patch files
@@ -260,6 +264,23 @@ $ ecdat rescore d3bd3e3d --z-years 30
 rescore_scan_id=29844d83 parent_scan_id=d3bd3e3d z_years=30 max_score=10
                                     # was 40 at the 7-year horizon it was scanned with
 ```
+
+`scan-system` is what makes Pillar 2 a product feature rather than a benchmark
+number. Drift is a property of the **union** of the views — a config promising a
+post-quantum group and an image that cannot negotiate one are each individually
+unremarkable, and only a document containing both is a finding. On QuantumBank:
+
+```
+scan_id=0b7f919c system=quantumbank targets=3 component_count=26 drift_count=6
+  drift cipher-outside-declared-set=2
+  drift declared-pqc-observed-classical=2
+  drift shipped-cannot-do-declared=2
+```
+
+…including the two on `payments.quantumbank.invalid:443` the demo turns on:
+the config declares `X25519MLKEM768`, the shipped image carries OpenSSL 3.0.2
+(PQC floor 3.5.0), and the observed handshake negotiated `x25519`. See
+[ADR-0019](docs/adr/0019-system-scan.md).
 
 `--sector`, `--data-class` and `--exposure` are the context that decides
 severity: the same RSA-2048 scores **98/Critical** in a BFSI system holding
@@ -366,6 +387,10 @@ before believing anything above:
   common result is "declared hybrid, observed **unconfirmed**" rather than a
   confirmed downgrade. That is deliberate: a partial observation must not become
   a hard claim.
+- **A system scan's observed view is a committed fixture, not a live
+  measurement.** `scan-system` reads a checked-in spool so it is deterministic,
+  offline and needs no root. The live eBPF attach is `make prove-pillar2`, and
+  the two must not be conflated.
 - **Observed findings carry no endpoint.** A uprobe sees a process, not a
   listening socket, so an observed handshake joins every declared endpoint in a
   system. Unattributable drift is printed as such, scored neither way.

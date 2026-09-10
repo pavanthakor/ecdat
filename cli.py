@@ -3,6 +3,7 @@
     python cli.py scan /srv/quantumbank --system quantumbank
     python cli.py scan /srv/quantumbank -o cbom.json
     python cli.py scan /srv/quantumbank --scanner source
+    python cli.py scan-system testdata/quantumbank/system.yaml
     python cli.py fix <scan-id> --out patches/
     python cli.py --list-scanners
 
@@ -22,6 +23,7 @@ same way the API does, so the two can never drift apart.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -38,6 +40,8 @@ from core.orchestrator import (
     run_scan,
 )
 from core.scanner import Exposure, Sector, Target, TargetKind
+from core.summary import summarise
+from core.system import ManifestError, TargetUnreadableError, load_manifest, scan_system
 from correlate.fixit.apply import write_patches
 from correlate.fixit.engine import FixResult
 from policy.apply import DEFAULT_Z_YEARS
@@ -133,6 +137,31 @@ def build_parser() -> argparse.ArgumentParser:
             "run only this scanner; repeatable. Defaults to every registered "
             "scanner. See --list-scanners."
         ),
+    )
+
+    scan_system_parser = subcommands.add_parser(
+        "scan-system",
+        help=(
+            "scan every target in a system manifest into ONE correlated CBOM "
+            "(this is what makes drift visible)"
+        ),
+    )
+    scan_system_parser.add_argument(
+        "manifest", type=Path, help="path to a system manifest (YAML)"
+    )
+    scan_system_parser.add_argument(
+        "--crqc-years",
+        type=int,
+        default=DEFAULT_Z_YEARS,
+        metavar="Z",
+        help=f"years until a CRQC (default {DEFAULT_Z_YEARS})",
+    )
+    scan_system_parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=None,
+        help="write the CBOM here instead of stdout",
     )
 
     fix = subcommands.add_parser(
@@ -391,6 +420,51 @@ def _rescore(args: argparse.Namespace) -> int:
     return 0
 
 
+def _scan_system(args: argparse.Namespace) -> int:
+    """Scan a whole system. The drift count is the headline, so it is printed.
+
+    A single-target scan can never report drift -- the comparison needs two
+    views in one document -- so this is the command whose drift line is worth
+    reading (ADR-0019).
+    """
+    try:
+        manifest = load_manifest(args.manifest)
+    except ManifestError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    configure_logging()
+    try:
+        scan_id = scan_system(manifest, default_context(), z_years=args.crqc_years)
+    except TargetUnreadableError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    scan = store.get_scan(scan_id)
+    if scan is None:  # pragma: no cover - the row was just committed
+        print("scan disappeared after saving", file=sys.stderr)
+        return 1
+
+    if args.output is not None:
+        args.output.write_text(scan.cbom_json, encoding="utf-8")
+    else:
+        sys.stdout.write(scan.cbom_json)
+
+    summary = summarise(json.loads(scan.cbom_json))
+    drift_total = sum(summary.drift_counts.values())
+    destination = str(args.output) if args.output is not None else "stdout"
+    print(
+        f"scan_id={scan.id} system={manifest.system} "
+        f"targets={len(manifest.targets)} "
+        f"component_count={scan.component_count} "
+        f"drift_count={drift_total} cbom={destination}",
+        file=sys.stderr,
+    )
+    for kind, count in sorted(summary.drift_counts.items()):
+        print(f"  drift {kind}={count}", file=sys.stderr)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -399,6 +473,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _list_scanners()
     if args.command == "scan":
         return _scan(args)
+    if args.command == "scan-system":
+        return _scan_system(args)
     if args.command == "fix":
         return _fix(args)
     if args.command == "rescore":

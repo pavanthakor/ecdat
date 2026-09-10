@@ -175,15 +175,20 @@
   a bigger blast radius. Tracked with the API entry below, which remains the
   largest open item on this list.
   *Raised: dashboard slice 1.*
-- **No stored scan carries drift, so the console's drift features show nothing
-  on real data.** Drift needs all three views in ONE document and `run_scan`
-  takes one target; the KPI harness merges three scans by hand (ADR-0014). The
-  drift column, drift-only filter and drift drawer section are built and tested
-  against a real merged fixture and will be empty against any scan the console
-  can currently load. Needs a "scan a system" entry point that runs several
-  targets into one correlated document -- which is also what the drift demo
-  needs.
-  *Raised: dashboard slice 1. See [ADR-0018](docs/adr/0018-dashboard.md).*
+- ~~**No stored scan carries drift, so the console's drift features show
+  nothing on real data.**~~ **Resolved** by the system scan. `ecdat scan-system
+  <manifest.yaml>` (and `POST /systems/scan`) runs every applicable scanner
+  over every target in a system manifest, normalises the findings into ONE
+  CBOM, and runs the correlator over it with all three views present. On
+  QuantumBank that is 26 components (17 declared, 4 shipped, 5 observed) and
+  **6 drifts**, including the two the demo turns on at
+  `payments.quantumbank.invalid:443`: `shipped-cannot-do-declared`
+  (X25519MLKEM768 vs OpenSSL 3.0.2) and `declared-pqc-observed-classical`
+  (X25519MLKEM768 vs x25519). `GET /scans` reports `drift_counts` summing to 6,
+  so the console's DRIFT metric and "Drift only" filter are non-empty. A
+  control test asserts a single-target scan still finds NO drift.
+  *Raised: dashboard slice 1. Resolved: system-scan slice, see
+  [ADR-0019](docs/adr/0019-system-scan.md).*
 - **The Mosca slider re-colours in one direction only, on this fixture.**
   Pulling Z in from 11 to 5 moves 15 of 17 components across a band boundary;
   pushing it out to 20 lowers every score by the same 13 points and crosses no
@@ -209,6 +214,38 @@
   the stated SOC-console reference rather than that guidance. Worth a review by
   someone who has it before the console is treated as final.
   *Raised: dashboard slice 1.*
+- **`scan-system` is SYNCHRONOUS, and it wants the job model more than
+  `POST /scans` does.** It runs every applicable scanner over every target and
+  blocks until they are all done -- ~1.5s on QuantumBank, and a real estate
+  will not be that. The async job model owed since ADR-0003 now has two
+  callers asking for it.
+  *Raised: system-scan slice. See [ADR-0019](docs/adr/0019-system-scan.md).*
+- **`kpi/harness.py` still merges three scans by hand.** It predates
+  `core.system.scan_system` and does the same job worse -- per-target
+  normalisation, so de-duplication is not global and two targets producing the
+  same artefact would repeat a bom-ref. Rewriting it on top of `scan_system`
+  would also make the KPI measure the code path the product actually runs. Not
+  done in the system-scan slice so the KPI's numbers stayed comparable across
+  the change.
+  *Raised: system-scan slice.*
+- **Manifest paths are working-directory relative**, so a system manifest is
+  only runnable from the repository root. Manifest-relative resolution is the
+  better default (move the checkout, the manifest still works) and would change
+  every committed ref plus the locator/bom-ref identity that keeps
+  `ecdat scan <repo>` and `ecdat scan-system` agreeing. Deferred as one change,
+  not two.
+  *Raised: system-scan slice.*
+- **The system root is "the first path target in manifest order."** Unambiguous
+  for one repo, arbitrary for two. It decides what locators are made relative
+  to, and therefore component identity, so a manifest naming several checkouts
+  would want an explicit `root:` key rather than a positional rule.
+  *Raised: system-scan slice.*
+- **The observed view in a system scan is a FIXTURE, not a measurement.** The
+  committed spool is a recording of one real handshake, kept so a system scan
+  is deterministic, offline and needs no root. A system scan observes nothing
+  live and must never be presented as though it does; `make prove-pillar2` is
+  where the live eBPF claim lives.
+  *Raised: system-scan slice.*
 - **The API has no authentication and `GET /scans` is unpaginated.** It serves
   an estate's complete cryptographic inventory over plain localhost CORS. Needs
   authn/authz and pagination before it is exposed anywhere but a developer
@@ -517,11 +554,13 @@
   attribution in the probe (local address/port at handshake time).
   *Raised: correlator slice.*
 - **Only four drift rules, and no shipped-vs-observed rule.** A library the
-  image ships but the runtime never loads, or vice versa, is a real drift
-  (dead crypto, or crypto arriving from somewhere unaudited) and is not
-  detected. Deferred deliberately: the four rules that landed are the ones the
-  demo turns on.
-  *Raised: correlator slice.*
+  image ships but the runtime never loads, or vice versa, is a real drift (dead
+  crypto, or crypto arriving from somewhere unaudited) and is not detected.
+  Deferred deliberately: the four rules that landed are the ones the demo turns
+  on. **Now more visible than it was** -- `ecdat scan-system` puts all three
+  views in one document, so the missing rule is the only reason that comparison
+  is not made.
+  *Raised: correlator slice. Sharpened: system-scan slice.*
 - **Apache is not parsed, and was deliberately not half-done.** `SSLProtocol`,
   `SSLCipherSuite` and `SSLOpenSSLConfCmd Groups` are individually trivial, but
   Apache's endpoint lives in `<VirtualHost *:443>` plus `ServerName` -- a second

@@ -56,7 +56,16 @@ WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 #: these rather than hand back index.html -- an HTML 200 for a mistyped
 #: endpoint is the bug where a fetch "succeeds" and JSON.parse explodes three
 #: frames away.
-API_PREFIXES = ("api", "scans", "scanners", "health", "docs", "redoc", "openapi.json")
+API_PREFIXES = (
+    "api",
+    "scans",
+    "scanners",
+    "systems",
+    "health",
+    "docs",
+    "redoc",
+    "openapi.json",
+)
 
 #: Every route is defined once here and mounted twice: bare (the documented
 #: surface) and under `/api` (what the console fetches, matching the Vite dev
@@ -454,6 +463,65 @@ def create_rescore(scan_id: str, z_years: int | None = None) -> DerivedCreated:
     return DerivedCreated(
         scan_id=new_id, parent_scan_id=scan_id, kind=store.KIND_RESCORE
     )
+
+
+# ---------------------------------------------------------------------------
+# System scan: three views into one document (ADR-0019)
+# ---------------------------------------------------------------------------
+
+
+class SystemTargetIn(BaseModel):
+    #: Deliberately `str`, not a Literal. See SystemManifestIn.
+    kind: str
+    ref: str
+
+
+class SystemManifestIn(BaseModel):
+    """A system manifest, as JSON. The same shape the YAML file carries.
+
+    **The vocabularies are typed as plain strings on purpose.** Validation is
+    `core.system.parse_manifest`, and it is the ONLY manifest validator --
+    a Literal here would refuse a bad `kind` with FastAPI's own 422 before
+    ECDAT's checker ran, which means two validators that can disagree and a
+    manifest that loads from a file but not from the API. One validator, one
+    message, identical refusals from the CLI and the API.
+    """
+
+    system: str = ""
+    targets: list[SystemTargetIn] = Field(default_factory=list)
+    sector: str = "other"
+    exposure: str = "unknown"
+    data_class: str | None = None
+    z_years: int = Field(default=DEFAULT_Z_YEARS, ge=0, le=100)
+
+
+@router.post("/systems/scan", status_code=status.HTTP_201_CREATED)
+def create_system_scan(body: SystemManifestIn) -> ScanCreated:
+    """Scan every target in a manifest into ONE correlated CBOM.
+
+    Synchronous, like `POST /scans`, and slower — it runs every applicable
+    scanner over every target. The job model both of them want is still owed
+    (ADR-0003); a system scan wants it more.
+    """
+    from core.system import ManifestError, TargetUnreadableError, parse_manifest
+    from core.system import scan_system as run_system_scan
+
+    try:
+        manifest = parse_manifest(body.model_dump(exclude={"z_years"}))
+    except ManifestError as exc:
+        # A malformed manifest is the client's mistake, and refusing names the
+        # target that was wrong rather than silently scanning fewer views.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        scan_id = run_system_scan(manifest, default_context(), z_years=body.z_years)
+    except TargetUnreadableError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    scan = store.get_scan(scan_id)
+    if scan is None:  # pragma: no cover - the row was just committed
+        raise HTTPException(status_code=500, detail="scan disappeared after saving")
+    return ScanCreated(scan_id=scan.id, component_count=scan.component_count)
 
 
 # ---------------------------------------------------------------------------

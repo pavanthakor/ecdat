@@ -1,0 +1,46 @@
+# QuantumBank, as one SYSTEM rather than three separate targets (ADR-0019).
+#
+# This is what makes drift a product feature. Scanning the repo alone finds
+# what the team DECLARES; scanning the image alone finds what it SHIPS; reading
+# the spool alone finds what the host was OBSERVED doing. None of those, on its
+# own, can notice that payments:443 promises a post-quantum group its OpenSSL
+# 3.0.2 cannot negotiate. Only the union can.
+#
+# `ecdat scan-system testdata/quantumbank/system.yaml`
+#
+# ---------------------------------------------------------------------------
+# PATHS are used as given -- resolved against the process working directory,
+# exactly like `ecdat scan <ref>`. Run this from the repository root.
+# ---------------------------------------------------------------------------
+system: quantumbank
+
+# The scan context, applied to EVERY target: one system has one sector, one
+# exposure and one data classification, and scoring a component differently
+# depending on which target it happened to be found in would be incoherent.
+sector: bfsi
+exposure: internet
+data_class: Personal
+
+targets:
+  # DECLARED -- what the team says it uses. The source scanner reads the Python
+  # services, the config scanner reads deploy/ (nginx, sshd, openssl.cnf).
+  - kind: repo
+    ref: testdata/quantumbank
+
+  # SHIPPED -- what actually got built. A `docker save` tar, read as nested tar
+  # streams; nothing is unpacked (ADR-0006). This is the one carrying OpenSSL
+  # 3.0.2, whose PQC floor is 3.5.0.
+  - kind: image
+    ref: testdata/quantumbank/images/payments.tar
+
+  # OBSERVED -- what a host was really doing. A COMMITTED spool fixture, so a
+  # system scan is deterministic, offline and needs no root. The live eBPF
+  # agent that produces spools for real is a separate proof
+  # (`make prove-pillar2`) and is deliberately not on this path: an attach
+  # needs privileges a scan must never ask for.
+  #
+  # scan_system COPIES this into the scratch directory before ingesting it,
+  # because the spool scanner moves what it consumes (ADR-0010) and a fixture
+  # that ate itself would work exactly once.
+  - kind: spool
+    ref: testdata/quantumbank/spool
