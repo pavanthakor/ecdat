@@ -205,10 +205,13 @@ cannot be pip-installed into a venv. `make verify` checks both.
 
 ```bash
 make web      # build the dashboard into web/dist (needs npm; run once, ahead of time)
+.venv/bin/python cli.py api-key create --name ops --role admin   # once: prints the key to sign in with
 make serve    # uvicorn on :8000, serving the API *and* the built console
 ```
 
-Then open <http://127.0.0.1:8000/>. A dark, data-dense SOC-style console over
+Then open <http://127.0.0.1:8000/> and sign in with that key. Every API request
+needs one ([ADR-0035](docs/adr/0035-api-hardening.md)): a `viewer` key reads,
+and an `admin` key also runs scans and fix passes. A dark, data-dense SOC-style console over
 the CBOM: a risk summary strip read off the denormalised scan row, a sortable
 and filterable inventory table, a drill-down drawer with evidence, fired rules
 and drift — and the **Mosca slider**, which re-scores the stored document
@@ -460,7 +463,11 @@ before believing anything above:
   management is deferred.
 - **`scripts/setup.sh` has not run on a truly fresh machine.** Its dry run is
   verified; the real path is not.
-- **The API has no authentication** and `GET /scans` is unpaginated.
+- **API keys, not accounts, and no TLS of its own**
+  ([ADR-0035](docs/adr/0035-api-hardening.md)). Keys are bearer tokens checked
+  against a local key file. Serve on localhost or behind a TLS-terminating
+  proxy. Scan jobs run in the server process and do not survive a restart
+  (they are marked failed, not resumed).
 
 ---
 

@@ -276,13 +276,14 @@ describe("the drawer shows confidence for EVERY finding", () => {
 });
 
 describe("the candidates / confirmed filter", () => {
-  it("the Candidates toggle counts only ACTUAL candidates", () => {
+  it("the Candidates toggle counts only ACTUAL candidates; Confirmed counts the rest", () => {
     render(<Harness items={artefacts} />);
 
     const candidates = screen.getByRole("button", { name: /candidates/i });
     const confirmedButton = screen.getByRole("button", { name: /confirmed/i });
     expect(within(candidates).getByText("1")).toBeInTheDocument();
-    expect(within(confirmedButton).getByText("31")).toBeInTheDocument();
+    // 37 findings, 1 flagged: the 31 at 1.0 AND the five inferred at 0.6.
+    expect(within(confirmedButton).getByText("36")).toBeInTheDocument();
   });
 
   it("pressing 'Candidates' asks for candidates only", async () => {
@@ -319,21 +320,27 @@ describe("the candidates / confirmed filter", () => {
     expect(rows()).toHaveLength(1);
     expect(rows()[0]).toHaveAttribute("data-ref", candidate.bomRef);
 
+    // Confirmed = everything that is NOT a flagged candidate: the 1.0 rows AND
+    // the inferred 0.6 rows. Only the candidate is gone.
     await userEvent.click(screen.getByRole("button", { name: /confirmed/i }));
-    expect(rows()).toHaveLength(31);
-    expect(rows().every((row) => row.getAttribute("data-certainty") === "confirmed")).toBe(true);
-    expect(rows().some((row) => row.getAttribute("data-ref") === unresolved.bomRef)).toBe(false);
+    expect(rows()).toHaveLength(36);
+    expect(rows().some((row) => row.getAttribute("data-certainty") === "candidate")).toBe(false);
+    expect(rows().some((row) => row.getAttribute("data-ref") === candidate.bomRef)).toBe(false);
+    expect(rows().some((row) => row.getAttribute("data-ref") === unresolved.bomRef)).toBe(true);
 
     await userEvent.click(screen.getByRole("button", { name: /confirmed/i }));
     expect(rows()).toHaveLength(37);
   });
 
-  it("on a binary scan, Candidates finds nothing -- no heuristic is a candidate", async () => {
+  it("on a binary scan, Candidates finds nothing and Confirmed shows every finding", async () => {
     render(<Harness items={binary} />);
     expect(rows()).toHaveLength(22);
 
     await userEvent.click(screen.getByRole("button", { name: /candidates/i }));
     expect(screen.queryAllByRole("row").filter((row) => row.hasAttribute("data-certainty"))).toHaveLength(0);
     expect(screen.getByTestId("empty-state")).toHaveAttribute("data-empty-kind", "filtered-out");
+
+    await userEvent.click(screen.getByRole("button", { name: /confirmed/i }));
+    expect(rows()).toHaveLength(22);
   });
 });

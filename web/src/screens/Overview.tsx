@@ -12,11 +12,12 @@
 import { ArrowRight, ChevronRight, Download } from "lucide-react";
 import { useMemo } from "react";
 
-import { cbomUrl } from "@/api/client";
+import { cbomPath } from "@/api/client";
 import { BANDS, VIEWS } from "@/api/types";
+import { FileButton } from "@/components/FileButton";
 import { EmptyPanel, MetricCard, NotComputed } from "@/components/Honest";
 import { InfoTip } from "@/components/InfoTip";
-import { BandBadge, LinkButton, Panel, ScreenHeader, SkeletonBlock, Tag } from "@/components/Panel";
+import { BandBadge, Panel, ScreenHeader, SkeletonBlock, Tag } from "@/components/Panel";
 import { Slider } from "@/components/ui/slider";
 import { BAND_STYLE, cn, pad2, shortLocator } from "@/lib/format";
 import { hrefFor } from "@/lib/router";
@@ -87,13 +88,13 @@ export function OverviewScreen({ view }: { view: ScanView }) {
       }
       actions={
         scan ? (
-          <LinkButton
-            href={cbomUrl(scan.id)}
-            download={`qorbit-cbom-${scan.id.slice(0, 8)}.json`}
+          <FileButton
+            path={cbomPath(scan.id)}
+            filename={`qorbit-cbom-${scan.id.slice(0, 8)}.json`}
             title="Download the stored CBOM this overview is computed from"
           >
             <Download className="h-3.5 w-3.5" aria-hidden /> Export snapshot
-          </LinkButton>
+          </FileButton>
         ) : undefined
       }
     />

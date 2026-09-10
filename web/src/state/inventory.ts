@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getCbom, listScans, rescore } from "@/api/client";
+import { getCbom, getScan, listScans, rescore } from "@/api/client";
 import { parseCbom } from "@/api/parse";
 import type { Artefact, Band, ScanSummary, View } from "@/api/types";
 import { certaintyOf } from "./certainty";
@@ -29,9 +29,9 @@ export interface Filters {
   views: (View | string)[];
   driftOnly: boolean;
   /**
-   * Separates uncertain findings from confirmed ones. A row whose document
-   * recorded no confidence matches NEITHER toggle -- it is neither -- and is
-   * shown only under "all".
+   * Splits the table on the candidate FLAG (ADR-0034): "candidates" is the
+   * flagged findings, "confirmed" is every other row -- 1.0, inferred, or with
+   * no recorded confidence. Each row is in exactly one of the two.
    */
   certainty: CertaintyFilter;
   query: string;
@@ -103,7 +103,10 @@ export function applyFilters(artefacts: Artefact[], filters: Filters): Artefact[
     if (filters.certainty === "candidates" && certaintyOf(artefact) !== "candidate") {
       return false;
     }
-    if (filters.certainty === "confirmed" && certaintyOf(artefact) !== "confirmed") {
+    // "Confirmed" is everything NOT flagged a candidate: 1.0 findings and the
+    // inferred ones (a 0.6 parameter, a 0.9 binary heuristic) alike. Their
+    // confidence is still in the drawer; only the flag is a candidate.
+    if (filters.certainty === "confirmed" && certaintyOf(artefact) === "candidate") {
       return false;
     }
     return matchesQuery(artefact, filters.query);
@@ -193,14 +196,22 @@ export function useScanView(): ScanView {
     setLoading(true);
     setError(null);
     try {
-      const rows = await listScans();
-      setScans(rows);
-      const original = rows.filter((row) => row.kind === "scan");
-      const picked =
-        (chosen ? rows.find((row) => row.id === chosen) : undefined) ??
-        original[0] ??
-        rows[0] ??
-        null;
+      // The newest PAGE (ADR-0035), not every row ever stored.
+      const page = await listScans();
+      const rows = page.items;
+      let found: ScanSummary | null = null;
+      if (chosen) {
+        // Chosen from an older page of Scan History: fetch THAT row, rather
+        // than silently loading the newest scan in its place.
+        found = rows.find((row) => row.id === chosen) ?? (await getScan(chosen));
+      }
+      if (!found) found = rows.find((row) => row.kind === "scan") ?? null;
+      if (!found && page.total > rows.length) {
+        // A page of nothing but derived rows: the newest ORIGINAL is further back.
+        found = (await listScans({ kind: "scan", limit: 1 })).items[0] ?? null;
+      }
+      const picked = found ?? rows[0] ?? null;
+      setScans(picked && !rows.some((row) => row.id === picked.id) ? [...rows, picked] : rows);
       setScan(picked);
       if (picked) {
         setZ(picked.z_years ?? Z_DEFAULT);

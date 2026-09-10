@@ -179,7 +179,8 @@ console shows the family the pack stated and nothing more specific.
 
 ECDAT has no authentication. The menu opens, and every entry is disabled with
 a sentence saying why: it is cosmetic until the Tier-3 auth work lands, and the
-API is unauthenticated on localhost.
+API is unauthenticated on localhost. **Superseded by ADR-0035:** the menu now
+names the API key the console holds and its role, and "Sign out" works.
 
 ## Consequences
 
@@ -259,9 +260,11 @@ does not know which of those it was, and the sentence does not claim to.
 
 **A filter.** "Candidates" and "Confirmed" toggles sit beside "Drift only".
 They are exclusive and each shows its count. "Candidates" is the flag and
-nothing else. "Confirmed" is 1.0. An inferred or unrecorded row matches
-neither toggle and appears only under "all", so the word "Confirmed" never
-labels a finding the drawer calls "Inferred".
+nothing else. "Confirmed" is everything else: 1.0 findings, inferred ones, and
+rows with no recorded confidence. The two toggles partition the table, and the
+drawer still gives every row its confidence and reason. (Until ADR-0035 §6,
+"Confirmed" meant exactly 1.0. That left every inferred finding in neither
+toggle, including all 22 on a binary scan.)
 
 **Revised the same day: a candidate is a flag, not a number.** The first
 version (0d22a73) tagged every finding below 1.0. In the captured

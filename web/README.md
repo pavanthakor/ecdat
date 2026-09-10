@@ -104,7 +104,24 @@ and what says it is not computed.
 | | `#/compare` | `GET /scans/{a}/compare/{b}`, joined on bom-ref |
 | | `#/settings` | read-only facts about this console |
 
-The user menu in the top bar is **cosmetic** until authentication lands.
+The user menu names the API key the console holds and its role, and signs out
+([ADR-0035](../docs/adr/0035-api-hardening.md)).
+
+## Signing in
+
+Every API request carries a key. Issue one on the server, then paste it into
+the console's sign-in:
+
+```bash
+ecdat api-key create --name ops --role admin   # prints the key ONCE
+```
+
+The console asks for a key only when the server refuses it, and it checks a
+key with `GET /auth/whoami` before storing it (in localStorage, until you sign
+out). A **viewer** key reads everything except verified patches. An **admin**
+key also runs scans and fix passes. Scans and fix passes are jobs: the console
+polls `GET /jobs/{id}` until the scan is stored. PDFs and the CBOM are fetched
+with the key rather than linked, because a link cannot send a header.
 
 ## Layout
 
@@ -152,7 +169,7 @@ the shape one imagined, which is always the shape that works.
 
 ## What is tested
 
-Data logic and interaction — 181 tests. Each of these failures is invisible in
+Data logic and interaction — 209 tests. Each of these failures is invisible in
 a screenshot review: filtering that silently drops rows, a rescore that leaves
 a stale table, a provisional fact rendered as a verified one, a candidate
 rendered as a confirmed finding, and a metric nobody computed rendered as a
@@ -186,3 +203,11 @@ number. Column order is not.
   every Overview card follows the new document.
 * `lib/routing.test.tsx` — every nav entry, deep links, unknown routes, finding
   links into the drawer, and the top-bar search.
+* `api/client.test.ts` — the key on every request, a 401 that raises the
+  sign-in and a 403 that does not, pages, and job polling (done, failed,
+  aborted).
+* `state/auth.test.tsx` — the sign-in gate through the real `<App />`, the user
+  menu, sign-out, and what a viewer key is and is not offered.
+* `components/NewScanDialog.test.tsx` — a scan as a job: queued, running, the
+  scan id handed on only when done, the server's reason when it fails.
+* `screens/scans.test.tsx` — Scan History pages from the server.

@@ -25,8 +25,12 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.endsWith("/api/scans")) {
-        return new Response(JSON.stringify(scansDoc), { status: 200 });
+      if (url.split("?")[0].endsWith("/api/scans")) {
+        // A page, as GET /scans answers since ADR-0035.
+        return new Response(
+          JSON.stringify({ items: scansDoc, total: scansDoc.length, limit: 50, offset: 0 }),
+          { status: 200 },
+        );
       }
       if (url.endsWith("/cbom")) return new Response(JSON.stringify(z11Doc), { status: 200 });
       return new Response("{}", { status: 404 });

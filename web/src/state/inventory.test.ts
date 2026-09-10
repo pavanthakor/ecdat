@@ -153,8 +153,12 @@ function mockApi() {
     const url = typeof input === "string" ? input : String(input);
     calls.push(`${init?.method ?? "GET"} ${url}`);
 
-    if (url.endsWith("/api/scans")) {
-      return new Response(JSON.stringify(scansDoc), { status: 200 });
+    if (url.split("?")[0].endsWith("/api/scans")) {
+      // A page, as GET /scans answers since ADR-0035.
+      return new Response(
+        JSON.stringify({ items: scansDoc, total: scansDoc.length, limit: 50, offset: 0 }),
+        { status: 200 },
+      );
     }
     // `/cbom` FIRST: the rescored row's id is "rescored-1", and matching
     // "/rescore" by substring would swallow "/scans/rescored-1/cbom".

@@ -8,17 +8,22 @@
  * nothing here touches the target. The API carries a diff ONLY for a verified
  * fix, and this screen keeps that invariant visible: an unverified fix shows
  * its reason and no patch to copy.
+ *
+ * Since ADR-0035 a fix pass and a re-scan are JOBS: the screen queues one and
+ * follows it. And the patches are served to an ADMIN key only, so a viewer is
+ * told that plainly rather than shown a 403.
  */
 import { ArrowRight, Copy, FileSearch, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { createScan, getFixes, runFix } from "@/api/client";
-import type { Exposure, FixEntry, ScanSummary, Sector, TargetKind } from "@/api/types";
+import { createScan, getFixes, runFix, waitForJob } from "@/api/client";
+import type { Exposure, FixEntry, JobStatus, ScanSummary, Sector, TargetKind } from "@/api/types";
 import { DiffBlock } from "@/components/ArtefactDrawer";
 import { EmptyPanel } from "@/components/Honest";
 import { Button, LinkButton, Panel, ScreenHeader, SkeletonBlock, Tag } from "@/components/Panel";
 import { cn, formatDateTime, pad2 } from "@/lib/format";
 import { hrefFor } from "@/lib/router";
+import { canAdmin, useAuth } from "@/state/auth";
 import { Z_DEFAULT } from "@/state/inventory";
 import { diffStats, fipsTag } from "@/state/metrics";
 import { useRemote } from "@/state/remote";
@@ -93,33 +98,54 @@ function FixCard({ fix, onRescan, rescanning }: { fix: FixEntry; onRescan: () =>
   );
 }
 
+type Pass = { state: "idle" } | { state: "running"; job?: string; status?: JobStatus } | { state: "error"; message: string };
+
 export function FixesScreen({ scan }: { scan: ScanSummary | null }) {
-  const fixes = useRemote(scan ? `fixes:${scan.id}` : null, () => getFixes((scan as ScanSummary).id));
-  const [running, setRunning] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
+  const { principal } = useAuth();
+  const admin = canAdmin(principal);
+  const fixes = useRemote(scan && admin ? `fixes:${scan.id}` : null, () => getFixes((scan as ScanSummary).id));
+  const [pass, setPass] = useState<Pass>({ state: "idle" });
   const [rescan, setRescan] = useState<{ state: "idle" | "running" | "done" | "error"; message?: string }>({
     state: "idle",
   });
+  // Every job this screen follows; leaving the screen stops the following.
+  const following = useRef(new Set<AbortController>());
+  useEffect(() => {
+    const controllers = following.current;
+    return () => controllers.forEach((controller) => controller.abort());
+  }, []);
+
+  function follow(): AbortSignal {
+    const controller = new AbortController();
+    following.current.add(controller);
+    return controller.signal;
+  }
 
   async function runPass() {
     if (!scan) return;
-    setRunning(true);
-    setRunError(null);
+    const signal = follow();
+    setPass({ state: "running" });
     try {
-      await runFix(scan.id);
+      const accepted = await runFix(scan.id);
+      setPass({ state: "running", job: accepted.job_id, status: accepted.status });
+      await waitForJob(accepted.job_id, {
+        signal,
+        onUpdate: (job) => setPass({ state: "running", job: job.id, status: job.status }),
+      });
+      setPass({ state: "idle" });
       fixes.reload();
     } catch (cause) {
-      setRunError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setRunning(false);
+      if (signal.aborted) return;
+      setPass({ state: "error", message: cause instanceof Error ? cause.message : String(cause) });
     }
   }
 
   async function rescanTarget() {
     if (!scan) return;
-    setRescan({ state: "running" });
+    const signal = follow();
+    setRescan({ state: "running", message: "Queued a re-scan of the same target…" });
     try {
-      const created = await createScan({
+      const accepted = await createScan({
         kind: scan.target.kind as TargetKind,
         ref: scan.target.ref,
         system: scan.target.system,
@@ -128,21 +154,40 @@ export function FixesScreen({ scan }: { scan: ScanSummary | null }) {
         exposure: (scan.exposure ?? "unknown") as Exposure,
         z_years: scan.z_years ?? Z_DEFAULT,
       });
+      const done = await waitForJob(accepted.job_id, {
+        signal,
+        onUpdate: (job) =>
+          setRescan({ state: "running", message: `Re-scan job ${job.id.slice(0, 8)} is ${job.status}…` }),
+      });
       setRescan({
         state: "done",
-        message: `Stored as scan ${created.scan_id.slice(0, 8)} — select it in Scans, then compare.`,
+        message: `Stored as scan ${(done.scan_id ?? "?").slice(0, 8)} — select it in Scans, then compare.`,
       });
     } catch (cause) {
+      if (signal.aborted) return;
       setRescan({ state: "error", message: cause instanceof Error ? cause.message : String(cause) });
     }
   }
 
+  const running = pass.state === "running";
+  const runLabel =
+    pass.state === "running" && pass.job
+      ? `Fix pass job ${pass.job.slice(0, 8)} is ${pass.status ?? "queued"}. It re-scans each finding twice; this page follows it.`
+      : null;
   const data = fixes.data;
   const verified = data?.fixes.filter((f) => f.verified).length ?? 0;
 
   let body: React.ReactNode;
   if (!scan) {
     body = <EmptyPanel title="No scan selected" />;
+  } else if (!admin) {
+    body = (
+      <EmptyPanel title="Verified fixes need an admin key">
+        A verified patch is a working change to an estate's weakest cryptography, so the API serves
+        fix results to an admin key only (ADR-0035). This key is a viewer. The Inventory still shows
+        every finding with its recommended action.
+      </EmptyPanel>
+    );
   } else if (fixes.loading) {
     body = <SkeletonBlock className="h-40 w-full" />;
   } else if (fixes.error) {
@@ -155,8 +200,8 @@ export function FixesScreen({ scan }: { scan: ScanSummary | null }) {
     body = (
       <EmptyPanel title="No fix pass has been run for this scan">
         A fix pass copies the target to a sandbox, applies each applicable template, and re-scans
-        the copy to verify the finding is gone. It is slow — two re-scans per finding — and it
-        never modifies the target itself.
+        the copy to verify the finding is gone. It is slow — two re-scans per finding — so it runs
+        as a job on the server, and it never modifies the target itself.
         <div className="mt-3">
           <Button variant="primary" onClick={runPass} disabled={running}>
             {running ? "Running fix pass…" : "Run fix pass"}
@@ -208,7 +253,7 @@ export function FixesScreen({ scan }: { scan: ScanSummary | null }) {
         title="Verified Fixes"
         subtitle="Review evidence-backed migration patches before re-scan. Each was applied to a sandbox copy and verified by re-scanning it; nothing here touches your code, and a patch is shown only when its verification passed."
         actions={
-          data?.fix_scan_id ? (
+          admin && data?.fix_scan_id ? (
             <Button onClick={runPass} disabled={running}>
               <RefreshCw className="h-3.5 w-3.5" aria-hidden /> {running ? "Running…" : "Re-run fix pass"}
             </Button>
@@ -216,8 +261,13 @@ export function FixesScreen({ scan }: { scan: ScanSummary | null }) {
         }
       />
       <div className="space-y-3 px-6 pb-6">
-        {runError ? (
-          <p className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-[12px] text-critical">{runError}</p>
+        {runLabel ? (
+          <p data-testid="fix-job" className="rounded-md border border-line px-3 py-2 font-mono text-[11.5px] text-ink-dim">
+            {runLabel}
+          </p>
+        ) : null}
+        {pass.state === "error" ? (
+          <p className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-[12px] text-critical">{pass.message}</p>
         ) : null}
         {rescan.message ? (
           <p

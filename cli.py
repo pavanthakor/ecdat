@@ -28,6 +28,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from api import auth
 from core import registry, store
 from core.logs import configure_logging
 from core.orchestrator import (
@@ -268,6 +269,44 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="write the re-scored CBOM here instead of stdout",
     )
+
+    # --file sits on each action, so it can follow the action's own options:
+    # `ecdat api-key list --file keys.json`.
+    key_file = argparse.ArgumentParser(add_help=False)
+    key_file.add_argument(
+        "--file",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            f"the key file (default: ${auth.ENV_API_KEYS}, else "
+            "~/.config/ecdat/api-keys.json)"
+        ),
+    )
+    api_key = subcommands.add_parser(
+        "api-key",
+        help="issue, list or revoke the API keys the server accepts (ADR-0035)",
+    )
+    key_actions = api_key.add_subparsers(dest="key_command", required=True)
+    create_key = key_actions.add_parser(
+        "create", parents=[key_file], help="issue a key; the token is printed ONCE"
+    )
+    create_key.add_argument("--name", required=True, help="who or what holds the key")
+    create_key.add_argument(
+        "--role",
+        choices=auth.ROLES,
+        required=True,
+        help="viewer: read everything; admin: also run scans and fix passes",
+    )
+    key_actions.add_parser(
+        "list",
+        parents=[key_file],
+        help="list issued keys: names, roles and digests -- never tokens",
+    )
+    revoke_key = key_actions.add_parser(
+        "revoke", parents=[key_file], help="revoke a key; refused from the next request"
+    )
+    revoke_key.add_argument("--name", required=True)
     return parser
 
 
@@ -550,9 +589,57 @@ def _report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _list_keys(keys: Sequence[auth.ApiKey], path: Path) -> None:
+    print(f"key file: {path}")
+    if not keys:
+        print("no keys issued -- the API refuses every data request")
+        return
+    print(f"{'name':24}  {'role':6}  {'created':25}  digest")
+    for key in keys:
+        print(
+            f"{key.name:24}  {key.role:6}  {key.created_at:25}  "
+            f"sha256:{key.sha256[:12]}"
+        )
+
+
+def _api_key(args: argparse.Namespace) -> int:
+    """Issue, list or revoke API keys (ADR-0035). Touches the key file only.
+
+    The token goes to stdout ALONE, so ``TOKEN=$(ecdat api-key create ...)``
+    captures it, and everything said about it goes to stderr. It is printed
+    once: the file keeps only its digest, so a lost token is revoked and a new
+    one issued -- there is nothing to recover it from.
+    """
+    path: Path = args.file or auth.keys_path()
+    try:
+        if args.key_command == "create":
+            token = auth.add_key(args.name, args.role, path)
+            print(token)
+            print(
+                f"issued key {args.name!r} (role {args.role}) into {path}. The "
+                "token above is shown ONCE -- the file keeps only its SHA-256 "
+                "digest. Send it as `Authorization: Bearer <token>`, or paste it "
+                "into the console's sign-in.",
+                file=sys.stderr,
+            )
+        elif args.key_command == "list":
+            _list_keys(auth.load_keys(path), path)
+        else:
+            auth.revoke_key(args.name, path)
+            print(f"revoked key {args.name!r} in {path}", file=sys.stderr)
+    except (auth.KeyFileError, auth.UnknownKeyError, ValueError) as exc:
+        # KeyExistsError is a ValueError: a duplicate name is refused, named.
+        print(str(exc), file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "api-key":
+        return _api_key(args)
 
     if args.list_scanners:
         return _list_scanners()

@@ -453,13 +453,14 @@ def test_ecdat_scan_system_on_a_missing_manifest_fails_cleanly(
 
 
 def test_post_systems_scan_stores_a_three_view_scan_with_drift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, admin_headers: dict[str, str]
 ) -> None:
     monkeypatch.setenv("ECDAT_SCRATCH_DIR", str(tmp_path / "scratch"))
     body = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))
 
-    with TestClient(app) as client:
-        created = client.post("/systems/scan", json=body)
+    with TestClient(app, headers=admin_headers) as client:
+        # `?wait=true` is the synchronous path (ADR-0035): 201 once stored.
+        created = client.post("/systems/scan", params={"wait": "true"}, json=body)
         assert created.status_code == 201, created.text
         scan_id = created.json()["scan_id"]
 
@@ -480,11 +481,11 @@ def test_post_systems_scan_stores_a_three_view_scan_with_drift(
 
 
 def test_post_systems_scan_rejects_a_bad_manifest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, admin_headers: dict[str, str]
 ) -> None:
     monkeypatch.setenv("ECDAT_SCRATCH_DIR", str(tmp_path / "scratch"))
 
-    with TestClient(app) as client:
+    with TestClient(app, headers=admin_headers) as client:
         response = client.post(
             "/systems/scan",
             json={"system": "x", "targets": [{"kind": "nope", "ref": "a"}]},

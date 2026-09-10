@@ -124,11 +124,14 @@
   `tests/test_registry.py` asserts, by parsing the AST of every module, that
   nothing imports `scanners.stub` again.
   *Raised: Phase 0, scan pipe slice. Resolved: scanner-registry slice.*
-- **`POST /scans` is synchronous.** The request blocks until the whole scan
-  finishes, which is acceptable for a stub and not for a real repo, image or
-  host scan. Needs a job model: accept, return a scan id immediately, and let
-  the dashboard poll status.
-  *Raised: Phase 0, scan pipe slice. See ADR-0003 Consequences.*
+- ~~**`POST /scans` is synchronous.**~~ **Resolved** by
+  [ADR-0035](docs/adr/0035-api-hardening.md): it answers 202 with a job id at
+  once, a worker thread runs the scan, and `GET /jobs/{id}` reports pending,
+  running, done (with the scan id) or failed (with the reason). The console
+  polls it; `?wait=true` keeps a synchronous path. *Was:* the request blocked
+  until the whole scan finished.
+  *Raised: Phase 0, scan pipe slice. See ADR-0003 Consequences. Resolved: API
+  hardening slice.*
 - **Schema changes are additive-only, by rule, not by accident.** `init_db()`
   introspects `PRAGMA table_info` and issues `ALTER TABLE ... ADD COLUMN` for
   anything missing (ADR-0016). Deliberate while ECDAT is one SQLite file per
@@ -152,11 +155,12 @@
   are meaningful (a fix re-verified under a new horizon?) or should be refused,
   before the dashboard starts rendering trees.
   *Raised: store migration.*
-- **`POST /scans/{id}/fix` is synchronous and slower than a scan.** Verifying a
-  fix copies the target and re-scans it twice per finding, so the request blocks
-  for the whole pass. The same job model `POST /scans` has owed since ADR-0003,
-  now with a worse worst case.
-  *Raised: store migration.*
+- ~~**`POST /scans/{id}/fix` is synchronous and slower than a scan.**~~
+  **Resolved** by [ADR-0035](docs/adr/0035-api-hardening.md): a fix pass is a
+  job (202 + job id; the console's Fixes screen polls it). A stored row whose
+  target kind ECDAT cannot classify is still refused at once (400), not queued
+  to fail. *Was:* the request blocked for the whole pass.
+  *Raised: store migration. Resolved: API hardening slice.*
 - **The migration backfills every un-summarised CBOM at first open.** One-off
   and bounded by the number of pre-migration rows, but it makes the first open
   of a large legacy database slower than every open after it. Fine at current
@@ -233,7 +237,11 @@
   `kind: "fix"` row is selected -- there is just no dedicated view and no way
   to start a fix pass from the console.
   *Raised: dashboard slice 1.*
-- **The console has no authentication, and it widens the API gap.** It is a
+- ~~**The console has no authentication, and it widens the API gap.**~~
+  **Resolved** by [ADR-0035](docs/adr/0035-api-hardening.md): the console
+  sends an API key on every request, raises a sign-in gate on any 401 with the
+  server's reason, and its user menu names the key and its role. A viewer is
+  not offered scans, fix passes or patches. *Was:* It is a
   static SPA served by the same FastAPI process, so it inherits the API's
   existing authn hole exactly -- and it now puts an estate's full inventory AND
   its verified fix diffs one URL away on an unauthenticated port. No new hole,
@@ -282,8 +290,12 @@
   the stated SOC-console reference rather than that guidance. Worth a review by
   someone who has it before the console is treated as final.
   *Raised: dashboard slice 1.*
-- **`scan-system` is SYNCHRONOUS, and it wants the job model more than
-  `POST /scans` does.** It runs every applicable scanner over every target and
+- ~~**`scan-system` is SYNCHRONOUS, and it wants the job model more than
+  `POST /scans` does.**~~ **Resolved for the API** by
+  [ADR-0035](docs/adr/0035-api-hardening.md): `POST /systems/scan` is a job,
+  and a target the job cannot read fails it with the target named. The CLI's
+  `scan-system` stays synchronous on purpose: a terminal waits either way.
+  *Was:* It runs every applicable scanner over every target and
   blocks until they are all done -- ~1.5s on QuantumBank, and a real estate
   will not be that. The async job model owed since ADR-0003 now has two
   callers asking for it.
@@ -394,7 +406,35 @@
   precedes its release compares as equal to it. Shared with the container
   scanner via `scanners/libraries.py`, so a fix lands in one place.
   *Raised: deps-scanner slice.*
-- **The API has no authentication and `GET /scans` is unpaginated.** It serves
+- **ADR-0035's own limits.**
+  - **No TLS of its own.** API keys are bearer tokens: serve on localhost or
+    behind a TLS-terminating proxy.
+  - **Keys have no expiry or rotation schedule.**
+  - **No rate limit or lockout** on failed attempts.
+  - **A thin audit trail:** a job's `requested_by`, plus log lines.
+  - **Jobs run in the server process and do not survive a restart.** The next
+    start marks them failed; it does not resume them.
+  - **One API process per database.** The startup sweep would fail another
+    process's running jobs.
+  - **A viewer may rescore,** so a viewer can add rescore rows.
+  - **The console keeps its key in localStorage,** and the server sends no CSP
+    header yet.
+  - **`/docs` and `/openapi.json` are open.**
+  - **Offset pages shift by one** if a row lands mid-browse.
+  - **The top bar and Compare offer only the newest 50 rows.** Older ones are
+    reached through Scan History.
+  *Raised: API hardening slice. See [ADR-0035](docs/adr/0035-api-hardening.md).*
+- ~~**The API has no authentication and `GET /scans` is unpaginated.**~~
+  **Resolved** by [ADR-0035](docs/adr/0035-api-hardening.md):
+  - **Auth:** every data route needs an API key. It is a bearer token; the
+    server keeps SHA-256 digests in a key file outside the repository and
+    checks them locally.
+  - **Roles:** `viewer` reads. `admin` also triggers scans and fix passes, and
+    reads `GET /scans/{id}/fixes`.
+  - **Pages:** `GET /scans` and `GET /jobs` answer
+    `{items, total, limit, offset}`, default 50, max 500.
+
+  *Was:* It serves
   an estate's complete cryptographic inventory over plain localhost CORS. Needs
   authn/authz and pagination before it is exposed anywhere but a developer
   machine. **Widened by the store migration:** `GET /scans` now also returns
@@ -594,6 +634,16 @@
   from a variable and every binary-scanner finding. The JS-fixture scan now
   tags 1 of 37 components, not 6, and the binary-fixture scan tags 0 of 22, not
   all 22. *Raised and resolved: candidate/confidence display slice.*
+- ~~**"Confirmed" meant exactly 1.0, so an inferred finding was in neither
+  toggle.**~~ **Resolved** by [ADR-0035](docs/adr/0035-api-hardening.md) §6.
+  "Confirmed" is now every row NOT flagged a candidate, so the two toggles
+  partition the table:
+  - JS-fixture scan: 1 candidate and 36 confirmed out of 37 (it was 31
+    confirmed);
+  - binary scan: 0 candidates and 22 confirmed out of 22 (it was 0 confirmed).
+
+  The drawer still shows each finding's confidence and its reason. *Raised:
+  candidate-tag follow-up. Resolved: API hardening slice (Part 0).*
 - **The console and the coverage PDF do not read `ecdat:coverage:*` yet.** A
   scan whose every file failed to parse is honest in the stored document ("
   nothing could be parsed ... not a clean result") and still LOOKS empty in the
@@ -949,7 +999,8 @@
   attach-then-signal handshake rather than the operator's timing.
   *Raised: eBPF agent slice 1.*
 - **Production transport for observed findings is still a file spool.** ADR-0010
-  chose a directory over authenticated HTTP deliberately: the API has no authn,
+  chose a directory over authenticated HTTP deliberately: the API had no authn
+  (it has API keys since ADR-0035, and the next reason still holds),
   and a root sensor holding an API credential would undo the privilege split
   the scan path exists to keep. That reasoning holds for a single host and does
   not for a fleet -- a distributed deployment needs a real transport, which
@@ -1355,8 +1406,11 @@
   sends the reader to Inventory → Drift → Roadmap. Blast radius could start from
   the correlator's peer data. *Raised: Q-orbit console slice.*
 - **No scan start time or duration is stored.** The row carries its save time
-  only, so the Scans screen's **Started** column says "not recorded". Arrives
-  naturally with the job model (ADR-0003). *Raised: Q-orbit console slice.*
+  only, so the Scans screen's **Started** column says "not recorded".
+  **Update (ADR-0035):** a JOB now records `started_at` and `finished_at`, but
+  only for work the API ran, and the scan row itself still carries neither. The
+  column keeps saying "not recorded" rather than showing a time for some rows
+  and not others. *Raised: Q-orbit console slice.*
 - **Drift has no "next check".** Nothing re-runs a scan on a schedule, so each
   drift panel says *not scheduled — re-scan to re-check*. A monitoring job
   (the eBPF agent in daemon mode, plus a periodic system scan) would give it a
@@ -1399,5 +1453,7 @@
   - **A roadmap priority distinct from band** ("Critical · High"): no such fact.
   - **Notifications** (the top-bar bell): nothing raises alerts; the bell is left
     out rather than shown silent.
-  - **A named user** ("Alex Kim, Analyst / Tier 2"): authentication, above.
+  - **A named user** ("Alex Kim, Analyst / Tier 2"): ECDAT has API keys, not
+    accounts (ADR-0035). The menu shows the key's name and role, which is as
+    much of a person as ECDAT knows.
   *Raised: design-match slice (ADR-0032).*

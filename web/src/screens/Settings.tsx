@@ -1,12 +1,14 @@
 /**
- * SETTINGS -- what this console is connected to. Read-only: nothing here is
- * configurable from the browser yet, and the screen says so rather than
- * offering controls that change nothing. (No design screenshot exists for this
- * screen; it uses the same card language as the rest, ADR-0032.)
+ * SETTINGS -- what this console is connected to, and with which key.
+ * Read-only: nothing here is configurable from the browser, and the screen
+ * says so rather than offering controls that change nothing. (No design
+ * screenshot exists for this screen; it uses the same card language as the
+ * rest, ADR-0032.)
  */
-import { API_BASE } from "@/api/client";
+import { API_BASE, TOKEN_STORAGE_KEY } from "@/api/client";
 import type { Artefact, ScanSummary } from "@/api/types";
 import { Panel, ScreenHeader, Tag } from "@/components/Panel";
+import { useAuth } from "@/state/auth";
 import { engineLine } from "@/state/presentation";
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -18,13 +20,19 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+const ROLE_MEANS: Record<string, string> = {
+  admin: "admin — reads everything, runs scans and fix passes, reads verified patches",
+  viewer: "viewer — reads everything except verified patches; scans and fixes need an admin key",
+};
+
 export function SettingsScreen({ scan, artefacts }: { scan: ScanSummary | null; artefacts: Artefact[] }) {
+  const { principal } = useAuth();
   const engine = scan ? engineLine(scan, artefacts) : null;
   return (
     <div>
       <ScreenHeader
         title="Settings"
-        subtitle="What this console is connected to and how it was built. Nothing here is editable from the browser yet."
+        subtitle="What this console is connected to, with which key, and how it was built. Nothing here is editable from the browser."
       />
       <div className="grid gap-4 px-6 pb-6 xl:grid-cols-2">
         <Panel eyebrow="Build" title="Console" bodyClassName="pt-2">
@@ -38,11 +46,21 @@ export function SettingsScreen({ scan, artefacts }: { scan: ScanSummary | null; 
         </Panel>
         <Panel eyebrow="Access" title="Authentication" bodyClassName="pt-2">
           <dl>
-            <Row label="Status" value={<Tag variant="provisional">Not configured</Tag>} />
-            <Row label="User menu" value="cosmetic until the Tier-3 authentication work lands; every entry is disabled" />
+            <Row label="Scheme" value={<Tag variant="verified">API key · bearer (ADR-0035)</Tag>} />
+            <Row label="Key" value={principal ? principal.name : "not known — the server has not said whose key this is"} />
+            <Row label="Role" value={principal ? (ROLE_MEANS[principal.role] ?? principal.role) : "not known"} />
             <Row
-              label="Exposure"
-              value="the API serves this inventory and its verified fix diffs unauthenticated on localhost (PUNCHLIST)"
+              label="Check"
+              value="on the server, against its key file: the SHA-256 digest of the key is compared with each issued one. No identity provider, no network call."
+            />
+            <Row
+              label="Kept"
+              value={
+                <>
+                  in this browser's local storage (<code className="font-mono">{TOKEN_STORAGE_KEY}</code>) until you
+                  sign out; revoking it is <code className="font-mono">ecdat api-key revoke</code> on the server
+                </>
+              }
             />
           </dl>
         </Panel>

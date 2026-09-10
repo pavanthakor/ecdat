@@ -441,12 +441,15 @@ def test_ecdat_report_on_an_unknown_scan_fails_cleanly(
     assert "no-such-scan" in capsys.readouterr().err
 
 
-def test_the_api_serves_each_report_as_a_pdf(system_scan: str) -> None:
+def test_the_api_serves_each_report_as_a_pdf(
+    system_scan: str, viewer_headers: dict[str, str]
+) -> None:
     from fastapi.testclient import TestClient
 
     from api.app import app
 
-    with TestClient(app) as client:
+    # A report is a read: a viewer key is enough (ADR-0035).
+    with TestClient(app, headers=viewer_headers) as client:
         for kind in ("executive", "technical", "coverage"):
             response = client.get(f"/scans/{system_scan}/report/{kind}")
             assert response.status_code == 200, response.text
@@ -454,11 +457,13 @@ def test_the_api_serves_each_report_as_a_pdf(system_scan: str) -> None:
             assert is_pdf(response.content)
 
 
-def test_the_api_refuses_an_unknown_report_kind(system_scan: str) -> None:
+def test_the_api_refuses_an_unknown_report_kind(
+    system_scan: str, viewer_headers: dict[str, str]
+) -> None:
     from fastapi.testclient import TestClient
 
     from api.app import app
 
-    with TestClient(app) as client:
+    with TestClient(app, headers=viewer_headers) as client:
         assert client.get(f"/scans/{system_scan}/report/nope").status_code == 400
         assert client.get("/scans/nope/report/executive").status_code == 404

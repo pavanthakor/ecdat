@@ -25,14 +25,20 @@ MINIMAL_COMPONENTS = 2
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
-    with TestClient(app) as test_client:
+def client(admin_headers: dict[str, str]) -> Iterator[TestClient]:
+    """An ADMIN client: these tests trigger scans and fixes (ADR-0035)."""
+    with TestClient(app, headers=admin_headers) as test_client:
         yield test_client
 
 
 def post_scan(client: TestClient, **body: object) -> dict[str, object]:
+    """Scan synchronously (`?wait=true`): the row exists when this returns.
+
+    The asynchronous 202 path has its own tests in test_api_jobs.py; here the
+    subject is what a stored scan looks like, so waiting for it is the point.
+    """
     payload = {"kind": "repo", "ref": MINIMAL_REPO, **body}
-    response = client.post("/scans", json=payload)
+    response = client.post("/scans", params={"wait": "true"}, json=payload)
     assert response.status_code == 201, response.text
     return dict(response.json())
 
@@ -161,7 +167,7 @@ def test_list_scans_summarises_newest_first(client: TestClient) -> None:
     response = client.get("/scans")
 
     assert response.status_code == 200
-    summaries = response.json()
+    summaries = response.json()["items"]
     assert [s["id"] for s in summaries] == [second, first]
     assert summaries[0]["target"] == {
         "kind": "repo",
@@ -177,7 +183,7 @@ def test_list_scans_summarises_newest_first(client: TestClient) -> None:
 
 
 def test_list_scans_is_empty_before_any_scan(client: TestClient) -> None:
-    assert client.get("/scans").json() == []
+    assert client.get("/scans").json()["items"] == []
 
 
 def test_cors_allows_the_local_dashboard(client: TestClient) -> None:
@@ -197,7 +203,7 @@ def test_scan_summary_carries_policy_bands(client: TestClient) -> None:
     """The dashboard reads bands off the summary rather than scoring itself."""
     post_scan(client)
 
-    (summary,) = client.get("/scans").json()
+    (summary,) = client.get("/scans").json()["items"]
 
     assert set(summary["band_counts"]) == {"Critical", "High", "Medium", "Low"}
     # RSA-2048 is Shor-broken (Medium at the quantum cap); SHA-256 is Low.
@@ -256,7 +262,7 @@ def test_list_scans_summary_matches_a_full_cbom_parse(client: TestClient) -> Non
     assert stored is not None
     expected = summarise(json.loads(stored.cbom_json))
 
-    (summary,) = client.get("/scans").json()
+    (summary,) = client.get("/scans").json()["items"]
 
     assert summary["band_counts"] == expected.band_counts
     assert summary["max_score"] == expected.max_score
@@ -267,11 +273,11 @@ def test_list_scans_summary_matches_a_full_cbom_parse(client: TestClient) -> Non
 def test_list_scans_does_not_parse_the_stored_cbom(client: TestClient) -> None:
     """The load-bearing assertion: corrupt the document, summary unchanged."""
     scan_id = post_scan_id(client)
-    (before,) = client.get("/scans").json()
+    (before,) = client.get("/scans").json()["items"]
 
     corrupt_stored_cbom(scan_id)
 
-    (after,) = client.get("/scans").json()
+    (after,) = client.get("/scans").json()["items"]
     assert after == before
 
 
@@ -284,7 +290,7 @@ def test_mutation_summarising_from_the_cbom_breaks_the_corrupted_row(
     from core.summary import summarise
 
     scan_id = post_scan_id(client)
-    (before,) = client.get("/scans").json()
+    (before,) = client.get("/scans").json()["items"]
     corrupt_stored_cbom(scan_id)
 
     def parse_the_document(scan: store.Scan) -> object:
@@ -300,7 +306,7 @@ def test_mutation_summarising_from_the_cbom_breaks_the_corrupted_row(
 def test_list_scans_reports_which_scanners_ran(client: TestClient) -> None:
     post_scan(client, scanners=["source"])
 
-    (summary,) = client.get("/scans").json()
+    (summary,) = client.get("/scans").json()["items"]
 
     assert [entry["id"] for entry in summary["scanners_ran"]] == ["source"]
 
@@ -316,7 +322,7 @@ def test_list_scans_distinguishes_an_unknown_scanner_set_from_an_empty_one(
         Target(kind="repo", ref="/legacy"), '{"components":[]}'
     )
 
-    summaries = {s["id"]: s for s in client.get("/scans").json()}
+    summaries = {s["id"]: s for s in client.get("/scans").json()["items"]}
 
     assert summaries[unknown_id]["scanners_ran"] is None
     empty = next(s for i, s in summaries.items() if i != unknown_id)
@@ -336,7 +342,9 @@ def test_post_fix_creates_a_linked_fix_row_and_leaves_the_parent_alone(
     scan_id = post_scan_id(client, sector="bfsi", exposure="internet")
     parent_before = client.get(f"/scans/{scan_id}/cbom").text
 
-    response = client.post(f"/scans/{scan_id}/fix", json={"scanners": ["source"]})
+    response = client.post(
+        f"/scans/{scan_id}/fix", params={"wait": "true"}, json={"scanners": ["source"]}
+    )
 
     assert response.status_code == 201, response.text
     fix_scan_id = response.json()["scan_id"]
@@ -354,7 +362,9 @@ def test_post_fix_inherits_the_parents_scoring_context(client: TestClient) -> No
 
     scan_id = post_scan_id(client, sector="bfsi", exposure="internet", z_years=7)
 
-    fix_id = client.post(f"/scans/{scan_id}/fix", json={}).json()["scan_id"]
+    fix_id = client.post(
+        f"/scans/{scan_id}/fix", params={"wait": "true"}, json={}
+    ).json()["scan_id"]
 
     fix_row = store.get_scan(fix_id)
     assert fix_row is not None
@@ -374,7 +384,9 @@ def test_get_fixes_returns_nothing_before_a_fix_pass(client: TestClient) -> None
 
 def test_get_fixes_returns_the_fix_results(client: TestClient) -> None:
     scan_id = post_scan_id(client)
-    fix_id = client.post(f"/scans/{scan_id}/fix", json={}).json()["scan_id"]
+    fix_id = client.post(
+        f"/scans/{scan_id}/fix", params={"wait": "true"}, json={}
+    ).json()["scan_id"]
 
     body = client.get(f"/scans/{scan_id}/fixes").json()
 
@@ -422,11 +434,11 @@ def test_scan_summaries_carry_their_kind_and_parent(client: TestClient) -> None:
     scan_id = post_scan_id(client)
     client.post(f"/scans/{scan_id}/rescore", params={"z_years": 30})
 
-    summaries = client.get("/scans").json()
+    summaries = client.get("/scans").json()["items"]
     kinds = {s["kind"] for s in summaries}
 
     assert kinds == {"scan", "rescore"}
-    scans_only = client.get("/scans", params={"kind": "scan"}).json()
+    scans_only = client.get("/scans", params={"kind": "scan"}).json()["items"]
     assert [s["id"] for s in scans_only] == [scan_id]
 
 

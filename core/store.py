@@ -52,8 +52,10 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    func,
     select,
     text,
+    update,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -62,21 +64,35 @@ from core.summary import summarise
 
 __all__ = [
     "ENV_DB_PATH",
+    "JOB_DONE",
+    "JOB_FAILED",
+    "JOB_PENDING",
+    "JOB_RUNNING",
     "KIND_FIX",
     "KIND_RESCORE",
     "KIND_SCAN",
+    "Job",
     "Scan",
     "ScannerRecord",
     "StoredContext",
     "UnknownScanError",
     "children_of",
+    "count_jobs",
+    "count_scans",
+    "create_job",
     "database_location",
     "database_path",
     "database_url",
+    "fail_unfinished_jobs",
+    "get_job",
     "get_scan",
     "init_db",
     "latest_child",
+    "list_jobs",
     "list_scans",
+    "mark_job_done",
+    "mark_job_failed",
+    "mark_job_running",
     "reset_engines",
     "save_fix_result",
     "save_rescore",
@@ -200,6 +216,53 @@ class Scan(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Scan {self.id} {self.kind} {self.target_kind}:{self.target_ref}>"
+
+
+#: A job's lifecycle (ADR-0035). Plain strings, like ``kind``, so adding a
+#: state later is not a migration.
+JOB_PENDING = "pending"
+JOB_RUNNING = "running"
+JOB_DONE = "done"
+JOB_FAILED = "failed"
+
+
+class Job(Base):
+    """One piece of asynchronous API work: a scan, a system scan, a fix pass.
+
+    A job is the REQUEST for a scan, not the scan. It exists before the scan
+    does (pending, running) and after one failed to exist at all (failed, with
+    the reason). ``scan_id`` is set only once the work has stored its row.
+
+    A table of its own rather than columns on ``scans``: a failed job has no
+    scan row to hang off, and the append-only history (ADR-0016) must not grow
+    placeholder rows for work that never finished. ``create_all`` adds the
+    table to an older database like any new table; no column migration.
+    """
+
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    #: ``scan``, ``system-scan`` or ``fix`` -- the API's vocabulary.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: What the job is about, for a human: ``repo testdata/quantumbank``.
+    subject: Mapped[str] = mapped_column(String(2048), nullable=False)
+    parent_scan_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    #: The row the work stored: NULL until ``done``, and forever if ``failed``.
+    scan_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    #: Why it failed -- the exception's type and message. NULL unless ``failed``.
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The NAME of the API key that asked. Never the key.
+    requested_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -543,17 +606,28 @@ def get_scan(scan_id: str) -> Scan | None:
         return scan
 
 
-def list_scans(*, kind: str | None = None) -> list[Scan]:
-    """Every row, newest first. The id breaks ties so the order is total.
+def list_scans(
+    *, kind: str | None = None, limit: int | None = None, offset: int = 0
+) -> list[Scan]:
+    """Rows newest first. The id breaks ties so the order is total.
 
     Derived rows are listed like any other by default rather than filtered out:
     hiding them would make a fix pass invisible in the one place an operator
     looks for what ECDAT has done. ``kind`` narrows when a caller wants only
     original scans.
+
+    ``limit`` and ``offset`` take one page of that order (ADR-0035); ``None``
+    means every row, which is what ``ecdat scans`` still prints. The total
+    order is what makes paging safe: with ties broken arbitrarily, a row could
+    land on two pages, or on none.
     """
     statement = select(Scan).order_by(Scan.created_at.desc(), Scan.id.desc())
     if kind is not None:
         statement = statement.where(Scan.kind == kind)
+    if offset:
+        statement = statement.offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
     with Session(_ensure_initialised()) as session:
         scans = list(session.scalars(statement))
         for scan in scans:
@@ -583,3 +657,137 @@ def latest_child(scan_id: str, *, kind: str) -> Scan | None:
     """The most recent derived row of ``kind``, or ``None``."""
     children = children_of(scan_id, kind=kind)
     return children[0] if children else None
+
+
+def count_scans(*, kind: str | None = None) -> int:
+    """How many rows :func:`list_scans` has in all, before any page is taken."""
+    statement = select(func.count()).select_from(Scan)
+    if kind is not None:
+        statement = statement.where(Scan.kind == kind)
+    with Session(_ensure_initialised()) as session:
+        return int(session.scalar(statement) or 0)
+
+
+# ---------------------------------------------------------------------------
+# Jobs (ADR-0035)
+# ---------------------------------------------------------------------------
+
+
+def _now() -> datetime:
+    return datetime.now(tz=UTC)
+
+
+def _detached(session: Session, job: Job) -> Job:
+    job.created_at = _as_utc(job.created_at)
+    job.started_at = None if job.started_at is None else _as_utc(job.started_at)
+    job.finished_at = None if job.finished_at is None else _as_utc(job.finished_at)
+    session.expunge(job)
+    return job
+
+
+def create_job(
+    kind: str,
+    *,
+    subject: str,
+    parent_scan_id: str | None = None,
+    requested_by: str | None = None,
+) -> str:
+    """Record a job as ``pending`` and return its id."""
+    job = Job(
+        id=str(uuid.uuid4()),
+        kind=kind,
+        status=JOB_PENDING,
+        subject=subject,
+        parent_scan_id=parent_scan_id,
+        requested_by=requested_by,
+        created_at=_now(),
+    )
+    job_id = job.id
+    with Session(_ensure_initialised()) as session:
+        session.add(job)
+        session.commit()
+    return job_id
+
+
+def _transition(job_id: str, *, allowed_from: tuple[str, ...], **values: Any) -> None:
+    """Move a job on -- but only out of a state it is allowed to leave.
+
+    Conditional on purpose: nothing may revive a finished job, and a failure
+    recorded by a shutdown or a startup sweep must not be overwritten.
+    """
+    statement = (
+        update(Job)
+        .where(Job.id == job_id, Job.status.in_(allowed_from))
+        .values(**values)
+    )
+    with Session(_ensure_initialised()) as session:
+        session.execute(statement)
+        session.commit()
+
+
+def mark_job_running(job_id: str) -> None:
+    _transition(
+        job_id, allowed_from=(JOB_PENDING,), status=JOB_RUNNING, started_at=_now()
+    )
+
+
+def mark_job_done(job_id: str, scan_id: str) -> None:
+    _transition(
+        job_id,
+        allowed_from=(JOB_RUNNING,),
+        status=JOB_DONE,
+        scan_id=scan_id,
+        finished_at=_now(),
+    )
+
+
+def mark_job_failed(job_id: str, error: str) -> None:
+    _transition(
+        job_id,
+        allowed_from=(JOB_PENDING, JOB_RUNNING),
+        status=JOB_FAILED,
+        error=error,
+        finished_at=_now(),
+    )
+
+
+def fail_unfinished_jobs(reason: str) -> list[str]:
+    """Fail every job still pending or running; return their ids.
+
+    For server startup. Jobs run in the process that accepted them, so one
+    that is unfinished when a new process starts will never finish -- saying
+    "running" forever would be a lie told by the job table itself.
+    """
+    unfinished = (JOB_PENDING, JOB_RUNNING)
+    with Session(_ensure_initialised()) as session:
+        ids = list(session.scalars(select(Job.id).where(Job.status.in_(unfinished))))
+        if ids:
+            session.execute(
+                update(Job)
+                .where(Job.id.in_(ids), Job.status.in_(unfinished))
+                .values(status=JOB_FAILED, error=reason, finished_at=_now())
+            )
+            session.commit()
+    return ids
+
+
+def get_job(job_id: str) -> Job | None:
+    with Session(_ensure_initialised()) as session:
+        job = session.get(Job, job_id)
+        return None if job is None else _detached(session, job)
+
+
+def list_jobs(*, limit: int | None = None, offset: int = 0) -> list[Job]:
+    """Jobs newest first, the id breaking ties -- the same total order as scans."""
+    statement = select(Job).order_by(Job.created_at.desc(), Job.id.desc())
+    if offset:
+        statement = statement.offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
+    with Session(_ensure_initialised()) as session:
+        return [_detached(session, job) for job in session.scalars(statement).all()]
+
+
+def count_jobs() -> int:
+    with Session(_ensure_initialised()) as session:
+        return int(session.scalar(select(func.count()).select_from(Job)) or 0)

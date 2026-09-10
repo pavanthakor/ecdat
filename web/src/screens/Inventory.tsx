@@ -16,6 +16,7 @@ import { InventoryTable } from "@/components/InventoryTable";
 import { Button, ScreenHeader } from "@/components/Panel";
 import { downloadText } from "@/lib/download";
 import { navigate } from "@/lib/router";
+import { canAdmin, NEEDS_ADMIN, useAuth } from "@/state/auth";
 import {
   applyFilters,
   NO_FILTERS,
@@ -61,14 +62,19 @@ export function InventoryScreen({
   const certainty = useMemo(() => certaintyCountsOf(view.artefacts), [view.artefacts]);
   const collected = useMemo(() => collectedViews(view.artefacts), [view.artefacts]);
 
-  const fixes = useRemote(scanId && selected ? `fixes:${scanId}` : null, () =>
+  // Fix results are served to an admin key only (ADR-0035): a viewer's drawer
+  // says so, rather than asking for them and rendering the 403.
+  const admin = canAdmin(useAuth().principal);
+  const fixes = useRemote(admin && scanId && selected ? `fixes:${scanId}` : null, () =>
     getFixes(scanId as string),
   );
-  const fixLookup: FixLookup = fixes.loading
-    ? { status: "loading" }
-    : fixes.error
-      ? { status: "error", message: fixes.error }
-      : { status: "loaded", entry: fixes.data?.fixes.find((f) => f.bom_ref === selectedRef) ?? null };
+  const fixLookup: FixLookup = !admin
+    ? { status: "error", message: NEEDS_ADMIN }
+    : fixes.loading
+      ? { status: "loading" }
+      : fixes.error
+        ? { status: "error", message: fixes.error }
+        : { status: "loaded", entry: fixes.data?.fixes.find((f) => f.bom_ref === selectedRef) ?? null };
 
   const params = (ref?: string): Record<string, string> => {
     const next: Record<string, string> = {};
@@ -132,7 +138,7 @@ export function InventoryScreen({
           filtersOpen={filtersOpen}
           driftCount={driftCount}
           candidateCount={certainty.candidate}
-          confirmedCount={certainty.confirmed}
+          confirmedCount={view.artefacts.length - certainty.candidate}
           caption={collected.length > 0 ? `${collected.join(", ")} collected` : undefined}
         />
       </div>

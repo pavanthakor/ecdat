@@ -2,15 +2,16 @@
  * Start a scan from the console: one target (`POST /scans`) or a whole system
  * manifest (`POST /systems/scan`, ADR-0019).
  *
- * Both endpoints are SYNCHRONOUS -- the server answers when the row is stored,
- * and a system scan can take a while (the job model is still owed, ADR-0003).
- * So the dialog says it is waiting on the server rather than showing a
- * progress bar it has no progress to fill.
+ * Both answer at once with a JOB (ADR-0035), and the dialog polls
+ * `GET /jobs/{id}`, saying where the job is -- queued, running -- rather than
+ * showing a progress bar it has no progress to fill. The scan id is handed on
+ * only when the job is DONE; a failed job shows the server's reason. Closing
+ * the dialog stops the polling, not the job: the scan still lands in Scans.
  */
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
-import { createScan, createSystemScan, listScanners } from "@/api/client";
-import type { Exposure, Sector, TargetKind } from "@/api/types";
+import { createScan, createSystemScan, JOB_POLL_MS, listScanners, waitForJob } from "@/api/client";
+import type { Exposure, JobStatus, Sector, TargetKind } from "@/api/types";
 import { cn } from "@/lib/format";
 import { Z_DEFAULT } from "@/state/inventory";
 import { useRemote } from "@/state/remote";
@@ -34,14 +35,31 @@ function Field({ label, children, hint }: { label: string; children: React.React
   );
 }
 
+function jobLine(id: string, status: JobStatus): string {
+  const job = `job ${id.slice(0, 8)}`;
+  switch (status) {
+    case "pending":
+      return `Queued as ${job}, waiting for a worker.`;
+    case "running":
+      return `Running as ${job}. The scan is stored when it finishes.`;
+    case "done":
+      return `Done: ${job} stored its scan.`;
+    default:
+      return `Failed: ${job}.`;
+  }
+}
+
 export function NewScanDialog({
   open,
   onOpenChange,
   onCreated,
+  pollMs = JOB_POLL_MS,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (scanId: string) => void;
+  /** How often to ask after the job. */
+  pollMs?: number;
 }) {
   const [mode, setMode] = useState<"target" | "system">("target");
   const [kind, setKind] = useState<TargetKind>("repo");
@@ -54,16 +72,34 @@ export function NewScanDialog({
   const [zYears, setZYears] = useState(Z_DEFAULT);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
+  const [job, setJob] = useState<{ id: string; status: JobStatus } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const polling = useRef<AbortController | null>(null);
 
   const scanners = useRemote(open ? "scanners" : null, listScanners);
 
+  useEffect(() => () => polling.current?.abort(), []);
+
+  function changeOpen(next: boolean) {
+    if (!next && polling.current) {
+      // Stop following; the job itself carries on and lands in Scans.
+      polling.current.abort();
+      polling.current = null;
+      setRunning(false);
+    }
+    onOpenChange(next);
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
+    polling.current?.abort();
+    const controller = new AbortController();
+    polling.current = controller;
     setRunning(true);
     setError(null);
+    setJob(null);
     try {
-      const created =
+      const accepted =
         mode === "target"
           ? await createScan({
               kind,
@@ -95,19 +131,27 @@ export function NewScanDialog({
               data_class: dataClass.trim() || null,
               z_years: zYears,
             });
-      onCreated(created.scan_id);
+      setJob({ id: accepted.job_id, status: accepted.status });
+      const done = await waitForJob(accepted.job_id, {
+        intervalMs: pollMs,
+        signal: controller.signal,
+        onUpdate: (update) => setJob({ id: update.id, status: update.status }),
+      });
+      if (!done.scan_id) throw new Error(`job ${done.id} finished without a scan id`);
+      onCreated(done.scan_id);
       onOpenChange(false);
     } catch (cause) {
+      if (controller.signal.aborted) return; // closed or unmounted: nobody to tell
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setRunning(false);
+      if (!controller.signal.aborted) setRunning(false);
     }
   }
 
   return (
     <Modal
       open={open}
-      onOpenChange={(next) => !running && onOpenChange(next)}
+      onOpenChange={changeOpen}
       title="New scan"
       description="Runs on the server against its filesystem; the console never reads your repo itself."
     >
@@ -231,11 +275,23 @@ export function NewScanDialog({
           </div>
         ) : null}
 
+        {job ? (
+          <p
+            data-testid="job-status"
+            data-status={job.status}
+            className="border border-line px-2 py-1.5 font-mono text-2xs text-ink-dim"
+          >
+            {jobLine(job.id, job.status)}
+          </p>
+        ) : null}
+
         {error ? <p className="border border-critical/40 bg-critical/10 px-2 py-1.5 text-2xs text-critical">{error}</p> : null}
 
         <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
           <span className="text-[10px] text-ink-faint">
-            {running ? "Scanning — the server answers when the scan is stored." : "Synchronous: the row exists when this returns."}
+            {running
+              ? "The server runs the scan as a job; closing this stops following it, not the scan."
+              : "Queued as a job on the server; this dialog follows it until the scan is stored."}
           </span>
           <Button type="submit" variant="primary" disabled={running}>
             {running ? "Scanning…" : "Run scan"}

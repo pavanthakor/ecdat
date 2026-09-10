@@ -6,9 +6,14 @@
  * scan view is loaded ONCE here and shared, so every screen reads the same
  * document -- a Mosca rescore on the Overview is what the Inventory, Roadmap
  * and Agility screens show too.
+ *
+ * In front of it all sits the sign-in gate (ADR-0035): shown when the server
+ * refuses the console's key -- or it has none -- and never otherwise. A new
+ * sign-in remounts the console, so every screen reloads with the new key.
  */
 import { useEffect, useState, type ReactNode } from "react";
 
+import { SignIn } from "@/components/SignIn";
 import { Sidebar, type Connection } from "@/components/shell/Sidebar";
 import { StatusStrip } from "@/components/shell/StatusStrip";
 import { TopBar } from "@/components/shell/TopBar";
@@ -26,9 +31,30 @@ import { RiskAnalysisScreen } from "@/screens/RiskAnalysis";
 import { RoadmapScreen } from "@/screens/Roadmap";
 import { ScansScreen } from "@/screens/Scans";
 import { SettingsScreen } from "@/screens/Settings";
+import { AuthContext, useAuthState } from "@/state/auth";
 import { NO_FILTERS, useScanView, type Filters } from "@/state/inventory";
 
 export default function App() {
+  const auth = useAuthState();
+
+  if (auth.status === "required") {
+    return <SignIn reason={auth.reason} onSignIn={auth.signIn} />;
+  }
+  if (auth.status === "checking") {
+    return (
+      <div role="status" className="flex h-full items-center justify-center bg-ground text-[12px] text-ink-faint">
+        Checking the API key…
+      </div>
+    );
+  }
+  return (
+    <AuthContext.Provider value={auth}>
+      <Console key={auth.session} />
+    </AuthContext.Provider>
+  );
+}
+
+function Console() {
   const view = useScanView();
   const route = useRoute();
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);

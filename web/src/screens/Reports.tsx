@@ -7,14 +7,18 @@
  * disagree with this console for the same scan. The design tags the technical
  * report "PDF / HTML" and the coverage report "CSV"; both are PDF only, so the
  * tags here say PDF, and the HTML tile says it is not available.
+ *
+ * The files are fetched WITH the API key (ADR-0035) -- a plain link could not
+ * send it -- so each is a button, not an `<a href>`.
  */
 import { Download, ExternalLink, FileText } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { cbomUrl, reportUrl } from "@/api/client";
+import { cbomPath, reportPath } from "@/api/client";
 import type { Artefact, ReportKind, ScanSummary } from "@/api/types";
+import { FileButton } from "@/components/FileButton";
 import { EmptyPanel, NotComputed } from "@/components/Honest";
-import { LinkButton, Panel, ScreenHeader, Tag } from "@/components/Panel";
+import { Panel, ScreenHeader, Tag } from "@/components/Panel";
 import { downloadText } from "@/lib/download";
 import { inventoryCsv, sortByRisk } from "@/state/metrics";
 
@@ -78,16 +82,20 @@ export function ReportsScreen({ scan, artefacts }: { scan: ScanSummary | null; a
                 <h2 className="mt-4 text-[16px] font-semibold text-ink">{report.title}</h2>
                 <p className="mt-1.5 min-h-[2.5rem] text-[12px] leading-relaxed text-ink-faint">{report.sub}</p>
                 <div className="mt-4 flex items-center gap-2">
-                  <LinkButton href={reportUrl(scan.id, report.kind)} target="_blank" rel="noopener">
+                  <FileButton
+                    mode="view"
+                    path={reportPath(scan.id, report.kind)}
+                    filename={`qorbit-${report.kind}-${short}.pdf`}
+                  >
                     <ExternalLink className="h-3.5 w-3.5" aria-hidden /> View
-                  </LinkButton>
-                  <LinkButton
+                  </FileButton>
+                  <FileButton
                     variant="quiet"
-                    href={reportUrl(scan.id, report.kind)}
-                    download={`qorbit-${report.kind}-${short}.pdf`}
+                    path={reportPath(scan.id, report.kind)}
+                    filename={`qorbit-${report.kind}-${short}.pdf`}
                   >
                     Generate
-                  </LinkButton>
+                  </FileButton>
                 </div>
               </section>
             ))}
@@ -108,14 +116,15 @@ export function ReportsScreen({ scan, artefacts }: { scan: ScanSummary | null; a
                 name="CBOM JSON"
                 sub="Machine-readable CycloneDX 1.6 — the stored document, byte for byte"
                 action={
-                  <a
-                    href={cbomUrl(scan.id)}
-                    download={`qorbit-cbom-${short}.json`}
-                    aria-label="Download CBOM JSON"
+                  <FileButton
+                    bare
+                    path={cbomPath(scan.id)}
+                    filename={`qorbit-cbom-${short}.json`}
+                    label="Download CBOM JSON"
                     className="inline-flex text-ink-dim transition-colors hover:text-ink"
                   >
                     <Download className="h-4 w-4" aria-hidden />
-                  </a>
+                  </FileButton>
                 }
               />
               <Tile

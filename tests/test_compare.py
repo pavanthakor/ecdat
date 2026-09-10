@@ -204,13 +204,18 @@ def test_the_comparison_is_deterministic_under_component_order() -> None:
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
-    with TestClient(app) as test_client:
+def client(admin_headers: dict[str, str]) -> Iterator[TestClient]:
+    with TestClient(app, headers=admin_headers) as test_client:
         yield test_client
 
 
 def post_scan_id(client: TestClient, **body: object) -> str:
-    response = client.post("/scans", json={"kind": "repo", "ref": MINIMAL_REPO, **body})
+    """Scan synchronously (`?wait=true`, ADR-0035): the row exists on return."""
+    response = client.post(
+        "/scans",
+        params={"wait": "true"},
+        json={"kind": "repo", "ref": MINIMAL_REPO, **body},
+    )
     assert response.status_code == 201, response.text
     scan_id = response.json()["scan_id"]
     assert isinstance(scan_id, str)

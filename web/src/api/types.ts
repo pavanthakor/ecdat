@@ -206,17 +206,65 @@ export interface FixesResponse {
   fixes: FixEntry[];
 }
 
-/** `POST /scans/{id}/rescore` and `POST /scans/{id}/fix`. */
+/** `POST /scans/{id}/rescore`, and `POST /scans/{id}/fix?wait=true`. */
 export interface DerivedCreated {
   scan_id: string;
   parent_scan_id: string;
   kind: string;
+  /** The fix job, for a synchronous fix pass. A rescore is not a job. */
+  job_id?: string | null;
 }
 
-/** `POST /scans` and `POST /systems/scan`. */
+/** `POST /scans?wait=true` and `POST /systems/scan?wait=true`. */
 export interface ScanCreated {
   scan_id: string;
   component_count: number;
+  job_id?: string | null;
+}
+
+/** One page of a list that grows with use (ADR-0035): `GET /scans`, `GET /jobs`. */
+export interface Page<T> {
+  items: T[];
+  /** Every row the filter matches, not just this page's. */
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type JobStatus = "pending" | "running" | "done" | "failed";
+
+/** `GET /jobs/{id}` -- `api.app.JobOut` (ADR-0035). */
+export interface Job {
+  id: string;
+  /** `scan`, `system-scan` or `fix`. */
+  kind: string;
+  status: JobStatus;
+  subject: string;
+  parent_scan_id: string | null;
+  /** The stored row, once `done`. */
+  scan_id: string | null;
+  /** Why it failed, once `failed`: the exception's type and message. */
+  error: string | null;
+  /** The NAME of the key that asked. */
+  requested_by: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/** The 202 body of `POST /scans`, `POST /systems/scan`, `POST /scans/{id}/fix`. */
+export interface JobAccepted {
+  job_id: string;
+  kind: string;
+  status: JobStatus;
+}
+
+export type Role = "viewer" | "admin";
+
+/** `GET /auth/whoami`: the key's name and role -- never the key. */
+export interface Principal {
+  name: string;
+  role: Role;
 }
 
 export type TargetKind = "repo" | "directory" | "image" | "host" | "endpoint" | "spool";

@@ -159,7 +159,15 @@ describe("certaintyReason -- WHY, in words, for the drawer", () => {
   });
 });
 
-describe("applyFilters -- 'Candidates' is the flag and nothing else", () => {
+/**
+ * The toggles split the table on the FLAG: "Candidates" is the flagged
+ * findings, "Confirmed" is everything else. A 0.6 or 0.9 finding is real
+ * crypto with one detail inferred -- it is not a candidate, so it belongs
+ * under Confirmed, and the drawer still shows its confidence and says why.
+ * (The first cut of the toggle kept only 1.0 rows under Confirmed, which left
+ * every inferred finding in neither toggle.)
+ */
+describe("applyFilters -- 'Candidates' is the flag; 'Confirmed' is everything else", () => {
   it("'all' keeps every row", () => {
     expect(applyFilters(artefacts, NO_FILTERS)).toHaveLength(37);
     expect(applyFilters(binary, NO_FILTERS)).toHaveLength(22);
@@ -170,22 +178,27 @@ describe("applyFilters -- 'Candidates' is the flag and nothing else", () => {
     expect(applyFilters(binary, CANDIDATES)).toHaveLength(0);
   });
 
-  it("'confirmed' keeps exactly the 1.0 rows", () => {
+  it("'confirmed' keeps every row that is NOT a flagged candidate", () => {
     const rows = applyFilters(artefacts, CONFIRMED);
 
-    expect(rows).toHaveLength(31);
-    expect(rows.every((a) => a.confidence === 1 && !a.candidate)).toBe(true);
+    expect(rows).toHaveLength(36);
+    expect(rows.some((a) => a.candidate)).toBe(false);
+    expect(rows).not.toContain(candidate);
     expect(rows).toContain(confirmed);
-    expect(applyFilters(binary, CONFIRMED)).toHaveLength(0);
+    expect(rows).toContain(unresolved);
   });
 
-  it("an INFERRED row is in neither toggle: it shows under 'all', and the drawer says why", () => {
+  it("an INFERRED row is not a candidate, so it shows under 'Confirmed'", () => {
     expect(applyFilters(artefacts, CANDIDATES)).not.toContain(unresolved);
-    expect(applyFilters(artefacts, CONFIRMED)).not.toContain(unresolved);
-    expect(applyFilters(artefacts, NO_FILTERS)).toContain(unresolved);
+    expect(applyFilters(artefacts, CONFIRMED)).toContain(unresolved);
+    expect(applyFilters([symbol], CONFIRMED)).toEqual([symbol]);
   });
 
-  it("every row is in exactly one certainty: nothing dropped, nothing counted twice", () => {
+  it("a whole binary scan -- every finding inferred, none flagged -- is all 'Confirmed'", () => {
+    expect(applyFilters(binary, CONFIRMED)).toHaveLength(22);
+  });
+
+  it("the two toggles partition the rows: nothing dropped, nothing counted twice", () => {
     const counts = certaintyCountsOf(artefacts);
     const candidates = applyFilters(artefacts, CANDIDATES);
     const confirmedRows = applyFilters(artefacts, CONFIRMED);
@@ -194,15 +207,16 @@ describe("applyFilters -- 'Candidates' is the flag and nothing else", () => {
       artefacts.length,
     );
     expect(candidates).toHaveLength(counts.candidate);
-    expect(confirmedRows).toHaveLength(counts.confirmed);
+    expect(confirmedRows).toHaveLength(counts.inferred + counts.confirmed + counts.unrecorded);
+    expect(candidates.length + confirmedRows.length).toBe(artefacts.length);
     expect(candidates.some((a) => confirmedRows.includes(a))).toBe(false);
   });
 
-  it("an UNRECORDED confidence is in neither toggle", () => {
+  it("an UNRECORDED confidence is not a candidate either: it shows under 'Confirmed'", () => {
     const unknown = [{ ...confirmed, confidence: null }];
 
     expect(applyFilters(unknown, CANDIDATES)).toHaveLength(0);
-    expect(applyFilters(unknown, CONFIRMED)).toHaveLength(0);
+    expect(applyFilters(unknown, CONFIRMED)).toHaveLength(1);
     expect(applyFilters(unknown, NO_FILTERS)).toHaveLength(1);
   });
 

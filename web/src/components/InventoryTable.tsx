@@ -174,7 +174,7 @@ export function InventoryTable({
               type="button"
               aria-pressed={filters.certainty === "confirmed"}
               onClick={() => toggleCertainty("confirmed")}
-              title="Findings at confidence 1.0. An inferred finding (below 1.0, one detail not read outright) is in neither toggle."
+              title="Everything not flagged a candidate: findings at 1.0 and inferred ones (one detail not read outright). The drawer shows each finding's confidence."
               className={cn(TOGGLE, filters.certainty === "confirmed" ? TOGGLE_ON : TOGGLE_OFF)}
             >
               <span className={CONFIRMED_SWATCH} aria-hidden />

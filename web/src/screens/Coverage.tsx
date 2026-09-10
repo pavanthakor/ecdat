@@ -13,11 +13,12 @@
 import { CircleDashed, CircleDot, CircleHelp, ExternalLink } from "lucide-react";
 import { useMemo } from "react";
 
-import { listScanners, reportUrl } from "@/api/client";
+import { listScanners, reportPath } from "@/api/client";
 import type { Artefact, ScanSummary, View } from "@/api/types";
 import { VIEWS } from "@/api/types";
+import { FileButton } from "@/components/FileButton";
 import { EmptyPanel } from "@/components/Honest";
-import { LinkButton, Panel, ScreenHeader, Tag } from "@/components/Panel";
+import { Panel, ScreenHeader, Tag } from "@/components/Panel";
 import { cn } from "@/lib/format";
 import { SCANNER_VIEW, scannerCoverage, viewCoverage, type ScannerCard } from "@/state/metrics";
 import { useRemote } from "@/state/remote";
@@ -116,9 +117,13 @@ export function CoverageScreen({
         subtitle="See what was inspected, what was not, and what remains unobserved. A view nobody collected is not a view that came back clean, and a scanner that did not run found nothing because it did not look."
         actions={
           scan ? (
-            <LinkButton href={reportUrl(scan.id, "coverage")} target="_blank" rel="noopener">
+            <FileButton
+              mode="view"
+              path={reportPath(scan.id, "coverage")}
+              filename={`qorbit-coverage-${scan.id.slice(0, 8)}.pdf`}
+            >
               <ExternalLink className="h-3.5 w-3.5" aria-hidden /> Coverage statement (PDF)
-            </LinkButton>
+            </FileButton>
           ) : undefined
         }
       />
