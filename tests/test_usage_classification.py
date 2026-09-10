@@ -303,12 +303,19 @@ def test_rsa_for_key_transport_is_recommended_ml_kem() -> None:
 
 
 def test_rsa_for_key_exchange_is_recommended_ml_kem() -> None:
-    assert "ML-KEM" in advice("key-exchange")
+    text = advice("key-exchange")
+    assert "ML-KEM" in text, text
+    # The OTHER target must be absent. Presence alone passed on the pre-ADR-0030
+    # pack, whose single RSA action named every option -- a vacuous pass.
+    assert "ML-DSA" not in text, "a key-exchange key was recommended a signature"
 
 
 def test_rsa_for_verification_is_recommended_ml_dsa() -> None:
     """A verifier migrates to the same family it must accept."""
-    assert "ML-DSA" in advice("verify")
+    text = advice("verify")
+    assert "ML-DSA" in text, text
+    # Same vacuous-pass gap as above, closed the same way.
+    assert "ML-KEM" not in text, "a verifier was recommended a KEM"
 
 
 def test_rsa_with_unknown_usage_gets_the_usage_agnostic_advice() -> None:

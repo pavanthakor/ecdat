@@ -31,6 +31,19 @@ expected:
       params_any:
         - curve: P256
 
+  # ---- THE VERIFY SIDE (ADR-0030 follow-up) ------------------------------
+  # go-ecdsa-verify shipped in ADR-0030 with no fixture. Both entry points.
+  # Its third pattern, ed25519.Verify, reports algorithm ECDSA -- a mislabel
+  # (PUNCHLIST) -- and is deliberately NOT exercised, so this key does not
+  # declare the wrong algorithm as ground truth.
+  must_fire/go_ecdsa_verify.go:
+    - rule_id: go-ecdsa-verify
+      algorithm: ECDSA
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      count: 2
+
   must_fire/go_ed25519_keygen.go:
     - rule_id: go-ed25519-keygen
       algorithm: Ed25519

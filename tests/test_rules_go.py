@@ -132,6 +132,30 @@ def test_go_ecb_is_flagged_and_gcm_is_not(findings: list[Finding]) -> None:
     assert all(f.params.get("flagged") is not True for f in gcm)
 
 
+def test_go_ecdsa_verify_reports_the_verify_side_at_both_entry_points(
+    findings: list[Finding],
+) -> None:
+    """`ecdsa.Verify` and `ecdsa.VerifyASN1` VERIFY (ADR-0030's go-ecdsa-verify).
+
+    The rule shipped in ADR-0030 with no fixture: nothing proved it fired, or
+    that it reported the verify side rather than signing. That matters because
+    a verifier migrates FIRST -- nothing can accept an ML-DSA signature until
+    its verifier does.
+    """
+    hits = [f for f in findings if rule_id_of(f) == "go-ecdsa-verify"]
+    assert {_rel(f) for f in hits} == {"must_fire/go_ecdsa_verify.go"}, hits
+    assert len(hits) == 2, "one finding per entry point"
+    for finding in hits:
+        assert (finding.algorithm, finding.primitive, finding.usage) == (
+            "ECDSA",
+            "signature",
+            "verify",
+        )
+    snippets = " ".join(o.snippet or "" for f in hits for o in f.evidence.occurrences)
+    assert "ecdsa.Verify(" in snippets, snippets
+    assert "ecdsa.VerifyASN1(" in snippets, snippets
+
+
 # ---------------------------------------------------------------------------
 # Precision: the decoys
 # ---------------------------------------------------------------------------

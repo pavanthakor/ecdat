@@ -49,6 +49,19 @@ expected:
       params_any:
         - transformation: SHA256withRSA
 
+  # ---- THE VERIFY SIDE (ADR-0030 follow-up) ------------------------------
+  # java-signature-verify shipped in ADR-0030 with no fixture. The Signature is
+  # handed in, so getInstance is NOT in this file: where it is, java-signature-rsa
+  # also fires and reports usage=sign for a VERIFIER -- a known mislabel
+  # (PUNCHLIST) that no answer key should declare as ground truth.
+  must_fire/JavaSignatureVerify.java:
+    - rule_id: java-signature-verify
+      algorithm: unknown
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      count: 1
+
   must_fire/JavaSignatureSha1Rsa.java:
     - rule_id: java-signature-weak-hash
       algorithm: RSA

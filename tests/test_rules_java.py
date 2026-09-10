@@ -204,6 +204,27 @@ def test_sha1withrsa_is_flagged_and_sha256withrsa_is_not(
     assert all(f.params.get("flagged") is not True for f in strong)
 
 
+def test_java_signature_verify_reports_the_verify_side(findings: list[Finding]) -> None:
+    """`Signature.initVerify` VERIFIES (ADR-0030's java-signature-verify).
+
+    Shipped in ADR-0030 with no fixture. The ALGORITHM is honestly `unknown`:
+    it was chosen at `Signature.getInstance`, which this fixture does not
+    contain, and joining the two calls is Java use-site refinement -- not built
+    (PUNCHLIST). The USAGE is the fact this rule adds, and it must be `verify`.
+    The fixture's `verify(sig)` is not a second finding: the direction was set
+    once, at `initVerify`.
+    """
+    hits = [f for f in findings if rule_id_of(f) == "java-signature-verify"]
+    assert {_rel(f) for f in hits} == {"must_fire/JavaSignatureVerify.java"}, hits
+    assert len(hits) == 1
+    assert (hits[0].algorithm, hits[0].primitive, hits[0].usage) == (
+        "unknown",
+        "signature",
+        "verify",
+    )
+    assert "initVerify" in (hits[0].evidence.occurrences[0].snippet or "")
+
+
 # ---------------------------------------------------------------------------
 # Precision: the decoys
 # ---------------------------------------------------------------------------

@@ -464,6 +464,60 @@
   names the usage but not the algorithm, and RSA is the overwhelmingly common
   case rather than the only one, so an AES key-wrap would be mislabelled.
   *Raised: usage-classification slice.*
+- **Java verifiers are reported as SIGNERS.** `java-signature-rsa` fires at
+  `Signature.getInstance("SHA256withRSA")` with `usage: sign` -- but
+  `getInstance` cannot know sign from verify; the direction is set later, by
+  `initSign` or `initVerify`. So a verifier reports a `sign` finding at
+  `getInstance` beside ADR-0030's `java-signature-verify` (`usage: verify`,
+  `algorithm: unknown`) at `initVerify`. The same bug class as the JWT verifier
+  mislabel ADR-0030 fixed for Python and JS, still open in Java.
+  **Consequence:** the migration TARGET is unaffected (sign and verify both map
+  to ML-DSA), but the "migrate verifiers first" advice never reaches a Java
+  verifier. **Fix:** Java use-site refinement -- `usage: unknown` at
+  `getInstance`, refined from `initSign`/`initVerify` in the same method through
+  the ADR-0030 annotation mechanism (refinement is Python-only today, above).
+  The same join would give `java-signature-verify` its algorithm. Recorded, not
+  fixed: `JavaSignatureVerify.java` (the ADR-0030 follow-up fixture) takes its
+  `Signature` as a parameter precisely so that no answer key declares the
+  mislabel as ground truth.
+  *Raised: ADR-0030 report. Recorded: verify-rule coverage follow-up.*
+- **`go-ecdsa-verify` labels `ed25519.Verify` as ECDSA.** Its third pattern
+  matches Ed25519 verification and reports `algorithm: ECDSA`, while
+  `go-ed25519-keygen` labels the same keys `Ed25519`. The migration target is
+  unchanged (both are Shor-broken -> ML-DSA), but the inventory names the wrong
+  algorithm, so a key's keygen and verify sides would not read as one algorithm.
+  **Fix:** split out `go-ed25519-verify` (`algorithm: Ed25519`) with its own
+  fixture. No fixture calls `ed25519.Verify` today; the follow-up fixture covers
+  `ecdsa.Verify` / `ecdsa.VerifyASN1` only, so no key declares the mislabel.
+  *Raised: verify-rule coverage follow-up.*
+- **The Go and Java answer-key recall gates are still `>= 0.9` floors.**
+  `tests/test_rules_go.py` and `tests/test_rules_java.py` assert
+  `recall >= 0.9` -- ADR-0027's lesson is that a floor can hide a regression.
+  Mitigated, not fixed: every declared case is also asserted on its own by the
+  parametrised per-fixture test, and `tests/test_dataflow_multilang.py` scores
+  the SAME two answer keys at `== 1.0`. The Python dataflow gate at
+  `tests/test_dataflow.py:434` is a floor too. Sweep all three to `== 1.0` in
+  one pass. *Raised: ADR-0030 slice. Recorded: verify-rule coverage follow-up.*
+- **Shipped rules that no answer key and no test names.** An audit of all 128
+  rule ids against every `answer_key.yaml` and every file under `tests/` found
+  21; the follow-up covered two (`go-ecdsa-verify`, `java-signature-verify`).
+  Three more are ANNOTATION rules whose effect behaviour tests assert without
+  naming them (`py-configurable-crypto-input`, `py-keygen-used-for-signing`,
+  `py-keygen-used-for-key-transport`). The remaining 16 have nothing that names
+  them:
+  - Go: `go-des`, `go-jwt-ecdsa`, `go-jwt-hmac`, `go-jwt-none`
+  - Java: `java-sslcontext-provider-default`, `java-jwt-auth0-ecdsa`
+  - JS: `js-hmac-sha1`, `js-forge-legacy-cipher`, `js-jwt-ecdsa-verify`,
+    `js-jwt-hmac-verify`, `js-jwt-none-verify`
+  - Python: `py-jwt-ecdsa-verify`, `py-jwt-hmac-verify`, `py-jwt-none-verify`,
+    `py-rsa-verify`, `py-keygen-used-for-key-exchange`
+
+  Eight of the sixteen are ADR-0030's own -- the same test-first gap as the two
+  fixed rules, wider than first reported. **Fix:** fixtures and answer-key
+  entries for each, then a CONTRACT test that fails whenever a rule id appears
+  in no answer key and is not on an explicit, reasoned exemption list -- so the
+  next untested rule is caught at commit, not in a post-commit audit.
+  *Raised: verify-rule coverage follow-up.*
 - **A policy pack rule can be silently detached from its `verified` flag.**
   `quantum.yaml`'s layout let a rule's `verified:`/`source:` block sit after a
   COMMENT introducing the NEXT rule. Inserting a rule between them moved the
