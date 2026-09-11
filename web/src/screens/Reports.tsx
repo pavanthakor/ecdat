@@ -1,25 +1,29 @@
 /**
- * REPORTS -- the three PDFs (ADR-0020) and the offline export formats, laid out
- * as web/design/ has it (ADR-0032): three report cards, then a tile per format.
+ * REPORTS -- the three PDFs (ADR-0020) and the offline export formats, rebuilt
+ * on the v2 mockup (reports.html; ADR-0039): three report cards, then
+ * "Available artifacts".
  *
  * Every report is rendered ON REQUEST from the stored CBOM by
  * `GET /scans/{id}/report/{kind}`: nothing is re-scanned, so a report cannot
- * disagree with this console for the same scan. The design tags the technical
- * report "PDF / HTML" and the coverage report "CSV"; both are PDF only, so the
- * tags here say PDF, and the HTML tile says it is not available.
+ * disagree with this console for the same scan. The mockup tags the technical
+ * report "PDF / HTML" and the coverage report "CSV"; all three are PDF only, so
+ * the tags here say PDF, and the HTML row says it is not available.
  *
  * The files are fetched WITH the API key (ADR-0035) -- a plain link could not
- * send it -- so each is a button, not an `<a href>`.
+ * send it -- so each is a button, not an `<a href>`. View opens the PDF in a
+ * tab; Generate renders and saves it.
  */
-import { Download, ExternalLink, FileText } from "lucide-react";
+import { Download, ExternalLink, FileCode, FileJson, FileSpreadsheet, FileText } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cbomPath, reportPath } from "@/api/client";
 import type { Artefact, ReportKind, ScanSummary } from "@/api/types";
 import { FileButton } from "@/components/FileButton";
-import { EmptyPanel, NotComputed } from "@/components/Honest";
-import { Panel, ScreenHeader, Tag } from "@/components/Panel";
+import { NotComputed } from "@/components/Honest";
+import { ScreenHeader } from "@/components/Panel";
+import { EmptyState, PanelHead } from "@/components/v2";
 import { downloadText } from "@/lib/download";
+import { cn } from "@/lib/format";
 import { inventoryCsv, sortByRisk } from "@/state/metrics";
 
 /** One-line summaries of reports/executive.py, technical.py and coverage.py. */
@@ -41,131 +45,167 @@ const REPORTS: { kind: ReportKind; title: string; sub: string }[] = [
   },
 ];
 
-function Tile({ glyph, name, sub, action }: { glyph: string; name: string; sub: string; action: ReactNode }) {
+function ArtifactRow({
+  testId,
+  icon,
+  name,
+  note,
+  action,
+  unavailable = false,
+}: {
+  testId: string;
+  icon: ReactNode;
+  name: string;
+  note: ReactNode;
+  action: ReactNode;
+  unavailable?: boolean;
+}) {
   return (
-    <div className="flex min-h-[8.5rem] flex-col rounded-lg border border-line p-4">
-      <span className="font-mono text-[14px] text-ink-dim">{glyph}</span>
-      <span className="mt-3 text-[13px] font-semibold text-ink">{name}</span>
-      <span className="mt-1 text-[11.5px] leading-snug text-ink-faint">{sub}</span>
-      <div className="mt-auto pt-3">{action}</div>
+    <div
+      data-testid={testId}
+      data-state={unavailable ? "not-computed" : undefined}
+      className={cn("artifact-row", unavailable && "unavailable")}
+    >
+      <div className="artifact-icon">{icon}</div>
+      <div className="min-w-0 flex-1">
+        <div className={cn("artifact-name", unavailable && "text-ink-dim")}>{name}</div>
+        <div className="artifact-note">{note}</div>
+      </div>
+      {action}
     </div>
   );
 }
 
 export function ReportsScreen({ scan, artefacts }: { scan: ScanSummary | null; artefacts: Artefact[] }) {
   const short = scan?.id.slice(0, 8) ?? "";
+  const icon = "h-4 w-4";
   return (
-    <div>
+    <div className="content">
       <ScreenHeader
         title="Reports"
         subtitle="Prepare analyst-ready exports without masking coverage gaps. Rendered on request from the stored CBOM — nothing is re-scanned, and nothing leaves this machine."
       />
       {!scan ? (
-        <div className="px-6 pb-6">
-          <EmptyPanel title="No scan selected" />
-        </div>
+        <EmptyState title="No scan selected" />
       ) : (
-        <div className="space-y-4 px-6 pb-6">
-          <div className="grid gap-4 md:grid-cols-3">
+        <>
+          <div className="grid-row in grid-cols-1 lg:grid-cols-3" style={{ animationDelay: "0.04s" }}>
             {REPORTS.map((report) => (
-              <section
-                key={report.kind}
-                data-testid={`report-${report.kind}`}
-                className="rounded-lg border border-line bg-panel p-5"
-              >
-                <div className="flex items-start justify-between">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-md border border-line text-ink-dim">
-                    <FileText className="h-4 w-4" aria-hidden />
-                  </span>
-                  <Tag>PDF</Tag>
+              <section key={report.kind} data-testid={`report-${report.kind}`} className="report-card">
+                <div className="report-icon">
+                  <FileText className={icon} aria-hidden />
                 </div>
-                <h2 className="mt-4 text-[16px] font-semibold text-ink">{report.title}</h2>
-                <p className="mt-1.5 min-h-[2.5rem] text-[12px] leading-relaxed text-ink-faint">{report.sub}</p>
-                <div className="mt-4 flex items-center gap-2">
-                  <FileButton
-                    mode="view"
-                    path={reportPath(scan.id, report.kind)}
-                    filename={`ecdat-${report.kind}-${short}.pdf`}
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" aria-hidden /> View
-                  </FileButton>
-                  <FileButton
-                    variant="quiet"
-                    path={reportPath(scan.id, report.kind)}
-                    filename={`ecdat-${report.kind}-${short}.pdf`}
-                  >
-                    Generate
-                  </FileButton>
+                <div className="report-title">{report.title}</div>
+                <div className="report-desc">{report.sub}</div>
+                <div className="report-formats">
+                  <span className="format-tag">PDF</span>
+                  <span className="ml-auto flex flex-wrap gap-2">
+                    <FileButton
+                      bare
+                      mode="view"
+                      className="btn-ghost"
+                      title="Open the PDF in a new tab"
+                      path={reportPath(scan.id, report.kind)}
+                      filename={`ecdat-${report.kind}-${short}.pdf`}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden /> View
+                    </FileButton>
+                    <FileButton
+                      bare
+                      className="btn-primary"
+                      title="Render and save the PDF"
+                      path={reportPath(scan.id, report.kind)}
+                      filename={`ecdat-${report.kind}-${short}.pdf`}
+                    >
+                      Generate
+                    </FileButton>
+                  </span>
                 </div>
               </section>
             ))}
           </div>
 
-          <Panel
-            eyebrow="Offline export formats"
-            title="Available artifacts"
-            meta={
-              <span className="font-mono text-[10px] uppercase tracking-wider">
-                Generated locally · nothing leaves this machine
-              </span>
-            }
-          >
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Tile
-                glyph="{ }"
-                name="CBOM JSON"
-                sub="Machine-readable CycloneDX 1.6 — the stored document, byte for byte"
-                action={
+          <section className="panel in" style={{ animationDelay: "0.1s" }}>
+            <PanelHead
+              title="Available artifacts"
+              sub="Machine-readable and portable exports from this scan · generated locally, nothing leaves this machine"
+            />
+            <ArtifactRow
+              testId="artifact-cbom"
+              icon={<FileJson className={icon} aria-hidden />}
+              name="CBOM JSON"
+              note="Machine-readable CycloneDX 1.6 — the stored document, byte for byte"
+              action={
+                <FileButton
+                  bare
+                  className="btn-ghost"
+                  label="Download CBOM JSON"
+                  path={cbomPath(scan.id)}
+                  filename={`ecdat-cbom-${short}.json`}
+                >
+                  <Download className="h-3.5 w-3.5" aria-hidden /> Download
+                </FileButton>
+              }
+            />
+            <ArtifactRow
+              testId="artifact-pdf"
+              icon={<FileText className={icon} aria-hidden />}
+              name="PDF"
+              note="Executive and technical variants, rendered by the server (the coverage statement is on its card above)"
+              action={
+                <span className="flex flex-wrap gap-2">
                   <FileButton
                     bare
-                    path={cbomPath(scan.id)}
-                    filename={`ecdat-cbom-${short}.json`}
-                    label="Download CBOM JSON"
-                    className="inline-flex text-ink-dim transition-colors hover:text-ink"
+                    className="btn-ghost"
+                    label="Download executive PDF"
+                    path={reportPath(scan.id, "executive")}
+                    filename={`ecdat-executive-${short}.pdf`}
                   >
-                    <Download className="h-4 w-4" aria-hidden />
+                    Executive
                   </FileButton>
-                }
-              />
-              <Tile
-                glyph="PDF"
-                name="PDF"
-                sub="Executive / technical / coverage — rendered by the server, above"
-                action={<span className="text-[11px] text-ink-faint">see the report cards</span>}
-              />
-              <div
-                data-testid="export-html"
-                data-state="not-computed"
-                className="flex min-h-[8.5rem] flex-col rounded-lg border border-dashed border-line p-4"
-              >
-                <span className="font-mono text-[14px] text-ink-faint">&lt;/&gt;</span>
-                <span className="mt-3 text-[13px] font-semibold text-ink-dim">HTML</span>
-                <NotComputed
-                  reason="not available — ECDAT renders its reports as PDF only, and no HTML renderer exists yet"
-                  className="mt-1"
-                />
-              </div>
-              <Tile
-                glyph="CSV"
-                name="CSV"
-                sub="Inventory extract — generated in the browser from the stored CBOM"
-                action={
-                  <button
-                    type="button"
-                    aria-label="Download inventory CSV"
-                    disabled={artefacts.length === 0}
-                    onClick={() =>
-                      downloadText(`ecdat-inventory-${short}.csv`, inventoryCsv(sortByRisk(artefacts)), "text/csv")
-                    }
-                    className="inline-flex text-ink-dim transition-colors hover:text-ink disabled:opacity-40"
+                  <FileButton
+                    bare
+                    className="btn-ghost"
+                    label="Download technical PDF"
+                    path={reportPath(scan.id, "technical")}
+                    filename={`ecdat-technical-${short}.pdf`}
                   >
-                    <Download className="h-4 w-4" aria-hidden />
-                  </button>
-                }
-              />
-            </div>
-          </Panel>
-        </div>
+                    Technical
+                  </FileButton>
+                </span>
+              }
+            />
+            <ArtifactRow
+              testId="export-html"
+              unavailable
+              icon={<FileCode className={icon} aria-hidden />}
+              name="HTML"
+              note={
+                <NotComputed reason="not available — ECDAT renders its reports as PDF only, and no HTML renderer exists yet" />
+              }
+              action={null}
+            />
+            <ArtifactRow
+              testId="artifact-csv"
+              icon={<FileSpreadsheet className={icon} aria-hidden />}
+              name="CSV"
+              note="Full inventory extract — generated in the browser from the stored CBOM"
+              action={
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  aria-label="Download inventory CSV"
+                  disabled={artefacts.length === 0}
+                  onClick={() =>
+                    downloadText(`ecdat-inventory-${short}.csv`, inventoryCsv(sortByRisk(artefacts)), "text/csv")
+                  }
+                >
+                  <Download className="h-3.5 w-3.5" aria-hidden /> Download
+                </button>
+              }
+            />
+          </section>
+        </>
       )}
     </div>
   );

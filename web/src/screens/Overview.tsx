@@ -678,6 +678,7 @@ export function OverviewScreen({ view }: { view: ScanView }) {
             path={cbomPath(scan.id)}
             filename={`ecdat-cbom-${scan.id.slice(0, 8)}.json`}
             title="Download the stored CBOM this overview is computed from"
+            bare
             className="btn-ghost"
           >
             <Download className="h-3.5 w-3.5" aria-hidden /> Export snapshot
