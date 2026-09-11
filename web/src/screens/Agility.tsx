@@ -1,72 +1,83 @@
 /**
- * CRYPTO AGILITY -- laid out as web/design/ has it (ADR-0032): a large gauge
- * beside the agility breakdown, then "where to improve next".
+ * CRYPTO AGILITY -- rebuilt on the v2 mockup (agility.html; ADR-0039): the
+ * agility score and its breakdown beside a gauge, then "where to improve next".
  *
  * REAL today: the configurable share, the configurable / hard-coded split and
  * the not-assessed count, all off `ecdat:configurable` (ADR-0026). NOT
- * COMPUTED: key-store flexibility and protocol negotiation -- the design shows
+ * COMPUTED: key-store flexibility and protocol negotiation -- the mockup shows
  * sample percentages for both, and nothing in the backend measures either, so
- * those rows say so and draw no bar. The design's "target 80%" and
- * per-component agility percentages are not reproduced for the same reason.
+ * those rows say so and draw no bar. Also not reproduced, for the same reason:
+ * the mockup's "Target 80%" (no pack defines a target), its "Moderately
+ * adaptable" rating (no rubric exists), its "Agility trend / last 6 scans"
+ * (nothing stores agility per scan -- the gauge is THIS scan's share, and says
+ * so) and its per-component agility percentages (the improve list shows each
+ * component's risk score instead, labelled as such).
  */
 import { FileText } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { Artefact } from "@/api/types";
-import { EmptyPanel, NotComputed } from "@/components/Honest";
-import { BandBadge, Button, Panel, ScreenHeader, SkeletonBlock } from "@/components/Panel";
-import { shortLocator } from "@/lib/format";
+import { NotComputed } from "@/components/Honest";
+import { ScreenHeader } from "@/components/Panel";
+import { BandTag, EmptyState, PanelHead, useGrown } from "@/components/v2";
+import { cn, shortLocator } from "@/lib/format";
 import { hrefFor } from "@/lib/router";
 import { agility, type Measured } from "@/state/metrics";
 
+const ARC = "M15,80 A60,60 0 0,1 135,80";
+const ARC_LENGTH = 188.5;
+
 function Gauge({ measured }: { measured: Measured<number> }) {
-  // A half-ring drawn with pathLength=100, so the dash IS the percentage.
-  const arc = "M 20 100 A 80 80 0 0 1 180 100";
+  const grown = useGrown();
   const done = measured.status === "computed";
   return (
-    <div data-testid="agility-gauge" data-state={measured.status} className="flex flex-col items-center">
-      <div className="relative w-full max-w-[22rem]">
-        <svg viewBox="0 0 200 108" className="w-full" aria-hidden>
-          <path
-            d={arc}
-            fill="none"
-            strokeWidth="22"
-            className={done ? "stroke-tint-line" : "stroke-line"}
-            strokeDasharray={done ? undefined : "3 4"}
-          />
-          {done ? (
-            <path
-              d={arc}
-              fill="none"
-              strokeWidth="22"
-              pathLength={100}
-              strokeDasharray={`${measured.value} 100`}
-              className="stroke-ink-dim"
-            />
-          ) : null}
-        </svg>
-        {done ? (
-          <div className="absolute inset-x-0 top-[42%] text-center">
-            <span className="text-[52px] font-semibold leading-none tabular-nums text-ink">{measured.value}</span>
-            <span className="text-[20px] text-ink-dim">%</span>
-          </div>
-        ) : null}
+    <section data-testid="agility-gauge" data-state={measured.status} className="panel gauge-panel in" style={{ animationDelay: "0.08s" }}>
+      <div className="w-full">
+        <PanelHead title="Configurable share" sub="This scan · no agility history is stored" />
       </div>
       {done ? (
-        <div className="mt-3 text-center text-[12px] text-ink-faint">{measured.basis}</div>
+        <>
+          <div className="gauge-svg-wrap">
+            <svg width="150" height="90" viewBox="0 0 150 90" aria-hidden>
+              <path d={ARC} fill="none" stroke="#171c21" strokeWidth="11" strokeLinecap="round" />
+              <path
+                className="arc"
+                d={ARC}
+                fill="none"
+                stroke="#f5f6f8"
+                strokeWidth="11"
+                strokeLinecap="round"
+                strokeDasharray={ARC_LENGTH}
+                strokeDashoffset={ARC_LENGTH * (1 - (grown ? measured.value : 0) / 100)}
+              />
+            </svg>
+            <div className="gauge-center">
+              <div className="gauge-num">{measured.value}%</div>
+              <div className="gauge-lbl">configurable</div>
+            </div>
+          </div>
+          <div className="gauge-scale w-[150px]">
+            <span>0</span>
+            <span>100</span>
+          </div>
+          <div className="gauge-note">{measured.basis}</div>
+        </>
       ) : (
-        <NotComputed reason={measured.reason} className="mt-3 text-center" />
+        <div className="empty-inline w-full">
+          <NotComputed reason={measured.reason} />
+        </div>
       )}
-    </div>
+    </section>
   );
 }
 
-function SignalRow({
+function BarRow({
   testId,
   label,
   value,
   share,
   sub,
+  dim = false,
 }: {
   testId: string;
   label: string;
@@ -74,31 +85,34 @@ function SignalRow({
   /** Bar width in percent, or null for no bar. */
   share: number | null;
   sub: string;
+  dim?: boolean;
 }) {
+  const grown = useGrown();
   return (
-    <div data-testid={testId} data-state="computed" className="py-3.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[13px] text-ink">{label}</span>
-        <span className="font-mono text-[13px] tabular-nums text-ink">{value}</span>
+    <div data-testid={testId} data-state="computed" className="bar-metric-item">
+      <div className="bar-metric-row">
+        <span>{label}</span>
+        <span className="mono">{value}</span>
       </div>
       {share !== null ? (
-        <div className="mt-2 h-1.5 rounded-full bg-line">
-          <div className="h-full rounded-full bg-ink/80" style={{ width: `${share}%` }} />
+        <div className="bar-metric-track">
+          <div className={cn("bar-metric-fill", dim && "dim")} style={{ width: grown ? `${share}%` : 0 }} />
         </div>
       ) : null}
-      <div className="mt-1.5 text-[11.5px] text-ink-faint">{sub}</div>
+      <div className="bar-metric-note">{sub}</div>
     </div>
   );
 }
 
 function NotComputedRow({ testId, label, reason }: { testId: string; label: string; reason: string }) {
   return (
-    <div data-testid={testId} data-state="not-computed" className="py-3.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[13px] text-ink-dim">{label}</span>
-        <span className="font-mono text-[10.5px] uppercase tracking-wider text-ink-faint">Not computed</span>
+    <div data-testid={testId} data-state="not-computed" className="bar-metric-item">
+      <div className="bar-metric-row">
+        <span className="text-ink-dim">{label}</span>
+        <span className="not-computed-label">Not computed</span>
       </div>
-      <div className="mt-1.5 text-[11.5px] text-ink-faint">{reason}</div>
+      <div className="bar-metric-track absent" />
+      <div className="bar-metric-note">{reason}</div>
     </div>
   );
 }
@@ -110,90 +124,114 @@ export function AgilityScreen({ artefacts, loading }: { artefacts: Artefact[]; l
   const pct = (n: number) => Math.round((n / assessed) * 100);
 
   return (
-    <div>
+    <div className="content">
       <ScreenHeader
         title="Crypto Agility"
-        subtitle="Measure how readily this estate can adopt new cryptography: how much of it changes algorithm by configuration rather than a code change, review and redeploy."
+        subtitle="How easily this estate can swap cryptographic primitives without a rebuild: how much of it changes algorithm by configuration rather than a code change, review and redeploy."
         actions={
-          <Button aria-pressed={method} onClick={() => setMethod((open) => !open)}>
+          <button type="button" className="btn-ghost" aria-pressed={method} onClick={() => setMethod((open) => !open)}>
             <FileText className="h-3.5 w-3.5" aria-hidden /> Methodology
-          </Button>
+          </button>
         }
       />
       {loading && artefacts.length === 0 ? (
-        <div className="px-6 pb-6">
-          <SkeletonBlock className="h-72 w-full" />
+        <div className="grid-row grid-2b">
+          <div className="panel h-72 animate-pulse" />
+          <div className="panel h-72 animate-pulse" />
         </div>
       ) : (
-        <div className="space-y-4 px-6 pb-6">
+        <>
           {method ? (
-            <Panel eyebrow="Methodology" title="What this screen computes">
-              <ul className="list-disc space-y-1 pl-5 text-[12.5px] leading-relaxed text-ink-dim">
+            <section className="panel mb-3">
+              <PanelHead title="What this screen computes" />
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-[12px] leading-relaxed text-ink-dim">
                 <li>
-                  <strong className="text-ink">Configurable share</strong> = configurable ÷ (configurable +
-                  hard-coded), from each component's <code className="font-mono">ecdat:configurable</code>{" "}
-                  (ADR-0026). Components no scanner could judge are left out of the denominator.
+                  <strong className="text-ink">Configurable share</strong> = configurable ÷ (configurable + hard-coded),
+                  from each component's <code className="mono">ecdat:configurable</code> (ADR-0026). Components no
+                  scanner could judge are left out of the denominator.
                 </li>
                 <li>
                   <strong className="text-ink">Key-store flexibility</strong> and{" "}
-                  <strong className="text-ink">protocol negotiation</strong> are not computed: nothing in the
-                  backend detects key custody or runtime renegotiation yet (PUNCHLIST).
+                  <strong className="text-ink">protocol negotiation</strong> are not computed: nothing in the backend
+                  detects key custody or runtime renegotiation yet (PUNCHLIST).
                 </li>
-                <li>No target percentage is shown: no policy pack defines one.</li>
+                <li>No target, rating or trend is shown: no policy pack defines a target, and no scan stores agility.</li>
               </ul>
-            </Panel>
+            </section>
           ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-[1fr_1.45fr]">
-            <Panel eyebrow="Current score" title="Configurable share">
-              <Gauge measured={result.share} />
-            </Panel>
-            <Panel eyebrow="Implementation signals" title="Agility breakdown" bodyClassName="divide-y divide-line pt-1">
-              <SignalRow
-                testId="agility-configurable"
-                label="Configurable crypto"
-                value={assessed === 0 ? "—" : `${pct(result.configurable)}%`}
-                share={assessed === 0 ? null : pct(result.configurable)}
-                sub={
-                  assessed === 0
-                    ? "no component carries a configurability finding"
-                    : `${result.configurable} of ${assessed} assessed · algorithm chosen by configuration`
-                }
+          <div className="grid-row grid-2b">
+            <section className="panel in" style={{ animationDelay: "0.04s" }}>
+              <PanelHead
+                title="Crypto agility"
+                sub="How much of the estate can swap an algorithm without a code change"
               />
-              <SignalRow
-                testId="agility-hard-coded"
-                label="Hard-coded crypto"
-                value={assessed === 0 ? "—" : `${pct(result.hardCoded)}%`}
-                share={assessed === 0 ? null : pct(result.hardCoded)}
-                sub={
-                  assessed === 0
-                    ? "no component carries a configurability finding"
-                    : `${result.hardCoded} of ${assessed} assessed · fixed in code: a change is an edit, a review and a redeploy`
-                }
-              />
-              <SignalRow
-                testId="agility-unassessed"
-                label="Not assessed"
-                value={`${result.unassessed}`}
-                share={null}
-                sub="components no scanner could judge — counted neither way"
-              />
-              <NotComputedRow
-                testId="agility-key-store"
-                label="Key store flexibility"
-                reason={result.keyStore.status === "not-computed" ? result.keyStore.reason : ""}
-              />
-              <NotComputedRow
-                testId="agility-protocol"
-                label="Protocol negotiation"
-                reason={result.protocol.status === "not-computed" ? result.protocol.reason : ""}
-              />
-            </Panel>
+              <div className="metric-hero mt-2">
+                {result.share.status === "computed" ? (
+                  <span className="metric-hero-num lg">{result.share.value}%</span>
+                ) : (
+                  <NotComputed reason={result.share.reason} />
+                )}
+                <div>
+                  <div className="metric-hero-tag">Configurable share</div>
+                  <div className="metric-hero-note">No target: no policy pack defines one</div>
+                </div>
+              </div>
+
+              <div className="bar-metric mt-5">
+                <BarRow
+                  testId="agility-configurable"
+                  label="Configurable crypto"
+                  value={assessed === 0 ? "—" : `${pct(result.configurable)}%`}
+                  share={assessed === 0 ? null : pct(result.configurable)}
+                  sub={
+                    assessed === 0
+                      ? "no component carries a configurability finding"
+                      : `${result.configurable} of ${assessed} assessed · algorithm chosen by configuration`
+                  }
+                />
+                <BarRow
+                  testId="agility-hard-coded"
+                  label="Hard-coded crypto"
+                  value={assessed === 0 ? "—" : `${pct(result.hardCoded)}%`}
+                  share={assessed === 0 ? null : pct(result.hardCoded)}
+                  dim
+                  sub={
+                    assessed === 0
+                      ? "no component carries a configurability finding"
+                      : `${result.hardCoded} of ${assessed} assessed · fixed in code: a change is an edit, a review and a redeploy`
+                  }
+                />
+                <BarRow
+                  testId="agility-unassessed"
+                  label="Not assessed"
+                  value={`${result.unassessed}`}
+                  share={null}
+                  sub="components no scanner could judge — counted neither way"
+                />
+                <NotComputedRow
+                  testId="agility-key-store"
+                  label="Key store flexibility"
+                  reason={result.keyStore.status === "not-computed" ? result.keyStore.reason : ""}
+                />
+                <NotComputedRow
+                  testId="agility-protocol"
+                  label="Protocol negotiation"
+                  reason={result.protocol.status === "not-computed" ? result.protocol.reason : ""}
+                />
+              </div>
+            </section>
+
+            <Gauge measured={result.share} />
           </div>
 
-          <Panel eyebrow="System components" title="Where to improve next" bodyClassName="pt-1">
+          <section className="panel in" style={{ animationDelay: "0.1s" }}>
+            <PanelHead
+              title="Where to improve next"
+              sub="Hard-coded components, worst first — where making the algorithm configurable pays most"
+            />
             {result.improve.length === 0 ? (
-              <EmptyPanel
+              <EmptyState
                 title={
                   result.hardCoded === 0 && result.configurable > 0
                     ? "Nothing is hard-coded"
@@ -201,31 +239,32 @@ export function AgilityScreen({ artefacts, loading }: { artefacts: Artefact[]; l
                 }
               />
             ) : (
-              <ul>
+              <div className="mt-2">
                 {result.improve.map((artefact) => (
-                  <li
-                    key={artefact.bomRef}
-                    className="grid grid-cols-[minmax(9rem,1fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_auto] items-center gap-4 border-t border-line py-3 first:border-t-0"
-                  >
-                    <a
-                      href={hrefFor("inventory", { ref: artefact.bomRef })}
-                      className="truncate text-[13px] font-medium text-ink hover:underline"
-                    >
-                      {artefact.name}
-                    </a>
-                    <span className="truncate font-mono text-[11px] text-ink-dim">
-                      {artefact.occurrences[0] ? shortLocator(artefact.occurrences[0].locator) : "—"}
-                    </span>
-                    <span className="truncate text-[12px] text-ink-faint">
-                      fixed in code — read the algorithm from configuration
-                    </span>
-                    <BandBadge band={artefact.band} />
-                  </li>
+                  <div key={artefact.bomRef} className="improve-row" data-testid="improve-row">
+                    <div className="min-w-0">
+                      <a
+                        href={hrefFor("inventory", { ref: artefact.bomRef })}
+                        className="improve-name hover:underline"
+                      >
+                        {artefact.name}
+                      </a>
+                      <div className="improve-note">
+                        {artefact.occurrences[0] ? shortLocator(artefact.occurrences[0].locator) : "no location"} ·
+                        fixed in code — read the algorithm from configuration
+                      </div>
+                    </div>
+                    <BandTag band={artefact.band} />
+                    <div className="improve-pct" title="The component's risk score, not an agility percentage">
+                      {artefact.score}
+                      <small>risk</small>
+                    </div>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
-          </Panel>
-        </div>
+          </section>
+        </>
       )}
     </div>
   );
