@@ -16,6 +16,7 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { NewScanDialog } from "@/components/NewScanDialog";
 import { SignIn } from "@/components/SignIn";
 import { ConsoleContext, type ConsoleFrame } from "@/components/shell/console";
 import { Sidebar, type Connection } from "@/components/shell/Sidebar";
@@ -61,8 +62,13 @@ function Console() {
   const view = useScanView();
   const route = useRoute();
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [creating, setCreating] = useState(false);
   const frame = useMemo<ConsoleFrame>(
-    () => ({ view, onSearch: (q) => navigate("inventory", q ? { q } : undefined) }),
+    () => ({
+      view,
+      onSearch: (q) => navigate("inventory", q ? { q } : undefined),
+      onRunScan: () => setCreating(true),
+    }),
     [view],
   );
 
@@ -142,6 +148,8 @@ function Console() {
         ) : null}
         <ConsoleContext.Provider value={frame}>{screen}</ConsoleContext.Provider>
       </main>
+      {/* One dialog for every screen's Run scan; a stored scan becomes the loaded one. */}
+      <NewScanDialog open={creating} onOpenChange={setCreating} onCreated={(scanId) => view.selectScan(scanId)} />
     </div>
   );
 }

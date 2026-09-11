@@ -17,6 +17,8 @@ export interface ConsoleFrame {
   view: ScanView;
   /** Lands on a filtered Inventory. */
   onSearch: (query: string) => void;
+  /** Opens the new-scan dialog the shell hosts (every v2 topline has Run scan). */
+  onRunScan: () => void;
 }
 
 export const ConsoleContext = createContext<ConsoleFrame | null>(null);

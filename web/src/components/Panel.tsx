@@ -6,6 +6,7 @@
  * Colour stays semantic (ADR-0031): the only coloured primitive is BandBadge.
  * Verified vs provisional is a solid vs dashed border, never a colour.
  */
+import { ScanLine } from "lucide-react";
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from "react";
 
 import type { Band } from "@/api/types";
@@ -13,11 +14,13 @@ import { useConsole } from "@/components/shell/console";
 import { ContextChips, Crumb, SearchBox, StatusChip } from "@/components/shell/Topline";
 import { UserMenu } from "@/components/shell/UserMenu";
 import { BAND_STYLE, cn } from "@/lib/format";
+import { canAdmin, NEEDS_ADMIN, useAuth } from "@/state/auth";
 
 /**
  * The v2 topline: crumb, title and context chips on the left; search, status,
- * profile and the page's own actions on the right. Inside the console it draws
- * the frame; rendered on its own it is just the title and the actions.
+ * profile, the page's own actions and Run scan on the right -- every v2 mockup
+ * ends its topline with Run scan. Inside the console it draws the frame;
+ * rendered on its own it is just the title and the actions.
  */
 export function ScreenHeader({
   title,
@@ -29,6 +32,7 @@ export function ScreenHeader({
   actions?: ReactNode;
 }) {
   const frame = useConsole();
+  const admin = canAdmin(useAuth().principal);
   return (
     <header className="topline screen-head">
       <div className="min-w-0">
@@ -46,6 +50,17 @@ export function ScreenHeader({
           </>
         ) : null}
         {actions}
+        {frame ? (
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!admin}
+            title={admin ? "Scan a target, or a whole system manifest" : NEEDS_ADMIN}
+            onClick={frame.onRunScan}
+          >
+            <ScanLine className="h-3.5 w-3.5" aria-hidden /> Run scan
+          </button>
+        ) : null}
       </div>
     </header>
   );
@@ -170,6 +185,7 @@ export function BandBadge({ band }: { band: Band }) {
   return (
     <span
       data-testid="band-pill"
+      data-band={band}
       className={cn(
         "inline-flex items-center whitespace-nowrap rounded-[3px] border px-1.5 py-px font-mono text-[10px]",
         style.bg,

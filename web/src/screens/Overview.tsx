@@ -24,7 +24,7 @@
  * Added to the mockup's ops column, because the Overview is where it lives:
  * the CRQC horizon, the Mosca control.
  */
-import { ArrowRight, Download, GitCompareArrows, Radar, ScanLine, ShieldAlert, Table2, Workflow } from "lucide-react";
+import { ArrowRight, Download, GitCompareArrows, Radar, ShieldAlert, Table2, Workflow } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { cbomPath } from "@/api/client";
@@ -32,12 +32,10 @@ import { BANDS, type Artefact, type Band, type ScanSummary } from "@/api/types";
 import { FileButton } from "@/components/FileButton";
 import { MetricCard, NotComputed } from "@/components/Honest";
 import { InfoTip } from "@/components/InfoTip";
-import { NewScanDialog } from "@/components/NewScanDialog";
 import { ScreenHeader } from "@/components/Panel";
 import { Slider } from "@/components/ui/slider";
 import { cn, formatDate, shortLocator } from "@/lib/format";
 import { hrefFor, navigate } from "@/lib/router";
-import { canAdmin, NEEDS_ADMIN, useAuth } from "@/state/auth";
 import { certaintyOf, formatConfidence } from "@/state/certainty";
 import { Z_MAX, Z_MIN, type ScanView } from "@/state/inventory";
 import {
@@ -687,9 +685,6 @@ function AgilityPanel({ agile }: { agile: Agility }) {
 
 export function OverviewScreen({ view }: { view: ScanView }) {
   const { scan, artefacts, loading } = view;
-  const { principal } = useAuth();
-  const admin = canAdmin(principal);
-  const [creating, setCreating] = useState(false);
 
   const live = useMemo(() => bandCountsOf(artefacts), [artefacts]);
   const mosca = useMemo(() => moscaSummary(artefacts), [artefacts]);
@@ -702,32 +697,18 @@ export function OverviewScreen({ view }: { view: ScanView }) {
     <ScreenHeader
       title="Cryptographic Security Overview"
       actions={
-        <>
-          {scan ? (
-            <FileButton
-              path={cbomPath(scan.id)}
-              filename={`ecdat-cbom-${scan.id.slice(0, 8)}.json`}
-              title="Download the stored CBOM this overview is computed from"
-              className="btn-ghost"
-            >
-              <Download className="h-3.5 w-3.5" aria-hidden /> Export snapshot
-            </FileButton>
-          ) : null}
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={!admin}
-            title={admin ? "Scan a target, or a whole system manifest" : NEEDS_ADMIN}
-            onClick={() => setCreating(true)}
+        scan ? (
+          <FileButton
+            path={cbomPath(scan.id)}
+            filename={`ecdat-cbom-${scan.id.slice(0, 8)}.json`}
+            title="Download the stored CBOM this overview is computed from"
+            className="btn-ghost"
           >
-            <ScanLine className="h-3.5 w-3.5" aria-hidden /> Run scan
-          </button>
-        </>
+            <Download className="h-3.5 w-3.5" aria-hidden /> Export snapshot
+          </FileButton>
+        ) : undefined
       }
     />
-  );
-  const dialog = (
-    <NewScanDialog open={creating} onOpenChange={setCreating} onCreated={(scanId) => view.selectScan(scanId)} />
   );
 
   if (loading && artefacts.length === 0) {
@@ -744,7 +725,6 @@ export function OverviewScreen({ view }: { view: ScanView }) {
             <div key={i} className="panel h-60 animate-pulse" />
           ))}
         </div>
-        {dialog}
       </div>
     );
   }
@@ -761,7 +741,6 @@ export function OverviewScreen({ view }: { view: ScanView }) {
             server opened.
           </p>
         </div>
-        {dialog}
       </div>
     );
   }
@@ -837,7 +816,6 @@ export function OverviewScreen({ view }: { view: ScanView }) {
           </div>
         </div>
       </div>
-      {dialog}
     </div>
   );
 }
