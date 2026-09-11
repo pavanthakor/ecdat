@@ -1465,13 +1465,24 @@
   row, expose it on `ScanSummary`, and render it in the report and the Coverage
   screen. `packs_applied` is likewise in the log and not exposed by the API.
   *Raised: Q-orbit console slice (ADR-0031).*
-- **The coverage report's standing gap list is stale.** `reports/coverage.py`
-  `KNOWN_GAPS` still says Java source is not scanned and that binary scanners are
-  "designed, not built". The Java rules shipped in ADR-0024 and the binary
-  scanner in ADR-0025. The document that exists to state the tool's limits now
-  mis-states them, and a reader holding the PDF cannot tell. Deriving the
-  scanner-family line from the registry would stop it drifting again.
-  *Raised: Q-orbit console slice.*
+- ~~**The coverage report's standing gap list is stale.**~~ **Resolved.**
+  `reports/coverage.py` `KNOWN_GAPS` said Java source was not scanned and that
+  binary scanners were "designed, not built"; the Java rules shipped in
+  ADR-0024 and the binary scanner in ADR-0025. It now says source covers
+  Python, Go, JavaScript/TypeScript and Java, and describes the binary scanner
+  as built -- ELF and PE, heuristic and confidence-scored -- with its real
+  limits kept (not wired into container images, a symbol proves a link,
+  stripped / static / packed binaries yield less), along with the gaps that are
+  still true: C/C++, Rust and C# source, and no network scanner. A test ties
+  the source line to the packs in `knowledge/rules/`, so a new language pack
+  that the statement does not name fails the suite; the scanner-family line is
+  still hand-written. *Raised: Q-orbit console slice. Resolved: coverage /
+  Settings honesty fix.*
+- ~~**The Settings screen named a retired font.**~~ **Resolved** in the same
+  fix. It said "Space Grotesk + JetBrains Mono" after ADR-0038 moved the
+  console to Inter; it now says "Inter + JetBrains Mono", and a test checks the
+  row against the faces `src/styles/index.css` actually imports. *Raised:
+  post-ADR-0039 health audit.*
 - **Crypto-agility sub-metrics are not computed.** The Agility screen's
   configurable share is real (`ecdat:configurable`, ADR-0026). **Key store** —
   whether key material is held in a key store, HSM or KMS rather than a file —

@@ -46,18 +46,29 @@ VIEW_REMEDY = {
 #: ECDAT runs today, and a report that omitted them would overstate the tool.
 KNOWN_GAPS = [
     (
-        "Source scanning covers Python, Go and JavaScript/TypeScript",
-        "Java, C/C++, Rust and C# source are not scanned -- four of seven "
-        "planned language families. C/C++ is the hard one: OpenSSL call sites "
-        "are macro-heavy, so that pack needs a different engine rather than "
-        "more rules (ADR-0023).",
+        "Source scanning covers Python, Go, JavaScript/TypeScript and Java",
+        "C/C++, Rust and C# source are not scanned -- three of seven planned "
+        "language families. C/C++ is the hard one: OpenSSL call sites are "
+        "macro-heavy, so that pack needs a different engine rather than more "
+        "rules (ADR-0023).",
     ),
     (
-        "Binary and network scanners are designed, not built",
-        "Five of a planned seven scanner families exist. The dependency "
-        "scanner landed in ADR-0021 (Python, Node and Go manifests), but a "
-        "cryptographic library reached only through a statically linked "
-        "binary, or a packet capture, is still not inventoried.",
+        "Binaries are read heuristically, and not inside container images",
+        "The binary scanner (ADR-0025) reads ELF and PE files by symbols, OIDs, "
+        "embedded PEM, version banners and known constants; every finding is "
+        "confidence-scored and none is 1.0. A symbol proves a link, not a call; "
+        "a stripped, statically linked or packed binary yields less; PE is read "
+        "more shallowly than ELF, and Mach-O is untested. It is not wired to "
+        "the container scanner, so an image scan inventories the installed "
+        "packages, not the binaries inside the image.",
+    ),
+    (
+        "There is no network scanner",
+        "Six of a planned seven scanner families exist: source, configuration, "
+        "dependency (Python, Node and Go manifests -- not Java or Rust), "
+        "container, binary and the eBPF runtime view. No active TLS/SSH probe "
+        "and no packet-capture reader exist, so an endpoint is seen only "
+        "through its configuration or the runtime view.",
     ),
     (
         "Runtime coverage is narrower than 'TLS on this host'",

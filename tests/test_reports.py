@@ -41,6 +41,7 @@ from reports import (
     UnknownScanError,
     render,
 )
+from reports.coverage import KNOWN_GAPS
 
 MANIFEST = Path("testdata/quantumbank/system.yaml")
 KNOWLEDGE = Path("knowledge")
@@ -349,6 +350,44 @@ def test_the_coverage_statement_names_the_standing_known_gaps(
 
     assert "Go" in body
     assert "JavaScript" in body
+
+
+#: A rule pack directory -> the language name the coverage statement uses.
+PACK_LANGUAGE = {
+    "python": "Python",
+    "go": "Go",
+    "javascript": "JavaScript",
+    "java": "Java",
+}
+
+
+def test_the_standing_gaps_name_every_language_a_rule_pack_ships() -> None:
+    """A limits list that calls a SHIPPED capability missing is as wrong as one
+    that hides a gap. The source line is tied to `knowledge/rules/`: adding a
+    language pack without updating the coverage statement fails here."""
+    covers = next(h for h, _ in KNOWN_GAPS if h.startswith("Source scanning covers"))
+    packs = sorted(p.name for p in (KNOWLEDGE / "rules").iterdir() if p.is_dir())
+
+    assert packs, "no rule packs found"
+    for pack in packs:
+        # A whole word: "Java" must not be satisfied by "JavaScript".
+        name = PACK_LANGUAGE.get(pack, pack.title())
+        assert re.search(rf"\b{re.escape(name)}\b", covers), pack
+
+
+def test_the_standing_gaps_do_not_call_shipped_scanners_unbuilt(
+    system_scan: str,
+) -> None:
+    """Java rules shipped in ADR-0024 and the binary scanner in ADR-0025; the
+    PDF must not say otherwise -- and must keep the gaps that ARE real."""
+    body = " ".join(text_of(render(CoverageReport, system_scan)).split())
+
+    assert "designed, not built" not in body
+    assert "Java, C/C++" not in body  # the retired "Java ... not scanned" claim
+    assert "ELF" in body
+    assert "PE" in body
+    for real_gap in ("C/C++", "Rust", "C#", "container"):
+        assert real_gap in body, real_gap
 
 
 def test_a_declared_only_scan_reports_the_views_it_did_not_collect(

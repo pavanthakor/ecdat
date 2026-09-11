@@ -40,7 +40,7 @@ export function SettingsScreen({ scan, artefacts }: { scan: ScanSummary | null; 
             <Row label="API" value={<code className="font-mono">{API_BASE}</code>} />
             <Row label="Origin" value="same-origin only — no configurable base URL" />
             <Row label="Build" value="static bundle served by FastAPI from web/dist; no Node at runtime" />
-            <Row label="Fonts" value="Space Grotesk + JetBrains Mono, self-hosted; no CDN" />
+            <Row label="Fonts" value="Inter + JetBrains Mono, self-hosted; no CDN" />
             <Row label="Routing" value="hash routes (#/…), so no path can collide with the API" />
           </dl>
         </Panel>
