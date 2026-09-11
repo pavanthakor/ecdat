@@ -200,7 +200,8 @@ describe("border and weight, never colour", () => {
     const { container } = table();
     const row = rowOf(container, unresolved);
 
-    expect(within(row).getByTestId("band-pill").className).toContain("text-medium");
+    // v2 (ADR-0039): the band badge and the rail carry the band as a class.
+    expect(within(row).getByTestId("band-pill").className).toContain("badge-medium");
     expect(within(row).getByTestId("severity-bar").className).toContain("bg-medium");
     expect(within(row).queryByTestId("candidate-tag")).toBeNull();
   });
