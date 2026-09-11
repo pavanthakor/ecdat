@@ -85,14 +85,14 @@ export function ReportsScreen({ scan, artefacts }: { scan: ScanSummary | null; a
                   <FileButton
                     mode="view"
                     path={reportPath(scan.id, report.kind)}
-                    filename={`qorbit-${report.kind}-${short}.pdf`}
+                    filename={`ecdat-${report.kind}-${short}.pdf`}
                   >
                     <ExternalLink className="h-3.5 w-3.5" aria-hidden /> View
                   </FileButton>
                   <FileButton
                     variant="quiet"
                     path={reportPath(scan.id, report.kind)}
-                    filename={`qorbit-${report.kind}-${short}.pdf`}
+                    filename={`ecdat-${report.kind}-${short}.pdf`}
                   >
                     Generate
                   </FileButton>
@@ -119,7 +119,7 @@ export function ReportsScreen({ scan, artefacts }: { scan: ScanSummary | null; a
                   <FileButton
                     bare
                     path={cbomPath(scan.id)}
-                    filename={`qorbit-cbom-${short}.json`}
+                    filename={`ecdat-cbom-${short}.json`}
                     label="Download CBOM JSON"
                     className="inline-flex text-ink-dim transition-colors hover:text-ink"
                   >
@@ -155,7 +155,7 @@ export function ReportsScreen({ scan, artefacts }: { scan: ScanSummary | null; a
                     aria-label="Download inventory CSV"
                     disabled={artefacts.length === 0}
                     onClick={() =>
-                      downloadText(`qorbit-inventory-${short}.csv`, inventoryCsv(sortByRisk(artefacts)), "text/csv")
+                      downloadText(`ecdat-inventory-${short}.csv`, inventoryCsv(sortByRisk(artefacts)), "text/csv")
                     }
                     className="inline-flex text-ink-dim transition-colors hover:text-ink disabled:opacity-40"
                   >

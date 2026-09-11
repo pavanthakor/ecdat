@@ -1,12 +1,14 @@
-# Q-orbit console (`web/`)
+# ECDAT console (`web/`)
 
-**Q-orbit — Security Console**: ECDAT's dashboard, a dark SOC-style console
-over the CBOM the scanners produce. React + Vite + TypeScript, Tailwind, Radix
-primitives, lucide-react. [ADR-0018](../docs/adr/0018-dashboard.md) is the
+**ECDAT — Cryptographic Security Console**: ECDAT's dashboard, a dark SOC-style
+console over the CBOM the scanners produce. React + Vite + TypeScript, Tailwind,
+Radix primitives, lucide-react. [ADR-0018](../docs/adr/0018-dashboard.md) is the
 first slice; [ADR-0031](../docs/adr/0031-qorbit-dashboard.md) is the full
 console and its honesty rule; [ADR-0032](../docs/adr/0032-qorbit-design-match.md)
-matched its layout to the design screenshots in `web/design/` (reference only —
-nothing there is bundled).
+matched its layout to the design screenshots in `web/design/`;
+[ADR-0038](../docs/adr/0038-v2-console-design.md) rebuilds it on the v2 mockups
+in `web/design-v2/` (git-ignored, reference only — nothing there is bundled),
+screen by screen. The v2 design system is `src/styles/console-v2.css`.
 
 ## Build it before the demo
 
@@ -62,10 +64,12 @@ against the dev proxy and against the built bundle with no configuration.
 
 No CDN, anywhere:
 
-* **Fonts are vendored.** Space Grotesk (the interface) and JetBrains Mono
+* **Fonts are vendored.** Inter (the interface) and JetBrains Mono
   (bom-refs, locators, endpoints, diffs) come from `@fontsource`, which ships
   the `woff2` files inside `node_modules`; Vite copies them into `dist/assets`.
-  Nothing is fetched from Google Fonts at runtime.
+  Nothing is fetched from Google Fonts at runtime — the v2 mockups link it, and
+  that link was deliberately not copied (ADR-0038). `src/test/offline.test.ts`
+  fails on any remote URL in `index.html`, a stylesheet or a source file.
 * **No external scripts or stylesheets.** `dist/index.html` references two
   hashed local assets, and the favicon is an inline `data:` URI.
 * **Same-origin API only.** `src/api/client.ts` has no configurable base URL —

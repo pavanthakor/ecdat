@@ -213,7 +213,7 @@ export function CompareScreen({
                 <Button
                   onClick={() =>
                     downloadText(
-                      `qorbit-compare-${data.base.id.slice(0, 8)}-${data.head.id.slice(0, 8)}.json`,
+                      `ecdat-compare-${data.base.id.slice(0, 8)}-${data.head.id.slice(0, 8)}.json`,
                       `${JSON.stringify(data, null, 2)}\n`,
                       "application/json",
                     )

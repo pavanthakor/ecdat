@@ -1,5 +1,6 @@
 /**
- * The user menu: WHICH KEY the console holds, and its role (ADR-0035).
+ * The profile chip: WHICH KEY the console holds, and its role (ADR-0035),
+ * drawn as the v2 topline's profile chip (ADR-0038).
  *
  * ECDAT has no user accounts. A key is issued to a name with `ecdat api-key
  * create`, and that name is what shows here. "Sign out" forgets the key in
@@ -10,7 +11,6 @@
 import { ChevronDown, LogOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { cn } from "@/lib/format";
 import { useAuth } from "@/state/auth";
 
 export function UserMenu() {
@@ -45,24 +45,21 @@ export function UserMenu() {
         aria-expanded={open}
         aria-label="User menu"
         onClick={() => setOpen((value) => !value)}
-        className={cn(
-          "flex items-center gap-2.5 rounded-md border px-2 py-1.5 transition-colors",
-          open ? "border-ink-dim bg-raised" : "border-line hover:border-ink-faint",
-        )}
+        className="profile-chip"
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-ink-faint text-[10px] font-semibold text-ink">
+        <span className="profile-avatar" aria-hidden>
           {initials}
         </span>
-        <span className="hidden text-left leading-tight xl:block">
-          <span className="block text-[12px] font-medium text-ink">{name}</span>
-          <span className="block text-[9.5px] uppercase tracking-wider text-ink-faint">{role}</span>
+        <span className="leading-tight">
+          <span className="profile-name block">{name}</span>
+          <span className="profile-sub block">{role} key</span>
         </span>
         <ChevronDown className="h-3.5 w-3.5 text-ink-faint" aria-hidden />
       </button>
       {open ? (
-        <div role="menu" className="absolute right-0 top-11 z-30 w-64 rounded-lg border border-line bg-panel shadow-2xl">
+        <div role="menu" className="menu">
           <div className="border-b border-line px-3 py-2.5">
-            <div className="text-[12.5px] font-medium text-ink">
+            <div className="text-[12.5px] font-semibold text-ink">
               {name} · {role}
             </div>
             <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">

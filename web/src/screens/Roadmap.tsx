@@ -106,7 +106,7 @@ export function RoadmapScreen({
             disabled={!scan || roadmap.rows.length === 0}
             title="CSV of the dated rows, generated in the browser"
             onClick={() =>
-              scan && downloadText(`qorbit-roadmap-${scan.id.slice(0, 8)}.csv`, roadmapCsv(roadmap.rows), "text/csv")
+              scan && downloadText(`ecdat-roadmap-${scan.id.slice(0, 8)}.csv`, roadmapCsv(roadmap.rows), "text/csv")
             }
           >
             <Download className="h-3.5 w-3.5" aria-hidden /> Export roadmap

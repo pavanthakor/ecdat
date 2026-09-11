@@ -120,7 +120,7 @@ export function CoverageScreen({
             <FileButton
               mode="view"
               path={reportPath(scan.id, "coverage")}
-              filename={`qorbit-coverage-${scan.id.slice(0, 8)}.pdf`}
+              filename={`ecdat-coverage-${scan.id.slice(0, 8)}.pdf`}
             >
               <ExternalLink className="h-3.5 w-3.5" aria-hidden /> Coverage statement (PDF)
             </FileButton>

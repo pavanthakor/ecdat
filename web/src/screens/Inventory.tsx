@@ -108,7 +108,7 @@ export function InventoryScreen({
               onClick={() =>
                 view.scan &&
                 downloadText(
-                  `qorbit-inventory-${view.scan.id.slice(0, 8)}.csv`,
+                  `ecdat-inventory-${view.scan.id.slice(0, 8)}.csv`,
                   inventoryCsv(sortArtefacts(view.artefacts, sort)),
                   "text/csv",
                 )

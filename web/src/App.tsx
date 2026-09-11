@@ -1,8 +1,11 @@
 /**
- * The Q-orbit console shell, laid out as web/design/ has it (ADR-0032).
+ * The ECDAT console shell, in the v2 design (ADR-0038; first matched to a
+ * design in ADR-0032).
  *
- * A full-height left column (mark, status, grouped nav, operator), then the
- * top bar, the status strip and one screen at a time from the hash route. The
+ * A full-height left column (mark, grouped nav, connection, key, engine) and
+ * one screen at a time from the hash route. Each screen's topline carries the
+ * crumb, context chips, search, status and profile -- through ConsoleContext,
+ * since the v2 design puts them beside the title, not in a bar above it. The
  * scan view is loaded ONCE here and shared, so every screen reads the same
  * document -- a Mosca rescore on the Overview is what the Inventory, Roadmap
  * and Agility screens show too.
@@ -11,12 +14,11 @@
  * refuses the console's key -- or it has none -- and never otherwise. A new
  * sign-in remounts the console, so every screen reloads with the new key.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { SignIn } from "@/components/SignIn";
+import { ConsoleContext, type ConsoleFrame } from "@/components/shell/console";
 import { Sidebar, type Connection } from "@/components/shell/Sidebar";
-import { StatusStrip } from "@/components/shell/StatusStrip";
-import { TopBar } from "@/components/shell/TopBar";
 import { navigate, useRoute } from "@/lib/router";
 import { AgilityScreen } from "@/screens/Agility";
 import { CompareScreen } from "@/screens/Compare";
@@ -33,6 +35,7 @@ import { ScansScreen } from "@/screens/Scans";
 import { SettingsScreen } from "@/screens/Settings";
 import { AuthContext, useAuthState } from "@/state/auth";
 import { NO_FILTERS, useScanView, type Filters } from "@/state/inventory";
+import { driftMeasure } from "@/state/metrics";
 
 export default function App() {
   const auth = useAuthState();
@@ -58,7 +61,10 @@ function Console() {
   const view = useScanView();
   const route = useRoute();
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  const [collapsed, setCollapsed] = useState(false);
+  const frame = useMemo<ConsoleFrame>(
+    () => ({ view, onSearch: (q) => navigate("inventory", q ? { q } : undefined) }),
+    [view],
+  );
 
   // The top-bar search arrives as `#/inventory?q=`; it seeds the table filter.
   const query = route.route === "inventory" ? route.params.get("q") : null;
@@ -117,28 +123,25 @@ function Console() {
       screen = <NotFoundScreen path={route.path} />;
   }
 
+  // The drift badge is a count only where drift could be assessed at all.
+  const drift = driftMeasure(view.scan, view.artefacts);
+
   return (
-    <div className="flex h-full bg-ground text-ink">
+    <div className="v2 app" data-ambient={route.route ?? "overview"}>
       <Sidebar
         current={route.route}
-        collapsed={collapsed}
-        onToggle={() => setCollapsed((value) => !value)}
         connection={connection}
-        analysing={Boolean(view.scan) && !view.loading}
+        view={view}
+        driftCount={drift.status === "computed" ? drift.value : null}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar view={view} onSearch={(q) => navigate("inventory", q ? { q } : undefined)} />
-        <StatusStrip view={view} />
+      <main className="main">
         {view.error ? (
-          <div
-            role="alert"
-            className="border-b border-critical/40 bg-critical/10 px-6 py-1.5 text-2xs text-critical"
-          >
+          <div role="alert" className="alert-strip mx-6 mt-4">
             {view.error}
           </div>
         ) : null}
-        <main className="min-h-0 flex-1 overflow-auto">{screen}</main>
-      </div>
+        <ConsoleContext.Provider value={frame}>{screen}</ConsoleContext.Provider>
+      </main>
     </div>
   );
 }

@@ -22,20 +22,26 @@ export function NotComputed({
 }) {
   return (
     <div className={cn("min-w-0", className)}>
-      <div className="font-mono text-[10.5px] font-medium uppercase tracking-wider text-ink-faint">
-        Not computed
-      </div>
-      <div className="mt-0.5 text-[11.5px] leading-snug text-ink-faint">{reason}</div>
+      <div className="not-computed-label">Not computed</div>
+      <div className="not-computed-reason">{reason}</div>
     </div>
   );
 }
 
+/**
+ * The v2 stat card (ADR-0038): icon and label, then the number and a small
+ * pill. The mockup's pill is a delta ("+6", in red or green); nothing computes
+ * a delta, so here it is the BASIS, in neutral ink, with the full basis on
+ * hover.
+ */
 export function MetricCard({
   id,
   label,
   measured,
   unit,
   pad = false,
+  icon,
+  note,
 }: {
   id: string;
   label: string;
@@ -43,29 +49,32 @@ export function MetricCard({
   unit?: string;
   /** Two-digit counts, as the design shows them ("08"). */
   pad?: boolean;
+  icon?: ReactNode;
+  /** A short form of the basis for the pill. Defaults to the basis. */
+  note?: string;
 }) {
   return (
-    <div
-      data-testid={`metric-${id}`}
-      data-state={measured.status}
-      className="min-w-0 rounded-lg border border-line bg-panel px-4 pb-3.5 pt-3"
-    >
-      <div className="eyebrow truncate">{label}</div>
+    <div data-testid={`metric-${id}`} data-state={measured.status} className="stat-card">
+      <div className="stat-top">
+        {icon ? (
+          <span className="stat-icon" aria-hidden>
+            {icon}
+          </span>
+        ) : null}
+        <span className="stat-label">{label}</span>
+      </div>
       {measured.status === "computed" ? (
-        <>
-          <div
-            data-testid="metric-value"
-            className="mt-2.5 text-[26px] font-semibold leading-none tabular-nums text-ink"
-          >
+        <div className="stat-bottom">
+          <span data-testid="metric-value" className="stat-num">
             {pad ? pad2(measured.value) : measured.value}
-            {unit ? <span className="text-[22px]">{unit}</span> : null}
-          </div>
-          <div className="mt-2.5 truncate text-[11.5px] text-ink-faint" title={measured.basis}>
-            {measured.basis}
-          </div>
-        </>
+            {unit ?? null}
+          </span>
+          <span className="stat-delta" title={measured.basis}>
+            {note ?? measured.basis}
+          </span>
+        </div>
       ) : (
-        <NotComputed reason={measured.reason} className="mt-2.5" />
+        <NotComputed reason={measured.reason} />
       )}
     </div>
   );

@@ -8,3 +8,5 @@ reports-out/
 # API key files (ADR-0035). They hold digests, not tokens -- and still never
 # belong in a commit. The default location is outside the repo anyway.
 api-keys*.json
+web/design-v2/
+web/design-v2.zip

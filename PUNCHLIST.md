@@ -1536,3 +1536,19 @@
     accounts (ADR-0035). The menu shows the key's name and role, which is as
     much of a person as ECDAT knows.
   *Raised: design-match slice (ADR-0032).*
+- **v2 design rebuild (ADR-0038): screens still on the ADR-0032 layout.** The
+  shell and the Overview are rebuilt on `web/design-v2/`. Cryptographic Drift,
+  Verified Fixes and Inventory are next (after review of the Overview), then
+  Scans, Roadmap, Agility, Coverage, Reports and Compare; until its turn, each
+  keeps its current layout inside the v2 frame and palette. **Still owed:** a
+  visual check of the rendered v2 console against the mockups (no headless
+  browser on the build machine). v2 elements with no backing, beyond the list
+  above:
+  - **An average risk score per scan** (the Risk trend's "54.2"): a stored row
+    has band counts and a max score, not an average. The trend plots Critical +
+    High per stored scan instead, and needs two scans of the target.
+  - **A weighted estate score** ("Overall risk 63/100 Elevated"): no such
+    model. The gauge shows the peak artefact score, named as the peak.
+  - **An agility history** (the agility panel's line): nothing records agility
+    per scan. Computable from the stored documents; not wired.
+  *Raised: v2 design slice (ADR-0038).*

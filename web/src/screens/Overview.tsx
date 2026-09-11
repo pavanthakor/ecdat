@@ -1,26 +1,44 @@
 /**
- * OVERVIEW -- "Cryptographic Security Overview", laid out as web/design/ has it
- * (ADR-0032): nine metric cards on a five-column grid, risk distribution beside
- * the CRQC horizon, then the priority queue beside the coverage pulse.
+ * OVERVIEW -- "Cryptographic Security Overview", rebuilt on the v2 mockup
+ * (web/design-v2/ecdat-console-v2/overview.html; ADR-0038).
  *
- * Every band-derived number is counted from the document ON SCREEN, so the
- * whole screen follows the Mosca slider through a real rescore round trip
- * (ADR-0016). Every card is `computed` with its basis or `not-computed` with
- * its reason. The design's sample captions ("+4 pts since baseline") are not
- * reproduced -- nothing computes them.
+ * The mockup's layout, top to bottom: five stat cards; risk trend, findings by
+ * category and a gauge; the priority table beside the ops column. Every figure
+ * is real or says why it is not (ADR-0031), and every band-derived figure is
+ * counted from the document ON SCREEN, so the whole screen follows the Mosca
+ * slider through a real rescore round trip (ADR-0016).
+ *
+ * Where the mockup draws something ECDAT does not compute, its place is kept
+ * and filled with what IS computed, named for what it is:
+ *
+ * - "Risk trend / Average score": stored rows carry band counts, not an
+ *   average, so the trend is Critical + High per stored scan of this target --
+ *   and it takes two scans to be a trend.
+ * - "Overall risk 63/100 Elevated": there is no weighted estate score. The
+ *   gauge is the PEAK artefact score in the live document, in its band colour.
+ * - The delta pills ("+6", "↑ 4 pts"): nothing computes a delta against a
+ *   baseline (PUNCHLIST). The pills state each figure's basis, neutral.
+ * - "Good morning, Alex": ECDAT has keys, not people (ADR-0035). The title is
+ *   the screen's.
+ *
+ * Added to the mockup's ops column, because the Overview is where it lives:
+ * the CRQC horizon, the Mosca control.
  */
-import { ArrowRight, ChevronRight, Download } from "lucide-react";
-import { useMemo } from "react";
+import { ArrowRight, Download, GitCompareArrows, Radar, ScanLine, ShieldAlert, Table2, Workflow } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { cbomPath } from "@/api/client";
-import { BANDS, VIEWS } from "@/api/types";
+import { BANDS, type Artefact, type Band, type ScanSummary } from "@/api/types";
 import { FileButton } from "@/components/FileButton";
-import { EmptyPanel, MetricCard, NotComputed } from "@/components/Honest";
+import { MetricCard, NotComputed } from "@/components/Honest";
 import { InfoTip } from "@/components/InfoTip";
-import { BandBadge, Panel, ScreenHeader, SkeletonBlock, Tag } from "@/components/Panel";
+import { NewScanDialog } from "@/components/NewScanDialog";
+import { ScreenHeader } from "@/components/Panel";
 import { Slider } from "@/components/ui/slider";
-import { BAND_STYLE, cn, pad2, shortLocator } from "@/lib/format";
-import { hrefFor } from "@/lib/router";
+import { cn, formatDate, shortLocator } from "@/lib/format";
+import { hrefFor, navigate } from "@/lib/router";
+import { canAdmin, NEEDS_ADMIN, useAuth } from "@/state/auth";
+import { certaintyOf, formatConfidence } from "@/state/certainty";
 import { Z_MAX, Z_MIN, type ScanView } from "@/state/inventory";
 import {
   agility,
@@ -30,10 +48,10 @@ import {
   notComputed,
   priorityQueue,
   quantumExposure,
-  scoreHistogram,
-  targetOf,
   viewCoverage,
+  type Agility,
   type Measured,
+  type MoscaSummary,
   type Range,
 } from "@/state/metrics";
 import { bandCountsOf } from "@/state/presentation";
@@ -48,6 +66,441 @@ const MOSCA_EXPLAINER =
 /** Slider tick marks, as horizons in years; labelled as calendar years. */
 const TICKS = [5, 10, 15, 20].filter((z) => z >= Z_MIN && z <= Z_MAX);
 
+/** The class stem for a band's colour (`band-bg-critical`, ...). */
+const tone = (band: Band) => band.toLowerCase();
+
+/** False on the first paint, true on the next: bars and the gauge grow in. */
+function useGrown(): boolean {
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setGrown(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+  return grown;
+}
+
+function PanelHead({ title, sub, right }: { title: ReactNode; sub?: ReactNode; right?: ReactNode }) {
+  return (
+    <div className="panel-head">
+      <div className="min-w-0">
+        <h2 className="panel-title">{title}</h2>
+        {sub ? <div className="panel-sub">{sub}</div> : null}
+      </div>
+      {right}
+    </div>
+  );
+}
+
+function locationOf(artefact: Artefact): string {
+  return (
+    artefact.endpoint ??
+    (artefact.occurrences[0] ? shortLocator(artefact.occurrences[0].locator) : "no location")
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Risk trend: Critical + High per stored scan of this target
+// ---------------------------------------------------------------------------
+
+function trendOf(scans: ScanSummary[], scan: ScanSummary): ScanSummary[] {
+  return scans
+    .filter(
+      (row) =>
+        row.kind === "scan" &&
+        row.target.ref === scan.target.ref &&
+        row.target.system === scan.target.system &&
+        row.created_at <= scan.created_at,
+    )
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .slice(-8);
+}
+
+const severe = (row: ScanSummary) => (row.band_counts?.Critical ?? 0) + (row.band_counts?.High ?? 0);
+
+function RiskTrend({ scans, scan }: { scans: ScanSummary[]; scan: ScanSummary }) {
+  const points = trendOf(scans, scan);
+  const target = scan.target.system ?? scan.target.ref;
+  const head = (
+    <PanelHead
+      title="Risk trend"
+      sub={
+        points.length < 2
+          ? "Critical + High, per stored scan"
+          : `Critical + High, last ${points.length} stored scans`
+      }
+    />
+  );
+
+  if (points.length < 2) {
+    return (
+      <section className="panel in" data-testid="risk-trend" data-state="not-computed">
+        {head}
+        <div className="empty-inline">
+          <NotComputed
+            reason={`${points.length} stored scan of ${target} — a trend needs two. Each new scan of this target adds a point.`}
+          />
+        </div>
+      </section>
+    );
+  }
+
+  const values = points.map(severe);
+  const max = Math.max(1, ...values);
+  const W = 300;
+  const H = 110;
+  const xy = values.map((value, index) => [
+    6 + (index / (values.length - 1)) * (W - 12),
+    H - 8 - (value / max) * (H - 26),
+  ]);
+  const line = xy.map(([x, y], index) => `${index ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
+  const last = xy[xy.length - 1];
+  const area = `${line} L${last[0].toFixed(1)} ${H} L${xy[0][0].toFixed(1)} ${H} Z`;
+
+  return (
+    <section className="panel in" data-testid="risk-trend" data-state="computed">
+      {head}
+      <div className="breakdown-value" data-testid="risk-trend-value">
+        {values[values.length - 1]}
+      </div>
+      <svg
+        className="breakdown-chart"
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        role="img"
+        aria-label={`Critical + High per stored scan: ${values.join(", ")}`}
+      >
+        <title>Each point is a stored scan, counted at the horizon it was scored at.</title>
+        <defs>
+          <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#f5f6f8" stopOpacity="0.12" />
+            <stop offset="1" stopColor="#f5f6f8" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={area} fill="url(#trend-fill)" />
+        <path d={line} fill="none" stroke="#9ba7b2" strokeWidth="1.6" strokeLinejoin="round" />
+        <circle cx={last[0]} cy={last[1]} r="4" fill="#08090b" stroke="#f5f6f8" strokeWidth="2" />
+      </svg>
+      <div className="chart-axis">
+        <span>{formatDate(points[0].created_at)}</span>
+        <span>{formatDate(points[points.length - 1].created_at)}</span>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Findings by category
+// ---------------------------------------------------------------------------
+
+interface Category {
+  id: string;
+  label: string;
+  title: string;
+  primitives?: string[];
+}
+
+/** CycloneDX primitive -> the mockup's groups. Anything else is "Other". */
+const CATEGORIES: Category[] = [
+  { id: "sig", label: "Sig", title: "Signature", primitives: ["signature"] },
+  {
+    id: "kex",
+    label: "KEx",
+    title: "Key exchange: KEM, key agreement, public-key encryption",
+    primitives: ["kem", "key-agree", "key-agreement", "pke"],
+  },
+  {
+    id: "sym",
+    label: "Sym",
+    title: "Symmetric: block and stream ciphers, AEAD, MAC",
+    primitives: ["block-cipher", "stream-cipher", "ae", "mac"],
+  },
+  { id: "hash", label: "Hash", title: "Hash, XOF and KDF", primitives: ["hash", "xof", "kdf"] },
+  { id: "proto", label: "Proto", title: "Protocols (TLS, SSH, ...): CycloneDX assetType protocol" },
+  { id: "other", label: "Other", title: "Everything else: random-number generators, certificates, related material" },
+];
+
+function categoryOf(artefact: Artefact): string {
+  if (artefact.assetType === "protocol") return "proto";
+  const primitive = artefact.primitive;
+  const hit = CATEGORIES.find((c) => primitive !== null && c.primitives?.includes(primitive));
+  return hit?.id ?? "other";
+}
+
+function FindingsByCategory({ artefacts }: { artefacts: Artefact[] }) {
+  const grown = useGrown();
+  const counts = useMemo(() => {
+    const table = Object.fromEntries(
+      CATEGORIES.map((c) => [c.id, { Critical: 0, High: 0, Medium: 0, Low: 0 }]),
+    ) as Record<string, Record<Band, number>>;
+    for (const artefact of artefacts) table[categoryOf(artefact)][artefact.band] += 1;
+    return table;
+  }, [artefacts]);
+  // "Other" earns a column only when something is in it.
+  const shown = CATEGORIES.filter((c) => c.id !== "other" || BANDS.some((band) => counts.other[band] > 0));
+  const peak = Math.max(1, ...shown.flatMap((c) => BANDS.map((band) => counts[c.id][band])));
+
+  return (
+    <section className="panel in" data-testid="findings-by-category" style={{ animationDelay: "0.06s" }}>
+      <PanelHead title="Findings by category" sub="Signature · Key exchange · Symmetric · Hash · Protocol" />
+      {artefacts.length === 0 ? (
+        <div className="empty-inline">
+          <NotComputed reason="this scan holds no artefacts" />
+        </div>
+      ) : (
+        <>
+          <div className="bars-wrap">
+            {shown.map((category) => (
+              <div key={category.id} className="bar-group" data-testid={`category-${category.id}`}>
+                <div className="bar-stack" title={category.title}>
+                  {BANDS.map((band) => {
+                    const n = counts[category.id][band];
+                    return (
+                      <div
+                        key={band}
+                        data-band={band}
+                        data-count={n}
+                        title={`${category.title} · ${band}: ${n}`}
+                        className={cn("bar", n > 0 && `band-bg-${tone(band)}`)}
+                        style={{ height: grown && n > 0 ? `${(n / peak) * 100}%` : 0 }}
+                      />
+                    );
+                  })}
+                </div>
+                <span className="bar-month">{category.label}</span>
+              </div>
+            ))}
+          </div>
+          <div className="band-key">
+            {BANDS.map((band) => (
+              <span key={band}>
+                <i className={`swatch band-bg-${tone(band)}`} data-band={band} aria-hidden />
+                {band}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Peak risk gauge
+// ---------------------------------------------------------------------------
+
+const ARC = "M 25 90 A 60 60 0 0 1 145 90";
+const ARC_LENGTH = 188.5;
+
+function PeakRisk({ artefacts }: { artefacts: Artefact[] }) {
+  const grown = useGrown();
+  const peak = useMemo(() => priorityQueue(artefacts, 1)[0] ?? null, [artefacts]);
+  const head = <PanelHead title="Peak risk" sub="Highest artefact score, live horizon" />;
+
+  if (!peak) {
+    return (
+      <section className="panel in" data-testid="peak-risk" data-state="not-computed">
+        {head}
+        <div className="empty-inline">
+          <NotComputed reason="this scan holds no artefacts to score" />
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      className="panel in"
+      data-testid="peak-risk"
+      data-state="computed"
+      style={{ animationDelay: "0.12s" }}
+    >
+      {head}
+      <div className="gauge-panel">
+        <div className="gauge-svg-wrap">
+          <svg width="170" height="100" viewBox="0 0 170 100" aria-hidden>
+            <path d={ARC} fill="none" stroke="#171c21" strokeWidth="12" strokeLinecap="round" />
+            <path
+              d={ARC}
+              data-band={peak.band}
+              className={`arc band-stroke-${tone(peak.band)}`}
+              fill="none"
+              strokeWidth="12"
+              strokeLinecap="round"
+              strokeDasharray={ARC_LENGTH}
+              strokeDashoffset={ARC_LENGTH * (1 - (grown ? peak.score : 0) / 100)}
+            />
+          </svg>
+          <div className="gauge-center">
+            <div className="gauge-num" data-testid="peak-score">
+              {peak.score}
+            </div>
+            <div className="gauge-lbl">/ 100 · {peak.band}</div>
+          </div>
+        </div>
+        <div className="gauge-scale w-[170px]">
+          <span>0</span>
+          <span>100</span>
+        </div>
+        <a
+          className="gauge-note hover:text-ink"
+          href={hrefFor("inventory", { ref: peak.bomRef })}
+          title={`${peak.name} at ${locationOf(peak)}`}
+        >
+          {peak.name} · {locationOf(peak)}
+        </a>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Priority findings
+// ---------------------------------------------------------------------------
+
+function PriorityRow({ artefact }: { artefact: Artefact }) {
+  const certainty = certaintyOf(artefact);
+  const place = locationOf(artefact);
+  const filled = Math.max(1, Math.round((artefact.score / 100) * 6));
+  const open = () => navigate("inventory", { ref: artefact.bomRef });
+
+  return (
+    <tr
+      data-testid="priority-row"
+      data-ref={artefact.bomRef}
+      data-band={artefact.band}
+      data-certainty={certainty}
+      onClick={open}
+    >
+      <td>
+        <a
+          href={hrefFor("inventory", { ref: artefact.bomRef })}
+          onClick={(event) => event.stopPropagation()}
+          className={cn(
+            "qt-mono hover:text-ink",
+            // Weight, not colour: a candidate never reads as the strongest thing in its row.
+            certainty === "candidate" ? "font-medium opacity-80" : "font-semibold",
+          )}
+        >
+          {artefact.name}
+        </a>
+        <span className="ml-2 inline-flex flex-wrap gap-1 align-middle">
+          {certainty === "candidate" ? (
+            <span
+              className="mark candidate"
+              data-testid="candidate-tag"
+              title={`Candidate: confidence ${formatConfidence(artefact.confidence)}. Shown for review, not a confirmed finding (ADR-0034).`}
+            >
+              candidate
+            </span>
+          ) : null}
+          {certainty === "inferred" ? (
+            <span className="mark" title={`Inferred: confidence ${formatConfidence(artefact.confidence)}`}>
+              inferred
+            </span>
+          ) : null}
+          {artefact.provisional ? (
+            <span
+              className="mark candidate"
+              title="Provisional: part of this verdict rests on an unverified fact, which scored 0"
+            >
+              provisional
+            </span>
+          ) : null}
+          {artefact.drift.length > 0 ? <span className="mark">drift</span> : null}
+        </span>
+      </td>
+      <td className="qt-muted qt-mono" title={place}>
+        {place}
+      </td>
+      <td>
+        <span
+          className={`qt-bar band-fg-${tone(artefact.band)}`}
+          data-band={artefact.band}
+          role="img"
+          aria-label={`score ${artefact.score} of 100`}
+        >
+          {Array.from({ length: 6 }, (_, index) => (
+            <i key={index} className={cn("qt-tick", index < filled && "fill")} />
+          ))}
+        </span>
+      </td>
+      <td className="font-bold tabular-nums">{artefact.score}</td>
+      <td>
+        <span className={`badge badge-${tone(artefact.band)}`} data-band={artefact.band}>
+          {artefact.band}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+function PriorityFindings({ artefacts }: { artefacts: Artefact[] }) {
+  const [band, setBand] = useState<Band | "all">("all");
+  const rows = useMemo(
+    () => priorityQueue(band === "all" ? artefacts : artefacts.filter((a) => a.band === band), 6),
+    [artefacts, band],
+  );
+
+  return (
+    <section className="panel in" data-testid="priority-findings" style={{ animationDelay: "0.18s" }}>
+      <PanelHead
+        title="Priority findings"
+        sub="Highest risk, this scan at the live horizon"
+        right={
+          <div className="flex shrink-0 items-center gap-3">
+            <select
+              aria-label="Priority band"
+              className="panel-select"
+              value={band}
+              onChange={(event) => setBand(event.target.value as Band | "all")}
+            >
+              <option value="all">All bands</option>
+              {BANDS.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+            <a className="panel-link inline-flex items-center gap-1" href={hrefFor("inventory")}>
+              View inventory <ArrowRight className="h-3 w-3" aria-hidden />
+            </a>
+          </div>
+        }
+      />
+      {rows.length === 0 ? (
+        <div className="empty-inline" data-testid="priority-empty">
+          <p className="empty-title">
+            {band === "all" ? "This scan found no cryptographic artefacts" : `No ${band} findings at this horizon`}
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="queue-table">
+            <thead>
+              <tr>
+                <th>Artefact</th>
+                <th>Location</th>
+                <th>Score</th>
+                <th>Risk</th>
+                <th>Band</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((artefact) => (
+                <PriorityRow key={artefact.bomRef} artefact={artefact} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The ops column: CRQC horizon, then crypto agility
+// ---------------------------------------------------------------------------
+
 function yearsText(range: Range): string {
   return range.min === range.max ? `${range.min} years` : `${range.min}–${range.max} years`;
 }
@@ -55,9 +508,9 @@ function yearsText(range: Range): string {
 function Term({ label, measured }: { label: string; measured: Measured<Range> }) {
   return (
     <div className="min-w-0">
-      <div className="eyebrow">{label}</div>
+      <div className="term-label">{label}</div>
       {measured.status === "computed" ? (
-        <div className="mt-1.5 font-mono text-[14px] text-ink">{yearsText(measured.value)}</div>
+        <div className="term-value">{yearsText(measured.value)}</div>
       ) : (
         <NotComputed reason={measured.reason} className="mt-1.5" />
       )}
@@ -65,405 +518,326 @@ function Term({ label, measured }: { label: string; measured: Measured<Range> })
   );
 }
 
+/**
+ * The Mosca control. Changing z re-scores the STORED document through
+ * `POST /scans/{id}/rescore` -- a new linked row, never an edit.
+ */
+function CrqcHorizon({
+  view,
+  live,
+  mosca,
+}: {
+  view: ScanView;
+  live: Record<Band, number>;
+  mosca: MoscaSummary;
+}) {
+  const baseYear = new Date().getUTCFullYear();
+  const delta = mosca.delta.status === "computed" ? mosca.delta.value : null;
+
+  return (
+    <section className="panel in" data-testid="crqc-horizon" style={{ animationDelay: "0.24s" }}>
+      <PanelHead
+        title={
+          <>
+            CRQC horizon <InfoTip label={MOSCA_EXPLAINER} />
+          </>
+        }
+        sub="Mosca: exposed today when x + y > z"
+        right={
+          delta === null ? null : (
+            <span className={cn("risk-flag", delta.exposed > 0 && "at-risk")}>
+              {delta.exposed > 0 ? "At risk" : "Within horizon"}
+            </span>
+          )
+        }
+      />
+      <div className="metric-hero">
+        <span className={cn("metric-hero-num", view.rescoring && "text-ink-dim")}>{baseYear + view.zYears}</span>
+        <span className="metric-hero-tag">z = {view.zYears} years</span>
+      </div>
+      <div className="metric-hero-note">
+        {delta === null
+          ? "affected findings not computed"
+          : `${delta.exposed} of ${delta.assessed} findings exposed at this horizon`}
+        {view.rescoring ? " · re-scoring the stored CBOM…" : ""}
+      </div>
+
+      <div className="mt-5">
+        <Slider
+          value={[view.zYears]}
+          min={Z_MIN}
+          max={Z_MAX}
+          step={1}
+          aria-label="Years until a cryptographically relevant quantum computer"
+          onValueChange={([value]) => view.setZYears(value)}
+        />
+        <div className="slider-scale">
+          {TICKS.map((z) => (
+            <span
+              key={z}
+              className={cn(
+                "absolute -translate-x-1/2",
+                z === Z_MIN && "translate-x-0",
+                z === Z_MAX && "-translate-x-full",
+                z === view.zYears && "font-semibold text-ink",
+              )}
+              style={{ left: `${((z - Z_MIN) / (Z_MAX - Z_MIN)) * 100}%` }}
+            >
+              {baseYear + z}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div data-testid="live-readout" className={cn("readout", view.rescoring && "opacity-40")}>
+        {BANDS.map((band) => (
+          <div key={band}>
+            <i className={`swatch band-bg-${tone(band)}`} data-band={band} aria-hidden />
+            <div data-testid={`live-${band}`} className="readout-num">
+              {live[band]}
+            </div>
+            <div className="readout-lbl">{band}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="terms">
+        <Term label="Data shelf life" measured={mosca.x} />
+        <Term label="Migration time" measured={mosca.y} />
+        <div data-testid="horizon-delta" className="min-w-0">
+          <div className="term-label">Horizon delta</div>
+          {delta !== null ? (
+            <>
+              {/* Negative means exposed today: said by weight, not red. */}
+              <div className={cn("term-value", delta.worst < 0 && "font-bold")}>
+                {delta.worst > 0 ? `+${delta.worst}` : delta.worst} years
+              </div>
+              <div className="term-note">z − (x + y), worst component</div>
+            </>
+          ) : mosca.delta.status === "not-computed" ? (
+            <NotComputed reason={mosca.delta.reason} className="mt-1.5" />
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AgilityPanel({ agile }: { agile: Agility }) {
+  const assessed = agile.configurable + agile.hardCoded;
+  return (
+    <section className="panel in" data-testid="overview-agility" style={{ animationDelay: "0.3s" }}>
+      <PanelHead
+        title="Crypto agility"
+        sub="Configurable vs hard-coded"
+        right={
+          <a className="panel-link" href={hrefFor("agility")}>
+            Details
+          </a>
+        }
+      />
+      {agile.share.status === "computed" ? (
+        <>
+          <div className="ops-value">
+            <span data-testid="agility-share">{agile.share.value}%</span>
+            <span className="ops-pill" title={agile.share.basis}>
+              {agile.configurable} of {assessed} assessed
+            </span>
+          </div>
+          <div
+            className="split-track"
+            role="img"
+            aria-label={`${agile.configurable} configurable, ${agile.hardCoded} hard-coded, ${agile.unassessed} not assessed`}
+          >
+            {agile.configurable > 0 ? <span style={{ flexGrow: agile.configurable, background: "#f5f6f8" }} /> : null}
+            {agile.hardCoded > 0 ? <span style={{ flexGrow: agile.hardCoded, background: "#5f6b76" }} /> : null}
+            {agile.unassessed > 0 ? (
+              <span
+                style={{
+                  flexGrow: agile.unassessed,
+                  backgroundImage: "repeating-linear-gradient(90deg, #242b31 0 3px, transparent 3px 6px)",
+                }}
+              />
+            ) : null}
+          </div>
+          <div className="split-legend">
+            <span>
+              <b data-testid="overview-configurable">{agile.configurable}</b> configurable
+            </span>
+            <span>
+              <b>{agile.hardCoded}</b> hard-coded
+            </span>
+            <span title="No scanner determined configurability. Not counted as hard-coded.">
+              <b>{agile.unassessed}</b> not assessed
+            </span>
+          </div>
+        </>
+      ) : (
+        <div className="empty-inline">
+          <NotComputed reason={agile.share.reason} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The screen
+// ---------------------------------------------------------------------------
+
 export function OverviewScreen({ view }: { view: ScanView }) {
   const { scan, artefacts, loading } = view;
+  const { principal } = useAuth();
+  const admin = canAdmin(principal);
+  const [creating, setCreating] = useState(false);
 
   const live = useMemo(() => bandCountsOf(artefacts), [artefacts]);
   const mosca = useMemo(() => moscaSummary(artefacts), [artefacts]);
   const quantum = useMemo(() => quantumExposure(artefacts), [artefacts]);
   const coverage = useMemo(() => viewCoverage(artefacts), [artefacts]);
   const agile = useMemo(() => agility(artefacts), [artefacts]);
-  const queue = useMemo(() => priorityQueue(artefacts, 6), [artefacts]);
-  const histogram = useMemo(() => scoreHistogram(artefacts), [artefacts]);
   const drift = driftMeasure(scan, artefacts);
-  const baseYear = new Date().getUTCFullYear();
 
   const header = (
     <ScreenHeader
       title="Cryptographic Security Overview"
-      subtitle={
-        scan
-          ? `${scan.target.system ?? scan.target.ref} / scan ${scan.id.slice(0, 8)} · ${scan.target.kind} ${scan.target.ref}`
-          : "No scan loaded"
-      }
       actions={
-        scan ? (
-          <FileButton
-            path={cbomPath(scan.id)}
-            filename={`qorbit-cbom-${scan.id.slice(0, 8)}.json`}
-            title="Download the stored CBOM this overview is computed from"
+        <>
+          {scan ? (
+            <FileButton
+              path={cbomPath(scan.id)}
+              filename={`ecdat-cbom-${scan.id.slice(0, 8)}.json`}
+              title="Download the stored CBOM this overview is computed from"
+              className="btn-ghost"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden /> Export snapshot
+            </FileButton>
+          ) : null}
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!admin}
+            title={admin ? "Scan a target, or a whole system manifest" : NEEDS_ADMIN}
+            onClick={() => setCreating(true)}
           >
-            <Download className="h-3.5 w-3.5" aria-hidden /> Export snapshot
-          </FileButton>
-        ) : undefined
+            <ScanLine className="h-3.5 w-3.5" aria-hidden /> Run scan
+          </button>
+        </>
       }
     />
+  );
+  const dialog = (
+    <NewScanDialog open={creating} onOpenChange={setCreating} onCreated={(scanId) => view.selectScan(scanId)} />
   );
 
   if (loading && artefacts.length === 0) {
     return (
-      <div>
+      <div className="content">
         {header}
-        <div className="space-y-4 px-6 pb-6">
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-            {Array.from({ length: 9 }).map((_, i) => (
-              <SkeletonBlock key={i} className="h-[6.5rem]" />
-            ))}
-          </div>
-          <SkeletonBlock className="h-72 w-full" />
+        <div className="stat-row">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="stat-card h-[5.75rem] animate-pulse" />
+          ))}
         </div>
+        <div className="grid-row grid-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="panel h-60 animate-pulse" />
+          ))}
+        </div>
+        {dialog}
       </div>
     );
   }
 
   if (!scan) {
     return (
-      <div>
+      <div className="content">
         {header}
-        <div className="px-6 pb-6">
-          <EmptyPanel title="No scan in this database">
-            Nothing to summarise yet. Run a scan from{" "}
-            <a className="text-ink-dim underline" href={hrefFor("scans")}>
-              Scans
-            </a>
-            , or with <code className="font-mono">ecdat scan</code> against the same{" "}
-            <code className="font-mono">ECDAT_DB</code> the server opened.
-          </EmptyPanel>
+        <div className="empty-state">
+          <p className="empty-title">No scan in this database</p>
+          <p className="empty-text">
+            Nothing to summarise yet. Use <strong className="text-ink-dim">Run scan</strong>, or run{" "}
+            <code className="mono">ecdat scan</code> against the same <code className="mono">ECDAT_DB</code> the
+            server opened.
+          </p>
         </div>
+        {dialog}
       </div>
     );
   }
 
   const total = artefacts.length;
-  const ofInventory = (n: number) =>
-    total === 0 ? "of an empty inventory" : `${Math.round((n / total) * 100)}% of inventory`;
+  const share = (n: number) => (total === 0 ? 0 : Math.round((n / total) * 100));
   const quantumMeasure: Measured<number> =
     total === 0
       ? notComputed("this scan holds no artefacts")
-      : computed(quantum.broken, `${ofInventory(quantum.broken)} · ${quantum.unassessed} without a verdict`);
-  const peak = Math.max(1, ...histogram.map((bucket) => bucket.count));
-  const exposed = mosca.delta.status === "computed" ? mosca.delta.value.exposed : null;
+      : computed(
+          quantum.broken,
+          `${share(quantum.broken)}% of inventory broken by Shor · ${quantum.weakened} weakened · ${quantum.unassessed} without a verdict`,
+        );
+  const views = `${coverage.collected.length} of 3 views`;
 
   return (
-    <div>
+    <div className="content">
       {header}
-      <div className={cn("space-y-4 px-6 pb-6 transition-opacity", view.rescoring && "opacity-70")}>
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+      <div className={cn("transition-opacity", view.rescoring && "opacity-70")}>
+        <div className="stat-row in">
           <MetricCard
             id="total"
-            label="Total artefacts"
+            label="Artefacts"
+            icon={<Table2 className="h-[13px] w-[13px]" />}
             measured={computed(total, `across ${coverage.collected.length} of 3 evidence layers`)}
+            note="total"
           />
-          {BANDS.map((band) => (
-            <MetricCard
-              key={band}
-              id={band.toLowerCase()}
-              label={band}
-              pad
-              measured={computed(live[band], ofInventory(live[band]))}
-            />
-          ))}
-          <MetricCard id="quantum" label="Quantum vulnerable" pad measured={quantumMeasure} />
-          <MetricCard id="drift" label="Drift findings" pad measured={drift} />
-          <MetricCard id="coverage" label="Coverage" unit="%" measured={coverage.share} />
-          <MetricCard id="agility" label="Crypto agility" unit="%" measured={agile.share} />
+          <MetricCard
+            id="quantum"
+            label="Quantum vulnerable"
+            icon={<ShieldAlert className="h-[13px] w-[13px]" />}
+            pad
+            measured={quantumMeasure}
+            note={`${share(quantum.broken)}% of total`}
+          />
+          <MetricCard
+            id="drift"
+            label="Drift findings"
+            icon={<GitCompareArrows className="h-[13px] w-[13px]" />}
+            pad
+            measured={drift}
+            note={drift.status === "computed" && drift.value === 0 ? "views agree" : `${views} compared`}
+          />
+          <MetricCard
+            id="coverage"
+            label="Coverage"
+            icon={<Radar className="h-[13px] w-[13px]" />}
+            unit="%"
+            measured={coverage.share}
+            note={views}
+          />
+          <MetricCard
+            id="agility"
+            label="Crypto agility"
+            icon={<Workflow className="h-[13px] w-[13px]" />}
+            unit="%"
+            measured={agile.share}
+            note={`${agile.configurable} of ${agile.configurable + agile.hardCoded}`}
+          />
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-          <Panel
-            eyebrow="Current scan / severity"
-            title="Risk distribution"
-            meta={<span className="font-mono text-[10.5px] uppercase tracking-wider">{total} artefacts</span>}
-          >
-            <div className="flex h-3 w-full gap-1">
-              {BANDS.map((band) =>
-                live[band] === 0 ? null : (
-                  <div
-                    key={band}
-                    title={`${band}: ${live[band]}`}
-                    style={{ flexGrow: live[band] }}
-                    className={cn("rounded-[3px]", BAND_STYLE[band].dot)}
-                  />
-                ),
-              )}
-              {total === 0 ? <div className="flex-1 rounded-[3px] border border-dashed border-line" /> : null}
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-y-1 sm:grid-cols-4">
-              {BANDS.map((band) => (
-                <div key={band} className="flex items-center justify-between gap-2 pr-4">
-                  <span className="flex items-center gap-1.5 text-[12px] text-ink-dim">
-                    <span className={cn("h-2 w-2 rounded-full", BAND_STYLE[band].dot)} aria-hidden />
-                    {band}
-                  </span>
-                  <span className="font-mono text-[12px] tabular-nums text-ink">{pad2(live[band])}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-5 border-t border-line pt-4">
-              <div className="flex items-baseline justify-between">
-                <span className="eyebrow">Risk score distribution</span>
-                <span className="font-mono text-[10.5px] uppercase tracking-wider text-ink-faint">
-                  Score / 100 · peak {peak}
-                </span>
-              </div>
-              {/* Bars with a baseline and positioned ticks, so a height means a count. */}
-              <div className="mt-3 flex h-24 items-end gap-1.5 border-b border-line">
-                {histogram.map((bucket) => (
-                  <div
-                    key={bucket.floor}
-                    title={`score ${bucket.floor}–${bucket.floor + 9}: ${bucket.count}`}
-                    className="flex h-full flex-1 items-end"
-                  >
-                    <div
-                      className={cn(
-                        "w-full rounded-t-[2px]",
-                        bucket.count === 0 ? "h-px bg-line" : BAND_STYLE[bucket.band].dot,
-                      )}
-                      style={bucket.count === 0 ? undefined : { height: `${(bucket.count / peak) * 100}%` }}
-                    />
-                  </div>
-                ))}
-              </div>
-              <div className="relative mt-1.5 h-3 font-mono text-[10px] tabular-nums text-ink-faint">
-                {[0, 25, 50, 75, 100].map((tick) => (
-                  <span
-                    key={tick}
-                    className={cn(
-                      "absolute -translate-x-1/2",
-                      tick === 0 && "translate-x-0",
-                      tick === 100 && "-translate-x-full",
-                    )}
-                    style={{ left: `${tick}%` }}
-                  >
-                    {pad2(tick)}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </Panel>
-
-          {/* The Mosca control. Changing Z re-scores the STORED document through
-              POST /scans/{id}/rescore -- a new linked row, never an edit. */}
-          <Panel
-            eyebrow="Quantum risk model / Mosca"
-            title={
-              <span className="flex items-center gap-2">
-                CRQC horizon <InfoTip label={MOSCA_EXPLAINER} />
-              </span>
-            }
-            meta={
-              exposed === null ? null : exposed > 0 ? (
-                <span className="rounded-[3px] border border-critical/60 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-critical">
-                  At risk
-                </span>
-              ) : (
-                <Tag>Within horizon</Tag>
-              )
-            }
-          >
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <div
-                  className={cn(
-                    "font-mono text-[40px] font-light leading-none tabular-nums transition-colors",
-                    view.rescoring ? "text-ink-dim" : "text-ink",
-                  )}
-                >
-                  {baseYear + view.zYears}
-                </div>
-                <div className="mt-1.5 text-[12px] text-ink-faint">
-                  Assumed CRQC horizon · z = {view.zYears} years
-                </div>
-              </div>
-              <div className="text-right">
-                {exposed === null ? (
-                  <div className="text-[12px] text-ink-faint">affected findings not computed</div>
-                ) : (
-                  <div className="font-mono text-[13px] text-ink" title="artefacts where x + y > z">
-                    {exposed} affected findings
-                  </div>
-                )}
-                <div className="mt-0.5 text-[11px] text-ink-faint">
-                  {view.rescoring ? "re-scoring the stored CBOM…" : "Live model consequence"}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <Slider
-                value={[view.zYears]}
-                min={Z_MIN}
-                max={Z_MAX}
-                step={1}
-                aria-label="Years until a cryptographically relevant quantum computer"
-                onValueChange={([value]) => view.setZYears(value)}
-              />
-              <div className="relative mt-2.5 h-3 font-mono text-[10.5px] tabular-nums text-ink-faint">
-                {TICKS.map((z) => (
-                  <span
-                    key={z}
-                    className={cn(
-                      "absolute -translate-x-1/2",
-                      z === Z_MIN && "translate-x-0",
-                      z === Z_MAX && "-translate-x-full",
-                      z === view.zYears && "font-semibold text-ink",
-                    )}
-                    style={{ left: `${((z - Z_MIN) / (Z_MAX - Z_MIN)) * 100}%` }}
-                  >
-                    {baseYear + z}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div
-              data-testid="live-readout"
-              className={cn(
-                "mt-6 grid grid-cols-4 divide-x divide-line border-t border-line pt-4 transition-opacity",
-                view.rescoring ? "opacity-40" : "opacity-100",
-              )}
-            >
-              {BANDS.map((band) => (
-                <div key={band} className="px-3 first:pl-0">
-                  <span className={cn("block h-1.5 w-1.5 rounded-full", BAND_STYLE[band].dot)} aria-hidden />
-                  <div data-testid={`live-${band}`} className="mt-2 text-xl tabular-nums text-ink">
-                    {live[band]}
-                  </div>
-                  <div className="text-[11px] text-ink-faint">{band}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 grid grid-cols-3 gap-4 border-t border-line pt-4">
-              <Term label="Data shelf life" measured={mosca.x} />
-              <Term label="Migration time" measured={mosca.y} />
-              <div data-testid="horizon-delta" className="min-w-0">
-                <div className="eyebrow">Horizon delta</div>
-                {mosca.delta.status === "computed" ? (
-                  <>
-                    <div
-                      className={cn(
-                        "mt-1.5 font-mono text-[14px]",
-                        mosca.delta.value.worst < 0 ? "text-critical" : "text-ink",
-                      )}
-                    >
-                      {mosca.delta.value.worst > 0 ? `+${mosca.delta.value.worst}` : mosca.delta.value.worst} years
-                    </div>
-                    <div className="mt-0.5 text-[10.5px] text-ink-faint">z − (x + y), worst component</div>
-                  </>
-                ) : (
-                  <NotComputed reason={mosca.delta.reason} className="mt-1.5" />
-                )}
-              </div>
-            </div>
-          </Panel>
+        <div className="grid-row grid-3">
+          <RiskTrend scans={view.scans} scan={scan} />
+          <FindingsByCategory artefacts={artefacts} />
+          <PeakRisk artefacts={artefacts} />
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-          <Panel
-            eyebrow="Investigation queue"
-            title="Priority findings"
-            meta={
-              <a
-                href={hrefFor("inventory")}
-                className="inline-flex items-center gap-1 text-[13px] font-medium text-ink hover:text-white"
-              >
-                View inventory <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-              </a>
-            }
-            bodyClassName="pt-2"
-          >
-            {queue.length === 0 ? (
-              <EmptyPanel title="This scan found no cryptographic artefacts" />
-            ) : (
-              <ol>
-                {queue.map((artefact) => {
-                  const target = targetOf(artefact);
-                  const place =
-                    artefact.endpoint ??
-                    (artefact.occurrences[0] ? shortLocator(artefact.occurrences[0].locator) : "no location");
-                  return (
-                    <li key={artefact.bomRef} className="border-t border-line first:border-t-0">
-                      <a
-                        href={hrefFor("inventory", { ref: artefact.bomRef })}
-                        className="flex items-center gap-4 py-3 transition-colors hover:bg-raised/40"
-                      >
-                        <span
-                          className={cn("h-10 w-[3px] shrink-0 rounded-full", BAND_STYLE[artefact.band].dot)}
-                          aria-hidden
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span className="text-[14px] font-semibold text-ink">{artefact.name}</span>
-                            <BandBadge band={artefact.band} />
-                            {artefact.drift.length > 0 ? <Tag variant="strong">Drift</Tag> : null}
-                          </span>
-                          <span className="mt-1 block truncate font-mono text-[11.5px] text-ink-faint">
-                            {place} · {artefact.usage}
-                            {target ? ` → ${target}` : ""}
-                          </span>
-                        </span>
-                        <span className="shrink-0 text-right">
-                          <span className="block text-xl tabular-nums text-ink">{artefact.score}</span>
-                          <span className="eyebrow">Risk score</span>
-                        </span>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint" aria-hidden />
-                      </a>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </Panel>
-
-          <Panel
-            eyebrow="Evidence layers"
-            title="Coverage pulse"
-            meta={
-              coverage.share.status === "computed" ? (
-                <span className="text-[26px] font-semibold leading-none tabular-nums text-ink">
-                  {coverage.share.value}%
-                </span>
-              ) : (
-                <span className="font-mono text-[10.5px] uppercase tracking-wider">not computed</span>
-              )
-            }
-          >
-            <div className="space-y-4">
-              {VIEWS.map((name) => {
-                const pulse = coverage.pulse[name];
-                const collected = coverage.collected.includes(name);
-                return (
-                  <div key={name} data-testid={`pulse-${name}`}>
-                    <div className="flex items-baseline justify-between text-[11.5px]">
-                      <span className="font-medium uppercase tracking-wider text-ink">{name}</span>
-                      <span className="font-mono tabular-nums text-ink-dim">
-                        {collected ? `${pulse.percent}%` : "not collected"}
-                      </span>
-                    </div>
-                    <div
-                      className={cn(
-                        "mt-2 h-2 w-full rounded-full",
-                        collected ? "bg-line" : "border border-dashed border-line",
-                      )}
-                    >
-                      {collected ? (
-                        <div className="h-full rounded-full bg-ink/80" style={{ width: `${pulse.percent}%` }} />
-                      ) : null}
-                    </div>
-                    <div className="mt-1.5 text-[11px] text-ink-faint">
-                      {collected
-                        ? `${pulse.seen} of ${pulse.total} artefacts sighted in this view or its correlation group`
-                        : "nothing in this scan says anything about this view"}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Panel>
+        <div className="grid-row grid-2b">
+          <PriorityFindings artefacts={artefacts} />
+          <div className="stack">
+            <CrqcHorizon view={view} live={live} mosca={mosca} />
+            <AgilityPanel agile={agile} />
+          </div>
         </div>
       </div>
+      {dialog}
     </div>
   );
 }

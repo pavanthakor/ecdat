@@ -12,8 +12,8 @@
     "lint": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@fontsource/inter": "5.1.1",
     "@fontsource/jetbrains-mono": "5.1.1",
-    "@fontsource/space-grotesk": "5.1.1",
     "@radix-ui/react-dialog": "1.1.4",
     "@radix-ui/react-slider": "1.2.2",
     "clsx": "2.1.1",

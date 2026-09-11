@@ -1,7 +1,7 @@
 /**
- * The layout primitives every screen shares, matched to web/design/ (ADR-0032):
- * a page header with the workspace eyebrow and a short rule, rounded cards
- * with an eyebrow and a title inside them, and the badge set.
+ * The layout primitives every screen shares. ScreenHeader is the v2 topline
+ * (ADR-0038); the cards and badges below are the ADR-0032 set, which screens
+ * not yet rebuilt on the v2 classes still use.
  *
  * Colour stays semantic (ADR-0031): the only coloured primitive is BandBadge.
  * Verified vs provisional is a solid vs dashed border, never a colour.
@@ -9,8 +9,16 @@
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from "react";
 
 import type { Band } from "@/api/types";
+import { useConsole } from "@/components/shell/console";
+import { ContextChips, Crumb, SearchBox, StatusChip } from "@/components/shell/Topline";
+import { UserMenu } from "@/components/shell/UserMenu";
 import { BAND_STYLE, cn } from "@/lib/format";
 
+/**
+ * The v2 topline: crumb, title and context chips on the left; search, status,
+ * profile and the page's own actions on the right. Inside the console it draws
+ * the frame; rendered on its own it is just the title and the actions.
+ */
 export function ScreenHeader({
   title,
   subtitle,
@@ -20,18 +28,24 @@ export function ScreenHeader({
   subtitle?: ReactNode;
   actions?: ReactNode;
 }) {
+  const frame = useConsole();
   return (
-    <header className="px-6 pb-5 pt-6">
-      <div className="eyebrow">Q-orbit / Analysis workspace</div>
-      <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">{title}</h1>
-          {subtitle ? (
-            <p className="mt-1.5 max-w-3xl text-[13px] leading-relaxed text-ink-dim">{subtitle}</p>
-          ) : null}
-          <div className="mt-3 h-px w-12 bg-ink-faint" aria-hidden />
-        </div>
-        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+    <header className="topline screen-head">
+      <div className="min-w-0">
+        {frame ? <Crumb view={frame.view} /> : null}
+        <h1 className="page-title">{title}</h1>
+        {subtitle ? <p className="page-sub">{subtitle}</p> : null}
+        {frame ? <ContextChips scan={frame.view.scan} /> : null}
+      </div>
+      <div className="top-right">
+        {frame ? (
+          <>
+            <SearchBox onSearch={frame.onSearch} />
+            <StatusChip view={frame.view} />
+            <UserMenu />
+          </>
+        ) : null}
+        {actions}
       </div>
     </header>
   );

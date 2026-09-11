@@ -49,7 +49,7 @@ export function SignIn({
             <KeyRound className="h-4 w-4" aria-hidden />
           </span>
           <h1 id="sign-in-title" className="text-[17px] font-semibold">
-            Sign in to Q-orbit
+            Sign in to ECDAT
           </h1>
         </div>
 
