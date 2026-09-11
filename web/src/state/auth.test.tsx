@@ -136,12 +136,13 @@ describe("the sign-in gate", () => {
 });
 
 describe("roles in the console", () => {
-  it("a viewer cannot start a scan: New scan is disabled, and says it needs an admin key", async () => {
+  it("a viewer cannot start a scan: Run scan is disabled, and says it needs an admin key", async () => {
     localStorage.setItem(TOKEN_STORAGE_KEY, "good-viewer-key");
     window.location.hash = "#/scans";
     render(<App />);
 
-    const button = await screen.findByRole("button", { name: /new scan/i });
+    // Every v2 topline carries Run scan (ADR-0039); Scans no longer has its own.
+    const button = await screen.findByRole("button", { name: /run scan/i });
     await waitFor(() => expect(button).toBeDisabled());
     expect(button.getAttribute("title")).toMatch(/admin key/i);
   });
@@ -155,11 +156,11 @@ describe("roles in the console", () => {
     expect(calls.some((call) => call.url.includes("/fixes"))).toBe(false);
   });
 
-  it("an admin sees New scan enabled", async () => {
+  it("an admin sees Run scan enabled", async () => {
     localStorage.setItem(TOKEN_STORAGE_KEY, "good-admin-key");
     window.location.hash = "#/scans";
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: /new scan/i })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: /run scan/i })).toBeEnabled();
   });
 });
