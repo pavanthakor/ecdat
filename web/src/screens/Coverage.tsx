@@ -1,14 +1,19 @@
 /**
- * COVERAGE -- "Scanner Coverage", the tool's honesty screen, laid out as
- * web/design/ has it (ADR-0032): large scanner cards on a three-column grid,
- * then the evidence-layer visibility matrix.
+ * COVERAGE -- "Scanner Coverage", the tool's honesty screen, rebuilt on the v2
+ * mockup (coverage.html; ADR-0039): the coverage headline with a card per
+ * scanner, then evidence-layer coverage.
  *
- * The design's cards say COMPLETE / PARTIAL; the row cannot support either.
- * `scanners_ran` records the OFFERED set (`scanner_records(scanners)`), so a
- * repo scan lists the binary scanner the orchestrator skipped, and a crash is
- * logged, not stored (PUNCHLIST). The status here is SELECTED / NOT RUN /
- * UNKNOWN (ADR-0031 §4), and the per-scanner attributed-artefact count carries
- * the real signal -- a sighting from a scanner proves that scanner looked.
+ * The mockup's cards say VERIFIED / PROVISIONAL / UNAVAILABLE with work counts
+ * ("42 manifests indexed"); the row cannot support those. `scanners_ran`
+ * records the OFFERED set (`scanner_records(scanners)`), so a repo scan lists
+ * the binary scanner the orchestrator skipped, and a crash is logged, not
+ * stored (PUNCHLIST). The status here is SELECTED / NOT RUN / UNKNOWN (ADR-0031
+ * §4) as a solid / dashed / dotted chip, and the per-scanner attributed-artefact
+ * count carries the real signal -- a sighting from a scanner proves it looked.
+ *
+ * The mockup's "86% · 124 of 144 expected artefacts" has no denominator ECDAT
+ * knows; the headline is evidence-layer coverage, views collected of three.
+ * Its TLS / SSH probe card is not drawn: no probe scanner exists (PUNCHLIST).
  */
 import { CircleDashed, CircleDot, CircleHelp, ExternalLink } from "lucide-react";
 import { useMemo } from "react";
@@ -17,8 +22,9 @@ import { listScanners, reportPath } from "@/api/client";
 import type { Artefact, ScanSummary, View } from "@/api/types";
 import { VIEWS } from "@/api/types";
 import { FileButton } from "@/components/FileButton";
-import { EmptyPanel } from "@/components/Honest";
-import { Panel, ScreenHeader, Tag } from "@/components/Panel";
+import { NotComputed } from "@/components/Honest";
+import { ScreenHeader } from "@/components/Panel";
+import { EmptyState, Notice, PanelHead, Prov, useGrown, type ProvKind } from "@/components/v2";
 import { cn } from "@/lib/format";
 import { SCANNER_VIEW, scannerCoverage, viewCoverage, type ScannerCard } from "@/state/metrics";
 import { useRemote } from "@/state/remote";
@@ -43,6 +49,13 @@ const STATUS_ICON = {
   UNKNOWN: CircleHelp,
 } as const;
 
+/** Solid for a recorded selection, dashed for not run, dotted for unknown. */
+const STATUS_PROV: Record<ScannerCard["status"], ProvKind> = {
+  SELECTED: "verified",
+  "NOT RUN": "provisional",
+  UNKNOWN: "unavailable",
+};
+
 const FOOTNOTE: Record<ScannerCard["status"], string> = {
   SELECTED:
     "offered to this scan; whether it applied to the target, ran or failed is in the server log, not on the row",
@@ -63,34 +76,24 @@ function ScannerTile({ card }: { card: ScannerCard }) {
     <article
       data-testid="scanner-card"
       data-status={card.status}
-      className={cn(
-        "rounded-lg p-5",
-        card.status === "SELECTED" && "border border-line bg-panel",
-        card.status === "NOT RUN" && "border border-dashed border-line",
-        card.status === "UNKNOWN" && "border border-dotted border-ink-faint/60",
-      )}
+      className={cn("scanner-card", card.status === "NOT RUN" && "dashed", card.status === "UNKNOWN" && "dotted")}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="eyebrow">Scanner · feeds {SCANNER_VIEW[card.id] ?? "—"}</div>
-          <h2 className="mt-1 text-[16px] font-semibold text-ink">{card.label} Scanner</h2>
-        </div>
-        <Icon className="h-5 w-5 shrink-0 text-ink-dim" aria-hidden />
+      <div className="scanner-name">
+        <span>{card.label} Scanner</span>
+        <Icon className="h-4 w-4" aria-hidden />
       </div>
-      <div className="mt-4 font-mono text-[13px] uppercase tracking-wider text-ink">{card.status}</div>
-      <div className="mt-1 text-[12px] text-ink-faint">{subline(card)}</div>
-      <div className="mt-4 flex min-h-[1.25rem] flex-wrap gap-1.5">
-        {card.status === "SELECTED" && card.artefacts > 0 ? (
-          card.provisional > 0 ? (
-            <Tag variant="provisional">{card.provisional} provisional</Tag>
-          ) : (
-            <Tag variant="verified">Verified</Tag>
-          )
+      <div className="scanner-detail">
+        {subline(card)} · feeds {SCANNER_VIEW[card.id] ?? "—"}
+      </div>
+      <div className="scanner-status flex flex-wrap gap-1.5">
+        <Prov kind={STATUS_PROV[card.status]}>{card.status}</Prov>
+        {card.status === "SELECTED" && card.provisional > 0 ? (
+          <Prov kind="provisional">{card.provisional} provisional</Prov>
         ) : null}
-        {card.engine === "UNAVAILABLE" ? <Tag variant="provisional">Unavailable</Tag> : null}
-        {card.engine && card.engine !== "UNAVAILABLE" ? <Tag>engine {card.engine}</Tag> : null}
+        {card.engine === "UNAVAILABLE" ? <Prov kind="unavailable">engine unavailable</Prov> : null}
+        {card.engine && card.engine !== "UNAVAILABLE" ? <span className="format-tag">engine {card.engine}</span> : null}
       </div>
-      <p className="mt-3 text-[11px] leading-snug text-ink-faint">{FOOTNOTE[card.status]}</p>
+      <p className="scanner-note">{FOOTNOTE[card.status]}</p>
     </article>
   );
 }
@@ -109,16 +112,19 @@ export function CoverageScreen({
     [scan, scanners.data, artefacts],
   );
   const provisional = artefacts.filter((a) => a.provisional).length;
+  const grown = useGrown();
 
   return (
-    <div>
+    <div className="content">
       <ScreenHeader
         title="Scanner Coverage"
-        subtitle="See what was inspected, what was not, and what remains unobserved. A view nobody collected is not a view that came back clean, and a scanner that did not run found nothing because it did not look."
+        subtitle="What ECDAT was able to observe, and where visibility is missing. A view nobody collected is not a view that came back clean, and a scanner that did not run found nothing because it did not look."
         actions={
           scan ? (
             <FileButton
+              bare
               mode="view"
+              className="btn-ghost"
               path={reportPath(scan.id, "coverage")}
               filename={`ecdat-coverage-${scan.id.slice(0, 8)}.pdf`}
             >
@@ -128,81 +134,96 @@ export function CoverageScreen({
         }
       />
       {!scan ? (
-        <div className="px-6 pb-6">
-          <EmptyPanel title="No scan selected" />
-        </div>
+        <EmptyState title="No scan selected" />
       ) : (
-        <div className="space-y-4 px-6 pb-6">
-          {scanners.error ? (
-            <p className="text-[12px] text-ink-faint">
-              The server's scanner list could not be loaded — showing the scanners this row recorded.
-            </p>
-          ) : null}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {cards.map((card) => (
-              <ScannerTile key={card.id} card={card} />
-            ))}
-            <article data-testid="policy-card" className="rounded-lg border border-line bg-panel p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="eyebrow">Engine · scores every view</div>
-                  <h2 className="mt-1 text-[16px] font-semibold text-ink">Policy Engine</h2>
+        <>
+          <section className="panel in mb-3" data-testid="coverage-panel" style={{ animationDelay: "0.04s" }}>
+            <PanelHead title="Coverage" sub="What ECDAT was able to observe, and where visibility is missing" />
+            <div className="metric-hero mt-2">
+              {coverage.share.status === "computed" ? (
+                <span className="metric-hero-num lg" data-testid="coverage-share">
+                  {coverage.share.value}%
+                </span>
+              ) : (
+                <NotComputed reason={coverage.share.reason} />
+              )}
+              <div>
+                <div className="metric-hero-tag">Evidence-layer coverage</div>
+                <div className="metric-hero-note">
+                  {coverage.collected.length} of 3 views collected
+                  {coverage.collected.length > 0 ? ` (${coverage.collected.join(", ")})` : ""} · {artefacts.length}{" "}
+                  artefacts attributed
                 </div>
-                <CircleDot className="h-5 w-5 shrink-0 text-ink-dim" aria-hidden />
               </div>
-              <div className="mt-4 font-mono text-[13px] uppercase tracking-wider text-ink">Scored</div>
-              <div className="mt-1 text-[12px] text-ink-faint">
-                {artefacts.length} artefacts scored · {provisional} with an unverified fact
+            </div>
+            {scanners.error ? (
+              <div className="mt-3">
+                <Notice>The server's scanner list could not be loaded — showing the scanners this row recorded.</Notice>
               </div>
-              <div className="mt-4 flex min-h-[1.25rem] flex-wrap gap-1.5">
-                {provisional > 0 ? (
-                  <Tag variant="provisional">{provisional} provisional</Tag>
-                ) : (
-                  <Tag variant="verified">Verified</Tag>
-                )}
-              </div>
-              <p className="mt-3 text-[11px] leading-snug text-ink-faint">
-                an unverified rule is listed but scores 0 (ADR-0017); packs applied are not exposed by the API
-              </p>
-            </article>
-          </div>
+            ) : null}
+            <div className="scanner-grid">
+              {cards.map((card) => (
+                <ScannerTile key={card.id} card={card} />
+              ))}
+              <article data-testid="policy-card" className="scanner-card">
+                <div className="scanner-name">
+                  <span>Policy Engine</span>
+                  <CircleDot className="h-4 w-4" aria-hidden />
+                </div>
+                <div className="scanner-detail">
+                  {artefacts.length} artefacts scored · {provisional} with an unverified fact · scores every view
+                </div>
+                <div className="scanner-status flex flex-wrap gap-1.5">
+                  {provisional > 0 ? (
+                    <Prov kind="provisional">{provisional} provisional</Prov>
+                  ) : (
+                    <Prov kind="verified">Verified</Prov>
+                  )}
+                </div>
+                <p className="scanner-note">
+                  an unverified rule is listed but scores 0 (ADR-0017); packs applied are not exposed by the API
+                </p>
+              </article>
+            </div>
+          </section>
 
-          <Panel eyebrow="Visibility matrix" title="Evidence layer coverage">
-            <div className="grid overflow-hidden rounded-md border border-tint-line md:grid-cols-3">
-              {VIEWS.map((name) => {
-                const collected = coverage.collected.includes(name);
-                const pulse = coverage.pulse[name];
-                const inView = artefacts.filter((a) => a.views.includes(name)).length;
-                return (
-                  <div
-                    key={name}
-                    data-testid={`matrix-${name}`}
-                    className={cn(
-                      "border-tint-line p-5 md:border-l md:first:border-l-0",
-                      collected ? "bg-tint" : "bg-transparent",
-                    )}
-                  >
-                    <div className="eyebrow">{name}</div>
-                    <div className="mt-2 text-[30px] font-light leading-none tabular-nums text-ink">
-                      {collected ? `${pulse.percent}%` : <span className="text-[18px] text-ink-dim">Not collected</span>}
+          <section className="panel in" data-testid="layer-panel" style={{ animationDelay: "0.1s" }}>
+            <PanelHead
+              title="Evidence layer coverage"
+              sub="The gap between what's declared, what ships, and what's actually observed"
+            />
+            {VIEWS.map((name) => {
+              const collected = coverage.collected.includes(name);
+              const pulse = coverage.pulse[name];
+              const inView = artefacts.filter((a) => a.views.includes(name)).length;
+              return (
+                <div key={name} data-testid={`matrix-${name}`} data-collected={collected}>
+                  <div className="layer-row">
+                    <div className="layer-label">{name}</div>
+                    <div className={cn("layer-track", !collected && "absent")}>
+                      {collected ? (
+                        <div className="layer-fill" style={{ width: grown ? `${pulse.percent}%` : 0 }} />
+                      ) : null}
                     </div>
-                    <div className="mt-2 text-[12px] text-ink-dim">{VIEW_MEANING[name]}</div>
-                    <div className="mt-3 font-mono text-[11px] text-ink-faint">
-                      {collected
-                        ? `${pulse.seen}/${pulse.total} sighted · ${inView} in this view`
-                        : `to collect it: ${VIEW_REMEDY[name]}`}
+                    <div className={cn("layer-pct", !collected && "absent")}>
+                      {collected ? `${pulse.percent}%` : "Not collected"}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-            <p className="mt-4 text-[12px] leading-relaxed text-ink-faint">
-              <span className="font-mono tabular-nums text-ink-dim">{scan.coverage_gaps}</span> component(s)
-              were correlated against a group missing at least one view (from the scan row), so any drift
-              verdict on them rests on fewer sightings than a complete group would give.
+                  <div className="layer-note">
+                    {collected
+                      ? `${pulse.seen}/${pulse.total} sighted · ${inView} in this view — ${VIEW_MEANING[name]}`
+                      : `${VIEW_MEANING[name]} — to collect it: ${VIEW_REMEDY[name]}`}
+                  </div>
+                </div>
+              );
+            })}
+            <p className="page-sub mt-4">
+              <span className="mono text-ink-dim">{scan.coverage_gaps}</span> component(s) were correlated against a
+              group missing at least one view (from the scan row), so any drift verdict on them rests on fewer
+              sightings than a complete group would give.
             </p>
-          </Panel>
-        </div>
+          </section>
+        </>
       )}
     </div>
   );
