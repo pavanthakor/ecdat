@@ -1536,14 +1536,23 @@
     accounts (ADR-0035). The menu shows the key's name and role, which is as
     much of a person as ECDAT knows.
   *Raised: design-match slice (ADR-0032).*
-- **v2 design rebuild (ADR-0038): screens still on the ADR-0032 layout.** The
-  shell and the Overview are rebuilt on `web/design-v2/`. Cryptographic Drift,
-  Verified Fixes and Inventory are next (after review of the Overview), then
-  Scans, Roadmap, Agility, Coverage, Reports and Compare; until its turn, each
-  keeps its current layout inside the v2 frame and palette. **Still owed:** a
-  visual check of the rendered v2 console against the mockups (no headless
+- ~~**v2 design rebuild (ADR-0038): screens still on the ADR-0032 layout.**~~
+  **Done:** the shell and the Overview in ADR-0038, the other nine screens in
+  [ADR-0039](docs/adr/0039-v2-remaining-screens.md). Risk Analysis and Settings
+  have no v2 mockup and keep their layout inside the v2 frame. **Still owed:**
+  a visual check of the rendered v2 console against the mockups (no headless
   browser on the build machine). v2 elements with no backing, beyond the list
   above:
+  - **A scan's start time and duration** (Scans' "Started", "Avg. duration"):
+    the row stores when a scan was saved, not when it began.
+  - **Failed scans** (Scans' "Failed / partial"): a failed job stores no row,
+    and jobs are not listed, so failures cannot be counted.
+  - **Whether a patch was applied, and whether the re-scan came back clean**
+    (Fixes' lifecycle): not tracked -- ECDAT never touches the target. A link
+    from a fix to a later scan that no longer finds the artefact would carry it.
+  - **An HTML report renderer** (Reports' HTML artifact): PDF only.
+  - **A pack-defined agility target and a rating rubric** (Agility's "Target
+    80%", "Moderately adaptable").
   - **An average risk score per scan** (the Risk trend's "54.2"): a stored row
     has band counts and a max score, not an average. The trend plots Critical +
     High per stored scan instead, and needs two scans of the target.

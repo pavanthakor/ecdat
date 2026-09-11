@@ -8,7 +8,10 @@ console and its honesty rule; [ADR-0032](../docs/adr/0032-qorbit-design-match.md
 matched its layout to the design screenshots in `web/design/`;
 [ADR-0038](../docs/adr/0038-v2-console-design.md) rebuilds it on the v2 mockups
 in `web/design-v2/` (git-ignored, reference only — nothing there is bundled),
-screen by screen. The v2 design system is `src/styles/console-v2.css`.
+and [ADR-0039](../docs/adr/0039-v2-remaining-screens.md) finishes the other
+nine screens. The v2 design system is `src/styles/console-v2.css`, its shared
+pieces `src/components/v2.tsx`, and `src/test/colour.ts` is the audit every
+screen test runs: colour only where a band is.
 
 ## Build it before the demo
 
