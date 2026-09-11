@@ -108,7 +108,7 @@ function Console() {
       screen = <RoadmapScreen artefacts={view.artefacts} scan={view.scan} />;
       break;
     case "fixes":
-      screen = <FixesScreen scan={view.scan} />;
+      screen = <FixesScreen scan={view.scan} artefacts={view.artefacts} />;
       break;
     case "agility":
       screen = <AgilityScreen artefacts={view.artefacts} loading={view.loading} />;

@@ -16,7 +16,9 @@ import scansDoc from "@/test/fixtures/scans.json";
 import { parseCbom } from "@/api/parse";
 import type { Cbom, Principal, ScanSummary } from "@/api/types";
 import { DriftScreen } from "@/screens/Drift";
+import { FixesScreen } from "@/screens/Fixes";
 import { AuthContext, type Auth } from "@/state/auth";
+import { targetOf } from "@/state/metrics";
 import { auditColour } from "@/test/colour";
 
 const z11 = parseCbom(z11Doc as unknown as Cbom);
@@ -97,5 +99,104 @@ describe("Cryptographic Drift (drift.html)", () => {
       expect(row.querySelector(".layer-fill")).toBeNull();
     }
     colourIsSeverityOnly();
+  });
+});
+
+describe("Verified Fixes (fixes.html)", () => {
+  // The z11 fixture carries no migration label, so one copy is given the
+  // pack label the Target column reads (ADR-0030); MD5 stays unlabelled.
+  const rsa = z11.find((a) => a.name === "RSA-2048")!;
+  const withTarget = { ...rsa, labels: [...rsa.labels, "target-ml-kem"] };
+  const artefacts = z11.map((a) => (a.bomRef === rsa.bomRef ? withTarget : a));
+  const md5 = z11.find((a) => a.name === "MD5")!;
+  const DIFF = "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-sign(rsa)\n+sign(mldsa)";
+
+  function stubFixes() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith(`/scans/${scan.id}/fixes`)) {
+          return new Response(
+            JSON.stringify({
+              parent_scan_id: scan.id,
+              fix_scan_id: "fix-1",
+              created_at: "2026-09-10T07:00:00Z",
+              fixes: [
+                {
+                  bom_ref: withTarget.bomRef,
+                  component: withTarget.name,
+                  template: "source-rsa",
+                  verified: true,
+                  reason: "the sandbox re-scan no longer finds it",
+                  source: "FIPS 204",
+                  diff: DIFF,
+                },
+                {
+                  bom_ref: md5.bomRef,
+                  component: "MD5",
+                  template: "source-md5",
+                  verified: false,
+                  reason: "the re-scan still found MD5",
+                  source: null,
+                  diff: null,
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+  }
+
+  it("a card per fix: current, the pack's target, its band, and a diff for the verified one only", async () => {
+    stubFixes();
+    render(<FixesScreen scan={scan} artefacts={artefacts} />);
+    const [verified, unverified] = await screen.findAllByTestId("fix-card");
+
+    expect(targetOf(withTarget)).toBe("ML-KEM");
+    expect(verified).toHaveTextContent("ML-KEM");
+    expect(unverified).toHaveTextContent(/no target labelled by a pack/i);
+    expect(within(verified).getByText(withTarget.band)).toHaveAttribute("data-band", withTarget.band);
+    expect(verified.querySelector("pre.diff-block")).not.toBeNull();
+    expect(verified.querySelectorAll(".diff-add")).toHaveLength(1);
+    expect(verified.querySelectorAll(".diff-remove")).toHaveLength(1);
+    expect(within(verified).getByRole("button", { name: /copy patch/i })).toBeInTheDocument();
+
+    expect(unverified).toHaveTextContent("the re-scan still found MD5");
+    expect(unverified.querySelector("pre")).toBeNull();
+    expect(within(unverified).queryByRole("button", { name: /copy patch/i })).toBeNull();
+    colourIsSeverityOnly();
+  });
+
+  it("the lifecycle marks only what ECDAT knows: proposed, and the sandbox verdict", async () => {
+    stubFixes();
+    render(<FixesScreen scan={scan} artefacts={artefacts} />);
+    const [verified, unverified] = await screen.findAllByTestId("fix-card");
+    const steps = (card: HTMLElement) =>
+      Array.from(card.querySelectorAll("[data-state]")).map((step) => [step.textContent, step.getAttribute("data-state")]);
+
+    expect(steps(verified)).toEqual([
+      ["Proposed", "done"],
+      ["Verified in sandbox", "done"],
+      ["Applied externally", "current"],
+      ["Re-scanned", "pending"],
+    ]);
+    expect(steps(unverified)).toEqual([
+      ["Proposed", "done"],
+      ["Not verified in sandbox", "failed"],
+      ["Applied externally", "pending"],
+      ["Re-scanned", "pending"],
+    ]);
+  });
+
+  it("the diff is ink and weight, not red and green", async () => {
+    stubFixes();
+    render(<FixesScreen scan={scan} artefacts={artefacts} />);
+    const [verified] = await screen.findAllByTestId("fix-card");
+    for (const line of Array.from(verified.querySelectorAll(".diff-line"))) {
+      expect(line.className).not.toMatch(/critical|red|green|ok\b/);
+    }
   });
 });

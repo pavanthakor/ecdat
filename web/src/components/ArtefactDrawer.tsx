@@ -53,30 +53,32 @@ function Section({
   );
 }
 
+function diffLineClass(line: string): string {
+  if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@")) return "diff-meta";
+  if (line.startsWith("+")) return "diff-add";
+  if (line.startsWith("-")) return "diff-remove";
+  return "diff-context";
+}
+
 /**
- * A rendered unified diff, as the design has it: removed lines red, added lines
- * full-contrast, context faint. The red is git's convention, not a band.
+ * A rendered unified diff, in the v2 `.diff-block` (ADR-0039): removed lines
+ * dimmed, added lines full ink, context faint. No red and green -- colour in
+ * this console means severity and nothing else, and the leading -/+ already
+ * says which is which. Its own `.v2` scope (a `display: contents` box) makes
+ * it render the same inside the drawer, which is portalled outside the console.
  */
-export function DiffBlock({ diff }: { diff: string }) {
+export function DiffBlock({ diff, note }: { diff: string; note?: string }) {
   return (
-    <pre className="mt-3 overflow-x-auto rounded-md border border-line bg-ground p-3 font-mono text-[11.5px] leading-relaxed">
-      {diff.split("\n").map((line, index) => (
-        <div
-          key={index}
-          className={
-            line.startsWith("+++") || line.startsWith("---")
-              ? "text-ink-dim"
-              : line.startsWith("+")
-                ? "text-ink"
-                : line.startsWith("-")
-                  ? "text-critical"
-                  : "text-ink-faint"
-          }
-        >
-          {line || " "}
-        </div>
-      ))}
-    </pre>
+    <div className="v2 contents">
+      <pre className="diff-block mt-3">
+        {diff.split("\n").map((line, index) => (
+          <span key={index} className={cn("diff-line", diffLineClass(line))}>
+            {line || " "}
+          </span>
+        ))}
+      </pre>
+      {note ? <p className="diff-note">{note}</p> : null}
+    </div>
   );
 }
 
