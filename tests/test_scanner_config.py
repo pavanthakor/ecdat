@@ -441,5 +441,6 @@ def test_recall_and_precision(findings: list[Finding], capsys: Any) -> None:
         if spurious:
             print(f"  SPURIOUS  {spurious}")
 
-    assert recall >= 0.9, f"recall {recall:.1%}; missed {missed}"
+    # == 1.0, not a floor: a floor hides a regression (ADR-0027, ADR-0037).
+    assert recall == 1.0, f"recall {recall:.1%}; missed {missed}"
     assert precision == 1.0, f"precision {precision:.1%}; spurious {spurious}"

@@ -584,5 +584,6 @@ def test_recall_and_precision_against_the_answer_key(
         for hit in decoy_hits:
             print(f"    DECOY FIRED {hit}")
 
-    assert recall >= 0.9, f"missed {missed}"
+    # == 1.0, not a floor: a floor hides a regression (ADR-0027, ADR-0037).
+    assert recall == 1.0, f"missed {missed}"
     assert precision == 1.0, f"decoys fired: {decoy_hits}"

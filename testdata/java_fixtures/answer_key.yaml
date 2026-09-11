@@ -51,9 +51,7 @@ expected:
 
   # ---- THE VERIFY SIDE (ADR-0030 follow-up) ------------------------------
   # java-signature-verify shipped in ADR-0030 with no fixture. The Signature is
-  # handed in, so getInstance is NOT in this file: where it is, java-signature-rsa
-  # also fires and reports usage=sign for a VERIFIER -- a known mislabel
-  # (PUNCHLIST) that no answer key should declare as ground truth.
+  # handed in, so getInstance is NOT in this file.
   must_fire/JavaSignatureVerify.java:
     - rule_id: java-signature-verify
       algorithm: unknown
@@ -61,6 +59,66 @@ expected:
       usage: verify
       asset_type: algorithm
       count: 1
+
+  # ---- USE-SITE REFINEMENT (ADR-0037) --------------------------------------
+  # getInstance cannot know sign from verify; the SAME method's initVerify /
+  # verify or initSign / sign can. Until ADR-0037 java-signature-rsa reported
+  # usage=sign for a verifier -- the mislabel no answer key was allowed to
+  # declare. These entries are the ground truth it was never allowed to be.
+  must_fire/JavaSignatureVerifier.java:
+    - rule_id: java-signature-rsa
+      algorithm: RSA
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - transformation: SHA256withRSA
+    - rule_id: java-signature-verify
+      algorithm: unknown
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      count: 1
+
+  # Declared first, assigned later: the second shape STEP 0 measured.
+  must_fire/JavaSignatureWeakVerifier.java:
+    - rule_id: java-signature-weak-hash
+      algorithm: RSA
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - transformation: SHA1withRSA
+          flagged: true
+    - rule_id: java-signature-verify
+      algorithm: unknown
+      primitive: signature
+      usage: verify
+      asset_type: algorithm
+      count: 1
+
+  must_fire/JavaSignatureSigner.java:
+    - rule_id: java-signature-ecdsa
+      algorithm: ECDSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - transformation: SHA256withECDSA
+
+  # A verify() on a DIFFERENT Signature: the fresh one keeps the default.
+  must_fire/JavaSignatureUnrelatedVerify.java:
+    - rule_id: java-signature-rsa
+      algorithm: RSA
+      primitive: signature
+      usage: sign
+      asset_type: algorithm
+      count: 1
+      params_any:
+        - transformation: SHA256withRSA
 
   must_fire/JavaSignatureSha1Rsa.java:
     - rule_id: java-signature-weak-hash

@@ -219,21 +219,26 @@ def test_java_signature_verify_reports_the_verify_side(findings: list[Finding]) 
     """`Signature.initVerify` VERIFIES (ADR-0030's java-signature-verify).
 
     Shipped in ADR-0030 with no fixture. The ALGORITHM is honestly `unknown`:
-    it was chosen at `Signature.getInstance`, which this fixture does not
-    contain, and joining the two calls is Java use-site refinement -- not built
-    (PUNCHLIST). The USAGE is the fact this rule adds, and it must be `verify`.
-    The fixture's `verify(sig)` is not a second finding: the direction was set
-    once, at `initVerify`.
+    this rule fires at `initVerify` alone, and the algorithm was chosen at
+    `Signature.getInstance`. Where getInstance is in the same method, ADR-0037's
+    use-site refinement now carries `verify` onto the getInstance-side finding,
+    which does know the algorithm (tests/test_java_usage_refinement.py). The
+    USAGE is the fact this rule adds, and it must be `verify`. A `verify(sig)`
+    is not a second finding: the direction was set once, at `initVerify`.
     """
     hits = [f for f in findings if rule_id_of(f) == "java-signature-verify"]
-    assert {_rel(f) for f in hits} == {"must_fire/JavaSignatureVerify.java"}, hits
-    assert len(hits) == 1
-    assert (hits[0].algorithm, hits[0].primitive, hits[0].usage) == (
-        "unknown",
-        "signature",
-        "verify",
-    )
-    assert "initVerify" in (hits[0].evidence.occurrences[0].snippet or "")
+    in_its_fixture = [
+        f for f in hits if _rel(f) == "must_fire/JavaSignatureVerify.java"
+    ]
+    assert len(in_its_fixture) == 1, hits
+    # Every hit, in every fixture that has one, is the verify side at initVerify.
+    for hit in hits:
+        assert (hit.algorithm, hit.primitive, hit.usage) == (
+            "unknown",
+            "signature",
+            "verify",
+        )
+        assert "initVerify" in (hit.evidence.occurrences[0].snippet or "")
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +407,8 @@ def test_java_recall_and_precision(findings: list[Finding], capsys: Any) -> None
     with capsys.disabled():
         print(result.report("JAVA"))
 
-    assert result.recall >= 0.9, (
+    # == 1.0, not a floor: a floor hides a regression (ADR-0027, ADR-0037).
+    assert result.recall == 1.0, (
         f"Java recall {result.recall:.1%}; missed {result.missed}"
     )
     assert result.precision == 1.0, (

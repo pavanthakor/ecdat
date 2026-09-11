@@ -1,0 +1,91 @@
+# USE-SITE REFINEMENT for Java signatures (ADR-0037).
+#
+# `Signature.getInstance("SHA256withRSA")` names the ALGORITHM and not the
+# DIRECTION: `initSign` or `initVerify` sets that later. The signature rules in
+# signatures.yaml therefore report `usage: sign` as a DEFAULT and declare it
+# `usage_refinable: true`; these annotations replace it where the same method
+# shows the direction. Without them every Java verifier in an estate was
+# inventoried as a signer, so the "migrate the VERIFIERS first" advice
+# (policy/packs/quantum.yaml, citing NIST IR 8547) could never point at one --
+# the bug class ADR-0030 fixed for Python and JS JWT verifiers.
+#
+# THEY ARE ANNOTATIONS, NOT FINDINGS (the ADR-0026/0030 mechanism).
+# `annotates: usage` applies `metadata.usage` to the finding already reported
+# at the same line -- the getInstance call -- and emits nothing of its own.
+#
+# INTRA-PROCEDURAL, and measured (ADR-0037 STEP 0, semgrep 1.176.1 OSS): a
+# typed declaration or a later assignment, then initVerify/verify or
+# initSign/sign on the SAME variable in the same method. A call on a different
+# Signature does not refine (the binding holds). A Signature returned to a
+# caller, handed to another method or stored in a field is not followed and
+# keeps its default. A Signature initialised both ways matches both rules; the
+# scanner keeps the first in rule order ("signing"), deterministically.
+rules:
+  - id: java-signature-used-for-signing
+    languages: [java]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      annotates: usage
+      usage: sign
+      algorithm: unknown
+      primitive: unknown
+      quantum_note: >-
+        Not a detection. Records that the Signature obtained at this line is
+        initialised to SIGN (initSign) in the same method, so the finding here
+        is a signer: ML-DSA (FIPS 204), migrated after the verifiers that must
+        accept it (NIST IR 8547). See ADR-0037.
+    patterns:
+      - pattern: Signature.getInstance(...)
+      - pattern-either:
+          - pattern-inside: |
+              $TYPE $SIG = Signature.getInstance(...);
+              ...
+              $SIG.initSign(...);
+          - pattern-inside: |
+              $SIG = Signature.getInstance(...);
+              ...
+              $SIG.initSign(...);
+          - pattern-inside: |
+              $TYPE $SIG = Signature.getInstance(...);
+              ...
+              $SIG.sign(...);
+          - pattern-inside: |
+              $SIG = Signature.getInstance(...);
+              ...
+              $SIG.sign(...);
+
+  - id: java-signature-used-for-verify
+    languages: [java]
+    severity: INFO
+    message: "ecdat|"
+    metadata:
+      annotates: usage
+      usage: verify
+      algorithm: unknown
+      primitive: unknown
+      quantum_note: >-
+        Not a detection. Records that the Signature obtained at this line is
+        initialised to VERIFY (initVerify) in the same method, so the finding
+        here is a verifier. Verifiers migrate FIRST: nothing can accept an
+        ML-DSA (FIPS 204) signature until its verifier does (NIST IR 8547). See
+        ADR-0037.
+    patterns:
+      - pattern: Signature.getInstance(...)
+      - pattern-either:
+          - pattern-inside: |
+              $TYPE $SIG = Signature.getInstance(...);
+              ...
+              $SIG.initVerify(...);
+          - pattern-inside: |
+              $SIG = Signature.getInstance(...);
+              ...
+              $SIG.initVerify(...);
+          - pattern-inside: |
+              $TYPE $SIG = Signature.getInstance(...);
+              ...
+              $SIG.verify(...);
+          - pattern-inside: |
+              $SIG = Signature.getInstance(...);
+              ...
+              $SIG.verify(...);

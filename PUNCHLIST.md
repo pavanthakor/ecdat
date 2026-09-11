@@ -510,6 +510,14 @@
   Still owed: the configurability annotation and the assembled-key rule have no
   counterpart in Go, JS or Java, and Go and Java have no weak-RNG-by-flow rule
   at all.
+  **Re-verified by [ADR-0037](docs/adr/0037-tier2-leftovers.md):** the JS
+  sibling's four cases are asserted and green:
+  - flow through a non-key-named variable is found;
+  - where both rules fire, they make one component;
+  - the name-scoped rule still catches its no-sink case;
+  - the non-crypto decoys stay silent.
+
+  Nothing was rebuilt. Go and Java weak-RNG-by-flow remain owed.
   *Raised: all-languages slice. JS weak-RNG resolved: usage-classification
   slice.*
 - ~~**usage classification is thin: nothing consumes it, and keygen sites stay
@@ -524,15 +532,25 @@
   `key-transport` and `key-exchange` rules exist across four packs where the API
   names them; and a Python keygen refines from its use site.
   *Raised: Scanner A slice. Resolved: usage-classification slice.*
-- **USE-SITE REFINEMENT is PYTHON-ONLY and INTRA-PROCEDURAL.** Go, JS and Java
-  need the same `pattern-inside` shapes against their own keygen and use-site
-  APIs -- not written, not faked. More limiting than the language gap: a key
-  generated in a factory and used by its caller, which is the common shape in
-  real code, stays `unknown` in every language. Semgrep Pro's interprocedural
-  analysis is the fix. A key used for TWO things also reports only one usage
-  (first in sorted rule order -- deterministic, and a limit).
-  *Raised: usage-classification slice.*
-- **Two usage rules report an algorithm they cannot know.**
+- **USE-SITE REFINEMENT covers Python and Java `Signature` only, and is
+  INTRA-PROCEDURAL.**
+  - **Coverage.** ADR-0037 added Java `Signature` direction refinement:
+    initSign/initVerify on the same variable in the same method. Still not
+    written: Go and JS, Java keygen (`KeyPairGenerator`), and the Java JWT
+    construction rules.
+  - **More limiting than the language gap.** A key generated in a factory and
+    used by its caller, which is the common shape in real code, stays
+    `unknown` (or keeps its declared default) in every language. Semgrep Pro's
+    interprocedural analysis is the fix.
+  - **One usage per key.** A key used for TWO things reports only one usage
+    (first in sorted rule order -- deterministic, and a limit).
+
+  *Raised: usage-classification slice. Java signatures: ADR-0037.*
+- **Two usage rules report an algorithm they cannot know.** **Update
+  (ADR-0037):** where getInstance and initVerify share a method, the
+  getInstance-side finding is now refined to `verify` and carries the
+  algorithm, so the verifier is labelled correctly. `java-signature-verify`
+  itself still reports `unknown` at `initVerify`. *Was:*
   `java-signature-verify` reports `algorithm: unknown` because the algorithm was
   chosen at `Signature.getInstance` and `initVerify` only sets the direction --
   joining the two calls is use-site refinement for Java, which is not built. And
@@ -540,7 +558,21 @@
   names the usage but not the algorithm, and RSA is the overwhelmingly common
   case rather than the only one, so an AES key-wrap would be mislabelled.
   *Raised: usage-classification slice.*
-- **Java verifiers are reported as SIGNERS.** `java-signature-rsa` fires at
+- ~~**Java verifiers are reported as SIGNERS.**~~ **Resolved within a method**
+  by [ADR-0037](docs/adr/0037-tier2-leftovers.md).
+  - **Mechanism.** The three getInstance signature rules keep `usage: sign` as
+    a DEFAULT (`usage_refinable: true`). `java-signature-used-for-verify` /
+    `-signing` refine it from `initVerify`/`verify` or `initSign`/`sign` on the
+    same variable in the same method. STEP 0 measured this on semgrep 1.176.1
+    OSS: typed declarations and later assignments, with a `verify()` on a
+    different Signature correctly ignored.
+  - **Ground truth.** The Java answer key now declares verifiers as
+    `usage: verify`.
+  - **Remaining.** A Signature passed in, returned or held in a field keeps
+    `sign` (intra-procedural, as in Python). A Signature initialised both ways
+    reports `sign`.
+
+  *Was:* `java-signature-rsa` fires at
   `Signature.getInstance("SHA256withRSA")` with `usage: sign` -- but
   `getInstance` cannot know sign from verify; the direction is set later, by
   `initSign` or `initVerify`. So a verifier reports a `sign` finding at
@@ -566,7 +598,18 @@
   fixture. No fixture calls `ed25519.Verify` today; the follow-up fixture covers
   `ecdsa.Verify` / `ecdsa.VerifyASN1` only, so no key declares the mislabel.
   *Raised: verify-rule coverage follow-up.*
-- **The Go and Java answer-key recall gates are still `>= 0.9` floors.**
+- ~~**The Go and Java answer-key recall gates are still `>= 0.9` floors.**~~
+  **Resolved** by [ADR-0037](docs/adr/0037-tier2-leftovers.md).
+  - **Structural guard.** `tests/test_recall_gates.py` fails on ANY recall
+    floor in `tests/`.
+  - **Sweep.** It found nine, and eight are now `== 1.0`: Go, Java, Python
+    dataflow, and the source, config, container, binary and deps scanner
+    gates, each measured at 100% first.
+  - **The QuantumBank KPI keeps its ADR-0014 pass-line**, a published product
+    target, through `report.passes`, with a separate `== 1.0` regression
+    guard beside it.
+
+  *Was:*
   `tests/test_rules_go.py` and `tests/test_rules_java.py` assert
   `recall >= 0.9` -- ADR-0027's lesson is that a floor can hide a regression.
   Mitigated, not fixed: every declared case is also asserted on its own by the

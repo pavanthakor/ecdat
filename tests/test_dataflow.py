@@ -431,7 +431,8 @@ def test_dataflow_recall_and_precision(findings: list[Finding], capsys: Any) -> 
         if missed:
             print(f"  MISSED      {missed}")
 
-    assert recall >= 0.9, f"recall {recall:.1%}; missed {missed}"
+    # == 1.0, not a floor: a floor hides a regression (ADR-0027, ADR-0037).
+    assert recall == 1.0, f"recall {recall:.1%}; missed {missed}"
     assert precision == 1.0, f"{decoy_hits} finding(s) on the dataflow decoys"
     assert correct == corrections, "a configurable-flag correction did not hold"
 

@@ -295,7 +295,14 @@ def test_the_quantumbank_kpi_meets_its_gate(capsys: Any) -> None:
     with capsys.disabled():
         report.render()
 
-    assert report.findings.recall >= 0.9, (
+    # The ADR-0014 KPI pass-line -- recall over the claimed-detectable set at
+    # RECALL_GATE, no decoy hit, every expected drift, none invented -- is the
+    # harness's own verdict, and its published definition is not changed here.
+    assert report.passes, "the QuantumBank KPI fails its ADR-0014 gate"
+    # The REGRESSION guard is separate: everything claimed detectable is found
+    # today, so anything less is a regression the 90% pass-line would hide
+    # (ADR-0027, ADR-0037).
+    assert report.findings.recall == 1.0, (
         f"recall {report.findings.recall:.1%}; missed "
         f"{[m.id for m in report.findings.missed]}"
     )

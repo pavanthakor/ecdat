@@ -244,7 +244,8 @@ def test_go_recall_and_precision(findings: list[Finding], capsys: Any) -> None:
     with capsys.disabled():
         print(result.report("GO"))
 
-    assert result.recall >= 0.9, (
+    # == 1.0, not a floor: a floor hides a regression (ADR-0027, ADR-0037).
+    assert result.recall == 1.0, (
         f"Go recall {result.recall:.1%}; missed {result.missed}"
     )
     assert result.precision == 1.0, (

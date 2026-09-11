@@ -994,6 +994,33 @@ def _mark_configurable(finding: Finding) -> Finding:
     return finding.model_copy(update={"configurable": True, "confidence": 1.0})
 
 
+#: A rule whose `usage` is a DEFAULT -- inferred from where it matched, not
+#: stated by the call -- declares this, and a use-site annotation may replace
+#: it (ADR-0037). `Signature.getInstance("SHA256withRSA")` is the case: it names
+#: the algorithm, and `initSign` / `initVerify` set the direction later.
+USAGE_REFINABLE = "usage_refinable"
+
+
+def _refinable(finding: Finding, result: dict[str, Any]) -> bool:
+    """Whether a use-site verdict may replace this finding's usage.
+
+    ``unknown`` always may. Otherwise only a usage the rule itself declared a
+    default. A rule that READ its usage off the API (`initVerify`,
+    `Cipher.WRAP_MODE`) is better evidence than a use site, and letting the use
+    site overrule it would rewrite a fact the call itself stated.
+    """
+    if finding.usage == "unknown":
+        return True
+    metadata = (result.get("extra") or {}).get("metadata") or {}
+    flag = metadata.get(USAGE_REFINABLE, False)
+    if not isinstance(flag, bool):
+        raise RulePackContractError(
+            f"rule {result.get('check_id')!r}: {USAGE_REFINABLE} must be true or "
+            f"false, got {flag!r}"
+        )
+    return flag
+
+
 def _refine_usage(finding: Finding, usage: str) -> Finding:
     """Apply a use-site usage verdict to a keygen finding (ADR-0030).
 
@@ -1105,11 +1132,12 @@ class SourceScanner:
             if site in configurable_sites:
                 finding = _mark_configurable(finding)
             usage = refined_usage.get(site)
-            if usage is not None and finding.usage == "unknown":
-                # Only ever refines an UNKNOWN. A rule that already read the
-                # usage off the API is the better evidence, and a refinement
-                # that overrode it would let a use site in the same function
-                # rewrite a fact the call itself stated.
+            if usage is not None and _refinable(finding, result):
+                # Refines an UNKNOWN, or a usage the rule declared a default
+                # (ADR-0037). A rule that already read the usage off the API is
+                # the better evidence, and a refinement that overrode it would
+                # let a use site in the same function rewrite a fact the call
+                # itself stated.
                 finding = _refine_usage(finding, usage)
             findings.append(finding)
 
