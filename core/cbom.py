@@ -239,6 +239,18 @@ def _canonical(finding: Finding) -> Finding:
     return finding.model_copy(update={"params": canonical})
 
 
+def _revalidated(finding: Finding) -> Finding:
+    """The finding, through the schema's validators AGAIN (ADR-0036).
+
+    ``model_construct`` and ``model_copy(update=...)`` both skip validation, so
+    a Finding reaching the normaliser is no proof it passed the schema. Every
+    one is re-validated here -- the key-material redaction with the rest -- so
+    no path around the validators reaches a CBOM. Idempotent: a finding that
+    did pass comes back equal, and the guard does not fire twice.
+    """
+    return Finding.model_validate(finding.model_dump())
+
+
 def _group_findings(findings: Iterable[Finding], target: Target) -> list[_Group]:
     grouped: dict[str, list[Finding]] = {}
     for reported in findings:
@@ -247,7 +259,7 @@ def _group_findings(findings: Iterable[Finding], target: Target) -> list[_Group]
         # RSA-2048 reported by two scanners that disagreed about a type -- would
         # otherwise hash to two components. `core/params.py` is the one place
         # that says what a known param is; an unknown one passes through.
-        finding = _canonical(reported)
+        finding = _canonical(_revalidated(reported))
         grouped.setdefault(finding_identity(finding, target), []).append(finding)
     # Sorting by identity is what makes the output independent of input order.
     return [_merge(identity, grouped[identity]) for identity in sorted(grouped)]

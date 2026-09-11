@@ -31,8 +31,25 @@
   relied on anywhere -- but nothing rewrites the old ids, and a report that
   cross-referenced two scans by bom-ref across that boundary would not join.
   *Raised: typed-params slice.*
-- **"No secret key material in `snippet`" is enforced for Python source only.**
-  **Partially resolved** in the Scanner A slice. `scanners/source` scrubs every
+- ~~**"No secret key material in `snippet`" is enforced for Python source only;
+  redaction is per-scanner discipline, and a new scanner could leak.**~~
+  **Resolved STRUCTURALLY** by
+  [ADR-0036](docs/adr/0036-schema-redaction-guard.md). `core/redaction.py` is
+  called from the schema's validators and again from the normaliser, which
+  re-validates every finding, so a scanner that forgets -- or a `model_construct`
+  that skips the schema -- cannot put key material in the CBOM.
+  - **Rules 1–2, on every evidence field and string param:** private-key armour
+    goes whole; a DER private-key structure goes in any encoding.
+  - **Rule 3, on snippets:** a secret-named high-entropy literal goes.
+  - **Rule 4, on key-material findings:** every non-algorithm literal goes.
+  - **It is surgical.** Config lines, algorithm names, certificates, public
+    keys, hash digests and bom-refs pass through unchanged, and tests pin each.
+  - **It is proven against a seventh scanner that redacts nothing**, run
+    through the real `run_scan`.
+  - **The per-scanner redaction below stays** as defence in depth, and the
+    shipped scanners never trip the guard.
+
+  The history follows. *Was:* **Partially resolved** in the Scanner A slice. `scanners/source` scrubs every
   snippet twice: a rule that matches key material declares `redact: true` and
   loses its snippet entirely, and independently *any* snippet carrying a PEM
   banner or a byte-string literal of >=8 bytes is redacted. The second layer is
@@ -92,7 +109,26 @@
   family enforcing it by discipline is exactly the state where the next scanner
   written forgets.
   *Raised: Phase 0, core schema slice. Partially resolved: Scanner A slice,
-  see [ADR-0004](docs/adr/0004-source-scanning-semgrep.md).*
+  see [ADR-0004](docs/adr/0004-source-scanning-semgrep.md). Resolved
+  structurally: schema redaction guard slice.*
+- **The schema redaction guard's stated residual (ADR-0036).**
+  - **Unnamed literals on non-key lines.** The structural guard cannot see an
+    UNNAMED key literal on a line matched by a rule that is not about the key.
+    The example is `jwt.encode(claims, "s3cr3t...")` reported by the JWT rule:
+    nothing in the text says the literal is a key, and catching it would mean
+    redacting every opaque literal, hash digests included. Today the source
+    scanner's own opaque-literal net covers it. A NEW scanner emitting such a
+    line for a non-key finding would not be caught.
+  - **Unarmoured PEM body lines.** A line from the middle of a PEM body (no
+    armour, and not the start of a DER structure) is not recognisable.
+  - **Unrecognised encodings.** A JWK's private `d` member, and PKCS#12
+    contents beyond the PFX header.
+  - **Heuristic word lists.** Rule 3's secret words and the words that make
+    "key" public (`public`, `cert`, `fingerprint`, `digest`, ...) are
+    heuristics, ADR-0034's.
+  - **`raw` is not guarded.** It is never written to the CBOM.
+
+  *Raised: schema redaction guard slice.*
 - **Cross-view merging only happens when the normalised locus matches.** The
   same RSA seen in source, in a shipped binary and at runtime usually has three
   different paths, so it yields three components rather than one merged
