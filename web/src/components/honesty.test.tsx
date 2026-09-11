@@ -8,6 +8,7 @@
  * a plausible number looks exactly like a true one.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import driftDoc from "@/test/fixtures/cbom_drift.json";
@@ -148,14 +149,15 @@ describe("cryptographic drift", () => {
     expect(empty.textContent).not.toMatch(/no drift|views agree/i);
   });
 
-  it("renders each drift across the three views, with the cause named", () => {
+  it("lists each drift, and traces the selected one across the three views, with the cause named", async () => {
     render(<DriftScreen artefacts={drift} scan={scan} loading={false} />);
-    const panels = screen.getAllByTestId("drift-panel");
-    expect(panels).toHaveLength(5);
+    const rows = screen.getAllByTestId("drift-row");
+    expect(rows).toHaveLength(5);
 
-    const shipped = panels.find((p) =>
-      p.textContent?.includes("shipped-cannot-do-declared"),
-    )!;
+    // v2 (ADR-0039): one chain at a time, chosen from the findings list.
+    await userEvent.click(rows.find((row) => row.textContent?.includes("shipped-cannot-do-declared"))!);
+    const shipped = screen.getByTestId("drift-panel");
+    expect(shipped).toHaveAttribute("data-kind", "shipped-cannot-do-declared");
     expect(within(shipped).getByTestId("view-shipped")).toHaveTextContent(
       "OpenSSL 3.0.2 (not PQC-capable)",
     );

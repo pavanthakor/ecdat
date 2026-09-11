@@ -25,7 +25,7 @@
  * the CRQC horizon, the Mosca control.
  */
 import { ArrowRight, Download, GitCompareArrows, Radar, ShieldAlert, Table2, Workflow } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 import { cbomPath } from "@/api/client";
 import { BANDS, type Artefact, type Band, type ScanSummary } from "@/api/types";
@@ -34,6 +34,7 @@ import { MetricCard, NotComputed } from "@/components/Honest";
 import { InfoTip } from "@/components/InfoTip";
 import { ScreenHeader } from "@/components/Panel";
 import { Slider } from "@/components/ui/slider";
+import { PanelHead, tone, useGrown } from "@/components/v2";
 import { cn, formatDate, shortLocator } from "@/lib/format";
 import { hrefFor, navigate } from "@/lib/router";
 import { certaintyOf, formatConfidence } from "@/state/certainty";
@@ -63,31 +64,6 @@ const MOSCA_EXPLAINER =
 
 /** Slider tick marks, as horizons in years; labelled as calendar years. */
 const TICKS = [5, 10, 15, 20].filter((z) => z >= Z_MIN && z <= Z_MAX);
-
-/** The class stem for a band's colour (`band-bg-critical`, ...). */
-const tone = (band: Band) => band.toLowerCase();
-
-/** False on the first paint, true on the next: bars and the gauge grow in. */
-function useGrown(): boolean {
-  const [grown, setGrown] = useState(false);
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setGrown(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-  return grown;
-}
-
-function PanelHead({ title, sub, right }: { title: ReactNode; sub?: ReactNode; right?: ReactNode }) {
-  return (
-    <div className="panel-head">
-      <div className="min-w-0">
-        <h2 className="panel-title">{title}</h2>
-        {sub ? <div className="panel-sub">{sub}</div> : null}
-      </div>
-      {right}
-    </div>
-  );
-}
 
 function locationOf(artefact: Artefact): string {
   return (
